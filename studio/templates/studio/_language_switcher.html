@@ -1,0 +1,21 @@
+{% load ui_i18n %}
+<form class="language-switcher" method="post" action="{% url 'studio:set_language' %}">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <button class="language-current" type="button" aria-expanded="false">
+    {% for language in language_options %}
+      {% if language.active %}
+        <img src="{{ language.flag }}" alt="">
+        <span>{{ language.native }}</span>
+      {% endif %}
+    {% endfor %}
+  </button>
+  <div class="language-menu" role="menu">
+    {% for language in language_options %}
+      <button class="{% if language.active %}is-active{% endif %}" type="submit" name="language" value="{{ language.code }}" role="menuitem">
+        <img src="{{ language.flag }}" alt="">
+        <span>{{ language.native }}</span>
+      </button>
+    {% endfor %}
+  </div>
+</form>

@@ -1,0 +1,117 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Видео проекты - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar detail-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
+        <h1>Видео проекты</h1>
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
+      </div>
+    </header>
+
+    <main class="video-projects-shell" data-video-projects data-editor-url="{{ video_editor_url }}" data-api-url="{{ video_projects_api_url }}">
+      <section class="video-projects-head">
+        <div>
+          <span>Видео монтаж</span>
+          <strong>Проекты</strong>
+          <small>{{ video_projects|length }} в рабочем пространстве</small>
+        </div>
+        <button type="button" data-create-project>Создать проект</button>
+      </section>
+
+      <section class="video-projects-grid" data-project-grid>
+        {% for project in video_projects %}
+          <article class="video-project-card" data-project-id="{{ project.id }}">
+            <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.08), rgba(2,6,23,.72)), url('{{ project.thumbnail }}');{% endif %}">
+              <span>{{ project.aspect|default:"9 / 16" }}</span>
+              <b>{{ project.layer_count }} клипов · {{ project.track_count }} дорожек</b>
+            </a>
+            <div class="video-project-body">
+              <strong>{{ project.title }}</strong>
+              <span>{% if project.clip_name %}{{ project.clip_name }} · {% endif %}{{ project.storage_text }}</span>
+            </div>
+            <div class="video-project-actions">
+              <a href="{{ video_editor_url }}?project={{ project.id }}">Открыть</a>
+              <button type="button" data-delete-project="{{ project.id }}">Удалить</button>
+            </div>
+          </article>
+        {% empty %}
+          <article class="video-project-empty">
+            <div>
+              <strong>Проектов пока нет</strong>
+              <span>Создай первый монтаж, загрузи видео, и здесь появится заставка из случайного кадра.</span>
+            </div>
+            <button type="button" data-create-project>Создать проект</button>
+          </article>
+        {% endfor %}
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+
+        const root = document.querySelector("[data-video-projects]");
+        if (!root) return;
+        const apiUrl = root.dataset.apiUrl;
+        const editorUrl = root.dataset.editorUrl;
+        const csrfToken = (() => {
+          const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+          return match ? decodeURIComponent(match[1]) : "";
+        })();
+        const requestJson = async (url, options = {}) => {
+          const response = await fetch(url, {
+            ...options,
+            headers: {
+              "Accept": "application/json",
+              ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": csrfToken} : {}),
+              ...(options.headers || {}),
+            },
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        };
+
+        root.querySelectorAll("[data-create-project]").forEach((button) => button.addEventListener("click", async () => {
+          const state = {title: "Новый проект", aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
+          const data = await requestJson(`${apiUrl}create/`, {
+            method: "POST",
+            body: JSON.stringify({title: "Новый проект", state}),
+          });
+          window.location.href = `${editorUrl}?project=${data.project.id}`;
+        }));
+
+        root.querySelectorAll("[data-delete-project]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const id = button.dataset.deleteProject;
+            await requestJson(`${apiUrl}${id}/delete/`, {method: "POST", body: "{}"});
+            root.querySelector(`[data-project-id="${id}"]`)?.remove();
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,113 @@
+{% load ui_i18n %}
+<section class="designer-mode-panel{% if designer_fullscreen %} is-open is-fullscreen{% endif %}" data-designer-mode>
+  <div class="designer-head">
+    <div>
+      <h2>{% ui "designer_mode" %}</h2>
+    </div>
+    <div class="designer-head-actions">
+      <button class="designer-ghost" type="button" data-design-action="clear">{% ui "clear" %}</button>
+      {% if designer_fullscreen %}
+        <a class="designer-icon-button" href="{% url 'studio:index' %}" title="{% ui "workspace" %}" aria-label="{% ui "workspace" %}" data-icon="workspace"></a>
+      {% else %}
+        <button class="designer-icon-button" type="button" title="{% ui "workspace" %}" aria-label="{% ui "workspace" %}" data-designer-close data-icon="workspace"></button>
+        <a class="designer-icon-button" href="{{ designer_url }}" target="_blank" rel="noopener" title="{% ui "open_fullscreen" %}" aria-label="{% ui "open_fullscreen" %}" data-icon="expand"></a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="designer-studio">
+    <div class="designer-toolbar" role="toolbar" aria-label="{% ui "designer_tools" %}">
+      <button class="design-tool is-active" type="button" data-design-tool="select" title="{% ui "select" %}" aria-label="{% ui "select" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="pan" title="{% ui "pan" %}" aria-label="{% ui "pan" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="frame" title="{% ui "frame" %}" aria-label="{% ui "frame" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="shape-rect" title="{% ui "rectangle" %}" aria-label="{% ui "rectangle" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="shape-ellipse" title="{% ui "ellipse" %}" aria-label="{% ui "ellipse" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="shape-line" title="{% ui "line" %}" aria-label="{% ui "line" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="shape-arrow" title="{% ui "arrow" %}" aria-label="{% ui "arrow" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="text" title="{% ui "text" %}" aria-label="{% ui "text" %}"></button>
+      <button class="design-tool" type="button" data-design-tool="draw" title="{% ui "pen" %}" aria-label="{% ui "pen" %}"></button>
+      <label class="design-tool design-photo-tool" title="{% ui "photo" %}" aria-label="{% ui "photo" %}">
+        <input type="file" accept="image/*" data-design-photo>
+      </label>
+    </div>
+
+    <div class="designer-canvas-shell" data-design-shell>
+      <div class="designer-ruler designer-ruler-x"></div>
+      <div class="designer-ruler designer-ruler-y"></div>
+      <div class="designer-floating-bar">
+        <div class="designer-zoom-controls" aria-label="{% ui "zoom" %}">
+          <button type="button" data-design-zoom="out" aria-label="{% ui "zoom_out" %}"></button>
+          <output data-design-zoom-value>100%</output>
+          <button type="button" data-design-zoom="in" aria-label="{% ui "zoom_in" %}"></button>
+          <button type="button" data-design-zoom="fit">{% ui "fit" %}</button>
+        </div>
+      </div>
+      <div class="designer-plane" data-design-plane>
+        <svg class="designer-vector-layer" viewBox="0 0 9000 6400" data-design-vector-layer aria-hidden="true"></svg>
+      </div>
+    </div>
+
+    <aside class="designer-inspector" aria-label="{% ui "properties" %}">
+      <div class="designer-inspector-head">
+        <strong>{% ui "properties" %}</strong>
+        <span data-design-selection-count>Canvas</span>
+      </div>
+      <div class="designer-context" data-design-inspector>
+        <span>Canvas</span>
+      </div>
+      <details class="designer-layers" data-design-layer-panel>
+        <summary>
+          <span>{% ui "layers" %}</span>
+          <b data-design-layer-count>0</b>
+        </summary>
+        <div data-design-layers></div>
+      </details>
+      <div class="designer-resource-bin" hidden>
+        <div class="designer-command-grid">
+        <button type="button" data-design-command="group">{% ui "group" %}</button>
+        <button type="button" data-design-command="ungroup">{% ui "ungroup" %}</button>
+        <button type="button" data-design-command="export-svg">SVG</button>
+        <button type="button" data-design-command="export-png">PNG</button>
+        </div>
+        <div class="designer-preset-group">
+          <span>{% ui "frame_presets" %}</span>
+          <button type="button" data-frame-preset="iphone">iPhone</button>
+          <button type="button" data-frame-preset="iphone_max">Pro Max</button>
+          <button type="button" data-frame-preset="android">Android</button>
+          <button type="button" data-frame-preset="pixel">Pixel</button>
+          <button type="button" data-frame-preset="ipad">iPad</button>
+          <button type="button" data-frame-preset="tablet">Tablet</button>
+          <button type="button" data-frame-preset="desktop">Desktop</button>
+          <button type="button" data-frame-preset="desktop_hd">HD</button>
+          <button type="button" data-frame-preset="laptop">Laptop</button>
+          <button type="button" data-frame-preset="macbook">MacBook</button>
+          <button type="button" data-frame-preset="presentation">Slides</button>
+          <button type="button" data-frame-preset="watch">Watch</button>
+          <button type="button" data-frame-preset="a4">A4</button>
+          <button type="button" data-frame-preset="letter">Letter</button>
+          <button type="button" data-frame-preset="instagram">IG Post</button>
+          <button type="button" data-frame-preset="story">Story</button>
+          <button type="button" data-frame-preset="youtube">YouTube</button>
+          <button type="button" data-frame-preset="cover">Cover</button>
+        </div>
+        <label>
+          <span>{% ui "fill" %}</span>
+          <input type="color" value="#ffffff" data-design-fill>
+        </label>
+        <label>
+          <span>{% ui "stroke" %}</span>
+          <input type="color" value="#2563eb" data-design-stroke>
+        </label>
+        <label>
+          <span>{% ui "brush" %} <output data-design-brush-value>5 px</output></span>
+          <input type="range" min="1" max="80" value="5" data-design-brush>
+        </label>
+        <div class="designer-pen-mode">
+          <span>{% ui "pen_mode" %}</span>
+          <button class="is-active" type="button" data-pen-mode="pen">{% ui "pen" %}</button>
+          <button type="button" data-pen-mode="marker">{% ui "marker" %}</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>

@@ -1,0 +1,113 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="landing-page">
+    <header class="landing-nav">
+      <div>
+        <p class="eyebrow">CherryX-Digital</p>
+        <strong>Creator Studio</strong>
+      </div>
+      <nav>
+        {% include "studio/_language_switcher.html" %}
+        <a data-icon="credit-card" href="{% url 'billing:pricing' %}">{% ui "pricing" %}</a>
+        <a data-icon="log-in" href="{% url 'studio:login' %}">{% ui "login" %}</a>
+        <a class="nav-primary" data-icon="sparkles" href="{% url 'studio:index' %}">{% ui "try_free" %}</a>
+      </nav>
+    </header>
+
+    <main class="landing-hero">
+      <section class="landing-copy">
+        <p class="eyebrow">{% ui "digital_product_studio" %}</p>
+        <h1>CherryX Creator Studio</h1>
+        <p>{% ui "landing_copy" %}</p>
+        <div class="landing-actions">
+          <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
+          <a class="secondary-link" data-icon="credit-card" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+        </div>
+        <div class="brand-pills">
+          <span data-icon="box">Product</span>
+          <span data-icon="palette">Design</span>
+          <span data-icon="code-2">Engineering</span>
+          <span data-icon="rocket">Launch</span>
+        </div>
+      </section>
+
+      <section class="landing-console" aria-label="Studio modules">
+        <div class="console-top">
+          <span></span><span></span><span></span>
+          <strong>Live workspace</strong>
+        </div>
+        <div class="console-orbit" aria-hidden="true">
+          <i data-icon="video"></i>
+          <i data-icon="image"></i>
+          <i data-icon="captions"></i>
+        </div>
+        <div class="console-grid">
+          <article data-icon="wand-2">
+            <strong>01</strong>
+            <h2>{% ui "try_first" %}</h2>
+            <p>{% ui "try_first_copy" %}</p>
+            <span>Ready</span>
+          </article>
+          <article data-icon="layers">
+            <strong>02</strong>
+            <h2>{% ui "see_value" %}</h2>
+            <p>{% ui "see_value_copy" %}</p>
+            <span>Preview</span>
+          </article>
+          <article data-icon="sparkles">
+            <strong>03</strong>
+            <h2>{% ui "pay_to_deliver" %}</h2>
+            <p>{% ui "pay_to_deliver_copy" %}</p>
+            <span>Launch</span>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-dock" aria-label="CherryX tools">
+      <a href="{% url 'studio:video_editor' %}" data-icon="video">
+        <span>Editor</span>
+      </a>
+      <a href="{% url 'studio:index' %}?tool=cover" data-icon="image">
+        <span>Covers</span>
+      </a>
+      <a href="{% url 'studio:index' %}?tool=subtitles" data-icon="captions">
+        <span>Subtitles</span>
+      </a>
+      <a href="{% url 'studio:index' %}?tool=package" data-icon="layers">
+        <span>Package</span>
+      </a>
+      <a href="{% url 'studio:designer' %}" data-icon="palette">
+        <span>Design</span>
+      </a>
+      <a href="{% url 'studio:index' %}?tool=resume" data-icon="credit-card">
+        <span>Resume</span>
+      </a>
+    </footer>
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

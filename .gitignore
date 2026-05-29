@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+data/
+tmp/
+logs/
+.tmp/
+.pytest_cache/
+test-results/
+screenshots/
+*.sqlite3
+*.db
+*.log
+*.pdf

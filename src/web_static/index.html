@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://telegram.org/js/telegram-web-app.js?62"></script>
+    <title>Converter</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: var(--tg-theme-bg-color, #f7f8fa);
+        --text: var(--tg-theme-text-color, #18212f);
+        --hint: var(--tg-theme-hint-color, #697386);
+        --button: var(--tg-theme-button-color, #2f80ed);
+        --button-text: var(--tg-theme-button-text-color, #ffffff);
+        --line: rgba(120, 132, 148, 0.24);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(720px, 100%);
+        margin: 0 auto;
+        padding: 18px;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: 24px;
+        font-weight: 720;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: var(--hint);
+        font-size: 13px;
+      }
+
+      input,
+      select,
+      button {
+        width: 100%;
+        min-height: 42px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        padding: 9px 11px;
+        font: inherit;
+        color: var(--text);
+        background: transparent;
+      }
+
+      button {
+        margin-top: 16px;
+        border: 0;
+        background: var(--button);
+        color: var(--button-text);
+        font-weight: 680;
+        cursor: pointer;
+      }
+
+      .status {
+        min-height: 22px;
+        margin-top: 12px;
+        color: var(--hint);
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Image Converter</h1>
+      <form class="panel" id="form">
+        <label for="file">Файл</label>
+        <input id="file" name="file" type="file" accept="image/*,video/*" required />
+
+        <label for="target_format">Формат</label>
+        <select id="target_format" name="target_format">
+          <option value="png">PNG</option>
+          <option value="jpg">JPG</option>
+          <option value="webp">WEBP</option>
+          <option value="pdf">PDF</option>
+          <option value="bmp">BMP</option>
+          <option value="tiff">TIFF</option>
+          <option value="gif">GIF</option>
+          <option value="mp4">MP4 Video</option>
+          <option value="webm">WEBM Video</option>
+        </select>
+
+        <label for="output_name">Имя файла</label>
+        <input id="output_name" name="output_name" placeholder="converted" maxlength="80" />
+
+        <button type="submit">Конвертировать</button>
+        <div class="status" id="status"></div>
+      </form>
+    </main>
+    <script>
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg) {
+        tg.ready();
+        tg.expand();
+      }
+
+      const form = document.getElementById("form");
+      const status = document.getElementById("status");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "Конвертирую...";
+        const body = new FormData(form);
+        body.append("init_data", tg ? tg.initData : "");
+
+        const response = await fetch("/api/convert", { method: "POST", body });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ detail: "Ошибка конвертации" }));
+          status.textContent = error.detail || "Ошибка конвертации";
+          return;
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get("content-disposition") || "";
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        const filename = match ? match[1] : "converted";
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+        status.textContent = "Готово: " + filename;
+      });
+    </script>
+  </body>
+</html>

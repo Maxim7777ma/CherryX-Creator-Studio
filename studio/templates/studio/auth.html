@@ -1,0 +1,117 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if mode == "register" %}{% ui "create_account" %}{% else %}{% ui "login" %}{% endif %} - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="auth-page auth-mode-{{ mode }} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <main class="auth-shell">
+      <section class="auth-brand">
+        <div class="auth-brand-top">
+          <a class="back-link eyebrow" href="{% url 'studio:landing' %}">CherryX Creator Studio</a>
+          {% include "studio/_language_switcher.html" %}
+        </div>
+        <h1>{% if mode == "register" %}Build your creator workspace{% else %}Welcome back{% endif %}</h1>
+        <p>{% if mode == "register" %}{% ui "account_copy" %}{% else %}Sign in to manage video, design, covers, subtitles, and saved projects from one private workspace.{% endif %}</p>
+        <div class="brand-pills">
+          <span data-icon="box">Product</span>
+          <span data-icon="pen-tool">Design</span>
+          <span data-icon="code-2">Engineering</span>
+          <span data-icon="rocket">Launch</span>
+        </div>
+        <div class="auth-proof">
+          <article data-icon="shield-check">
+            <strong>Secure</strong>
+            <span>Account workspace</span>
+          </article>
+          <article data-icon="zap">
+            <strong>Fast</strong>
+            <span>Background jobs</span>
+          </article>
+          <article data-icon="clapperboard">
+            <strong>Creative</strong>
+            <span>Video + design tools</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="auth-card">
+        <div class="auth-card-head">
+          <span>{% if mode == "register" %}New account{% else %}Private workspace{% endif %}</span>
+          <h2>{% if mode == "register" %}{% ui "create_account" %}{% else %}Sign in{% endif %}</h2>
+          <p>{% if mode == "register" %}{% ui "email_password" %}{% else %}Use your email and password to continue.{% endif %}</p>
+        </div>
+
+        <form method="post" class="auth-form">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+            <div class="form-errors" role="alert">
+              {% if mode == "login" %}
+                Email or password is incorrect. Please check and try again.
+              {% else %}
+                {{ form.non_field_errors|striptags }}
+              {% endif %}
+            </div>
+          {% endif %}
+          {% for field in form %}
+            <div class="auth-field{% if field.errors %} has-error{% endif %}{% if field.field.widget.input_type == 'password' %} has-password-toggle{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              <div class="auth-input-wrap">
+                {{ field }}
+                {% if field.field.widget.input_type == 'password' %}
+                  <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="Show password"></button>
+                {% endif %}
+              </div>
+              {% if field.errors %}
+                <small class="field-error">{{ field.errors|striptags }}</small>
+              {% endif %}
+            </div>
+          {% endfor %}
+          <button class="primary-action" type="submit">
+            {% if mode == "register" %}{% ui "create_account" %}{% else %}Sign in{% endif %}
+          </button>
+        </form>
+
+        <p class="auth-switch">
+          {% if mode == "register" %}
+            {% ui "want_try_first" %} <a href="{% url 'studio:index' %}">{% ui "start_no_registration" %}</a>
+          {% else %}
+            {% ui "no_account" %} <a href="{% url 'studio:index' %}">{% ui "start_no_registration" %}</a>
+          {% endif %}
+        </p>
+      </section>
+    </main>
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+          const input = button.closest(".auth-input-wrap")?.querySelector("input");
+          if (!input) return;
+          button.addEventListener("click", () => {
+            const hidden = input.type === "password";
+            input.type = hidden ? "text" : "password";
+            button.dataset.icon = hidden ? "eye-off" : "eye";
+            button.setAttribute("aria-label", hidden ? "Hide password" : "Show password");
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

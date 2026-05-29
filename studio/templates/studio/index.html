@@ -1,0 +1,558 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <script defer src="{% static 'studio/app.js' %}"></script>
+  </head>
+  <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow">CherryX-Digital · Product / Design / Engineering / Launch</p>
+        <h1>{{ display_name }} Studio</h1>
+        {% if is_guest %}
+          <p class="topbar-note">{% ui "guest_note" %}</p>
+        {% elif has_access %}
+          <p class="topbar-note">{% ui "access_active_note" %}{% if active_until %} {% ui "until" %} {{ active_until|date:"d.m.Y H:i" }}{% endif %}</p>
+        {% else %}
+          <p class="topbar-note">{% ui "preview_note" %}</p>
+        {% endif %}
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <img class="account-avatar" src="{{ avatar_url }}" alt="">
+        {% if is_guest %}
+          <span>{% ui "guest_session" %}</span>
+          <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
+          <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
+        {% else %}
+          <span>{{ request.user.email }}</span>
+          {% if has_access %}
+            <button class="subscription-meter" type="button" data-subscription-open aria-expanded="false" aria-controls="subscription-drawer">
+              <span class="subscription-meter-top">
+                <b>{% ui "access" %}</b>
+                {% if active_until %}<small>{% ui "until" %} {{ active_until|date:"d.m" }}</small>{% endif %}
+              </span>
+              <span class="subscription-track" aria-hidden="true">
+                <span style="width: {{ subscription_meter.percent }}%"></span>
+              </span>
+            </button>
+          {% else %}
+            <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "activate" %}</a>
+          {% endif %}
+          <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
+          <form class="topbar-form" method="post" action="{% url 'studio:logout' %}">
+            {% csrf_token %}
+            <button type="submit">{% ui "logout" %}</button>
+          </form>
+        {% endif %}
+        <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
+        <span>Image {{ max_image_mb }} MB</span>
+        <span>Video {{ max_video_mb }} MB</span>
+      </div>
+    </header>
+
+    {% if not is_guest %}
+      <aside class="subscription-drawer" id="subscription-drawer" data-subscription-drawer hidden>
+        <div class="subscription-drawer-backdrop" data-subscription-close></div>
+        <section class="subscription-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="subscription-title">
+          <header>
+            <span>Billing</span>
+            <button class="designer-icon-button" type="button" data-subscription-close data-icon="x" aria-label="Close"></button>
+          </header>
+          <div class="subscription-current">
+            <small>Текущий план</small>
+            <h2 id="subscription-title">{{ subscription_panel.current_plan.name }}</h2>
+            <p>{{ subscription_panel.current_plan.headline }}</p>
+            <div class="subscription-current-grid">
+              <span><b>{{ subscription_panel.current_plan.price_label }}</b><small>Стоимость</small></span>
+              <span><b>{{ subscription_panel.current_plan.storage_text }}</b><small>Хранилище</small></span>
+              <span><b>{{ subscription_panel.days_left }}</b><small>Дней осталось</small></span>
+              <span><b>{{ subscription_panel.remaining_value_display }}</b><small>Примерный остаток</small></span>
+            </div>
+            <div class="subscription-storage">
+              <span><b>Объём</b><em>{{ subscription_panel.storage_used_text }}</em></span>
+              <i><b style="width: {{ subscription_panel.storage_percent }}%"></b></i>
+              <small>Доступно ещё {{ subscription_panel.storage_available_text }}</small>
+            </div>
+          </div>
+          <div class="subscription-plan-list">
+            {% for plan in subscription_panel.plans %}
+              <article class="{% if plan.is_current %}is-current{% endif %}" data-plan-card data-plan-code="{{ plan.code }}" data-plan-price="{{ plan.price_cents }}" data-plan-due="{{ plan.due_cents }}">
+                <div>
+                  <span>{{ plan.badge }}</span>
+                  <strong>{{ plan.name }}</strong>
+                  <small>{{ plan.storage_text }} · {{ plan.period_days }} {% ui "days" %}</small>
+                </div>
+                <p>{{ plan.description }}</p>
+                <ul>
+                  {% for feature in plan.features|slice:":3" %}
+                    <li>{{ feature }}</li>
+                  {% endfor %}
+                </ul>
+                <footer>
+                  <b>{{ plan.price_display }}</b>
+                  <small>сейчас примерно {{ plan.due_display }}</small>
+                  <a href="{{ plan.checkout_url }}">{% if plan.is_current %}Продлить{% else %}Сменить план{% endif %}</a>
+                </footer>
+              </article>
+            {% endfor %}
+          </div>
+          <p class="subscription-note">Перерасчёт показан как ориентир: стоимость нового плана минус примерная ценность оставшихся дней текущего доступа. Финальная сумма подтверждается на checkout.</p>
+        </section>
+      </aside>
+    {% endif %}
+
+    <section class="value-strip">
+      <article>
+        <strong>{% ui "start_step" %}</strong>
+        <span>{% ui "start_step_copy" %}</span>
+      </article>
+      <article>
+        <strong>{% ui "check_step" %}</strong>
+        <span>{% ui "check_step_copy" %}</span>
+      </article>
+      <article>
+        <strong>{% ui "collect_step" %}</strong>
+        <span>{% ui "collect_step_copy" %}</span>
+      </article>
+    </section>
+
+    <main class="layout">
+      <nav class="tabs" aria-label="{% ui "workspace" %}">
+        <button class="tab is-active" type="button" data-tab="convert">{% ui "converter" %}</button>
+        <button class="tab" type="button" data-tab="youtube">YouTube</button>
+        <button class="tab" type="button" data-tab="cover">{% ui "covers" %}</button>
+        <button class="tab" type="button" data-tab="subtitles">{% ui "subtitles" %}</button>
+        <button class="tab" type="button" data-tab="package">{% ui "package" %}</button>
+        <button class="tab" type="button" data-tab="resume">{% ui "resume" %}</button>
+        <a class="tab tab-link" href="{{ video_editor_url }}">Видео редактор</a>
+        <div class="designer-switch-wrap">
+          <a class="designer-switch" href="{{ designer_url }}" data-designer-launch aria-pressed="false">
+            <span class="designer-switch-track" aria-hidden="true"><span></span></span>
+            <span>
+              <b>{% ui "design" %}</b>
+            </span>
+          </a>
+        </div>
+      </nav>
+
+      <section class="workspace">
+        <section class="dashboard-strip">
+          <a class="dashboard-card is-total" href="{% url 'studio:dashboard_detail' 'all' %}">
+            <span>
+              <small>{% ui "total_jobs" %}</small>
+              <strong data-account-stat="total_jobs">{{ account_stats.total_jobs }}</strong>
+            </span>
+            <em class="dashboard-open">Открыть</em>
+          </a>
+          <a class="dashboard-card is-active-count" href="{% url 'studio:dashboard_detail' 'active' %}">
+            <span>
+              <small>{% ui "active_jobs" %}</small>
+              <strong data-account-stat="active_jobs">{{ account_stats.active_jobs }}</strong>
+            </span>
+            <em class="dashboard-open">Открыть</em>
+          </a>
+          <a class="dashboard-card is-completed-count" href="{% url 'studio:dashboard_detail' 'completed' %}">
+            <span>
+              <small>{% ui "completed" %}</small>
+              <strong data-account-stat="completed_jobs">{{ account_stats.completed_jobs }}</strong>
+            </span>
+            <em class="dashboard-open">Открыть</em>
+          </a>
+          <a class="dashboard-card is-files-count" href="{% url 'studio:dashboard_detail' 'files' %}">
+            <span>
+              <small>{% ui "files" %}</small>
+              <strong data-account-stat="output_count">{{ account_stats.output_count }}</strong>
+            </span>
+            <em class="dashboard-open">Открыть</em>
+          </a>
+          <a class="dashboard-card storage-card is-storage-count" href="{% url 'studio:dashboard_detail' 'storage' %}">
+            <span>
+              <small>{% ui "volume" %}</small>
+              <strong data-account-stat="total_output_size_text">{{ account_stats.total_output_size_text }}</strong>
+            </span>
+            <small>Доступно ещё <em data-account-stat="storage_available_text">{{ account_stats.storage_available_text }}</em></small>
+            <i><b style="width: {{ account_stats.storage_percent }}%"></b></i>
+          </a>
+        </section>
+
+        <section class="tool-panel is-active" id="tab-convert">
+          <div class="section-title">
+            <h2>{% ui "converter" %}</h2>
+            <span>PNG JPG WEBP PDF BMP TIFF GIF MP4 WEBM</span>
+          </div>
+          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_convert' %}">
+            {% csrf_token %}
+            <label class="field field-wide file-field">
+              <span>{% ui "file" %}</span>
+              <input type="file" name="file" accept="image/*,video/*" data-preview="convert-preview" required>
+              <span class="file-dropzone">
+                <span class="file-icon">+</span>
+                <span class="file-copy">
+                  <strong>{% ui "drag_file" %}</strong>
+                  <small>{% ui "file_hint" %} {{ max_video_mb }} MB. Preview.</small>
+                </span>
+                <span class="file-button">{% ui "choose_file" %}</span>
+              </span>
+              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+            </label>
+            <div class="media-preview field-wide" id="convert-preview">
+              <span>{% ui "preview_file" %}</span>
+            </div>
+            <div class="field format-field" data-format-picker>
+              <span>{% ui "result_format" %}</span>
+              <input type="hidden" name="target_format" value="{{ image_formats.0.0 }}" data-format-input>
+              <button class="format-current" type="button" data-format-current>
+                <b>{{ image_formats.0.1 }}</b>
+                <small>{% ui "images" %}</small>
+              </button>
+              <div class="format-menu" data-format-menu>
+                <section data-format-group="image">
+                  <strong>{% ui "images" %}</strong>
+                  <div>
+                    {% for value, label in image_formats %}
+                      <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-format-value="{{ value }}" data-format-kind="image">{{ label }}</button>
+                    {% endfor %}
+                  </div>
+                </section>
+                <section data-format-group="video" hidden>
+                  <strong>{% ui "video" %}</strong>
+                  <div>
+                    {% for value, label in video_formats %}
+                      <button type="button" data-format-value="{{ value }}" data-format-kind="video">{{ label }}</button>
+                    {% endfor %}
+                  </div>
+                </section>
+              </div>
+            </div>
+            <label class="field">
+              <span>{% ui "result_name" %}</span>
+              <input type="text" name="output_name" placeholder="converted" maxlength="80">
+            </label>
+            <fieldset class="segmented field-wide">
+              <legend>{% ui "image_compression" %}</legend>
+              {% for value, label in image_modes %}
+                <label>
+                  <input type="radio" name="image_mode" value="{{ value }}" {% if value == "balanced" %}checked{% endif %}>
+                  <span>{{ label }}</span>
+                </label>
+              {% endfor %}
+            </fieldset>
+            <button class="primary-action" type="submit">{% ui "start_task" %}</button>
+          </form>
+        </section>
+
+        <section class="tool-panel" id="tab-youtube">
+          <div class="section-title">
+            <h2>YouTube / TikTok</h2>
+            <span>Shorts Preview MP4 Cover</span>
+          </div>
+          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_youtube' %}">
+            {% csrf_token %}
+            <label class="field field-wide">
+              <span>{% ui "link" %}</span>
+              <input type="url" name="url" placeholder="https://youtu.be/..." required>
+            </label>
+            <div class="field custom-select-field" data-custom-select>
+              <span>{% ui "mode" %}</span>
+              {% for value, label in youtube_modes %}
+                {% if forloop.first %}
+                  <input type="hidden" name="mode" value="{{ value }}" data-custom-select-input>
+                  <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false">
+                    <b>{{ label }}</b>
+                    <small>YouTube</small>
+                  </button>
+                {% endif %}
+              {% endfor %}
+              <div class="custom-select-menu" data-custom-select-menu>
+                {% for value, label in youtube_modes %}
+                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}">
+                    <b>{{ label }}</b>
+                    <small>{{ value }}</small>
+                  </button>
+                {% endfor %}
+              </div>
+            </div>
+            <button class="primary-action" type="submit">{% ui "prepare" %}</button>
+          </form>
+        </section>
+
+        <section class="tool-panel" id="tab-cover">
+          <div class="section-title">
+            <h2>{% ui "png_covers" %}</h2>
+            <span>1280 x 720 · {% ui "variants" %}</span>
+          </div>
+          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_cover' %}">
+            {% csrf_token %}
+            <label class="field field-wide file-field">
+              <span>{% ui "video" %}</span>
+              <input type="file" name="file" accept="video/*" data-preview="cover-preview" required>
+              <span class="file-dropzone">
+                <span class="file-icon">MP4</span>
+                <span class="file-copy">
+                  <strong>{% ui "cover_video" %}</strong>
+                  <small>{% ui "cover_hint" %}</small>
+                </span>
+                <span class="file-button">{% ui "choose_file" %}</span>
+              </span>
+              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+            </label>
+            <div class="media-preview field-wide" id="cover-preview">
+              <span>{% ui "preview_video" %}</span>
+            </div>
+            <label class="field">
+              <span>{% ui "title" %}</span>
+              <input type="text" name="title" placeholder="{% ui "title" %}" maxlength="120">
+            </label>
+            <label class="field">
+              <span>{% ui "variants" %}</span>
+              <input type="number" name="variants" value="1" min="1" max="6">
+            </label>
+            <button class="primary-action" type="submit">{% ui "make_covers" %}</button>
+          </form>
+        </section>
+
+        <section class="tool-panel" id="tab-subtitles">
+          <div class="section-title">
+            <h2>{% ui "subtitles" %}</h2>
+            <span>MP4 + ASS</span>
+          </div>
+          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_subtitles' %}">
+            {% csrf_token %}
+            <label class="field field-wide file-field">
+              <span>{% ui "video" %}</span>
+              <input type="file" name="file" accept="video/*" data-preview="subtitles-preview" required>
+              <span class="file-dropzone">
+                <span class="file-icon">CC</span>
+                <span class="file-copy">
+                  <strong>{% ui "video_with_sound" %}</strong>
+                  <small>{% ui "subtitle_hint" %}</small>
+                </span>
+                <span class="file-button">{% ui "choose_file" %}</span>
+              </span>
+              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+            </label>
+            <div class="media-preview field-wide" id="subtitles-preview">
+              <span>{% ui "preview_video" %}</span>
+            </div>
+            <label class="field">
+              <span>{% ui "name" %}</span>
+              <input type="text" name="title" placeholder="subtitled" maxlength="80">
+            </label>
+            <label class="field">
+              <span>{% ui "style" %}</span>
+              <select name="style">
+                {% for value, label in subtitle_styles %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field">
+              <span>{% ui "language" %}</span>
+              <select name="language">
+                {% for value, label in subtitle_languages %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="primary-action" type="submit">{% ui "add_subtitles" %}</button>
+          </form>
+        </section>
+
+        <section class="tool-panel" id="tab-package">
+          <div class="section-title">
+            <h2>{% ui "publication_package" %}</h2>
+            <span>Video Cover Description ZIP</span>
+          </div>
+          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_package' %}">
+            {% csrf_token %}
+            <label class="field field-wide file-field">
+              <span>{% ui "video" %}</span>
+              <input type="file" name="file" accept="video/*" data-preview="package-preview" required>
+              <span class="file-dropzone">
+                <span class="file-icon">ZIP</span>
+                <span class="file-copy">
+                  <strong>{% ui "publication_material" %}</strong>
+                  <small>{% ui "package_hint" %}</small>
+                </span>
+                <span class="file-button">{% ui "choose_file" %}</span>
+              </span>
+              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+            </label>
+            <div class="media-preview field-wide" id="package-preview">
+              <span>{% ui "preview_video" %}</span>
+            </div>
+            <label class="field">
+              <span>{% ui "name" %}</span>
+              <input type="text" name="title" placeholder="{% ui "publication_package" %}" maxlength="120">
+            </label>
+            <label class="field">
+              <span>{% ui "subtitle_style" %}</span>
+              <select name="style">
+                {% for value, label in subtitle_styles %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field">
+              <span>{% ui "language" %}</span>
+              <select name="language">
+                {% for value, label in subtitle_languages %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="primary-action" type="submit">{% ui "assemble_package" %}</button>
+          </form>
+        </section>
+
+        <section class="tool-panel" id="tab-resume">
+          <div class="section-title">
+            <h2>PDF-{% ui "resume" %}</h2>
+            <span>{% ui "step_fill" %}</span>
+          </div>
+          <form class="job-form resume-wizard" data-endpoint="{% url 'studio:start_resume' %}" data-wizard-form>
+            {% csrf_token %}
+            <div class="resume-steps" aria-label="{% ui "resume_steps" %}">
+              <button class="is-active" type="button" data-step-target="0"><span>1</span>{% ui "profile" %}</button>
+              <button type="button" data-step-target="1"><span>2</span>{% ui "content" %}</button>
+              <button type="button" data-step-target="2"><span>3</span>{% ui "appearance" %}</button>
+              <button type="button" data-step-target="3"><span>4</span>PDF</button>
+            </div>
+            <section class="resume-step is-active" data-step="0">
+              <div class="resume-step-head">
+                <strong>{% ui "resume_step_profile_title" %}</strong>
+                <small>{% ui "resume_step_profile_copy" %}</small>
+              </div>
+              <div class="resume-grid resume-profile-grid">
+                <label class="field">
+                  <span>{% ui "name" %}</span>
+                  <input type="text" name="name" placeholder="{% ui "full_name" %}" required>
+                </label>
+                <label class="field">
+                  <span>{% ui "position" %}</span>
+                  <input type="text" name="position" placeholder="Product Designer">
+                </label>
+                <label class="field">
+                  <span>{% ui "contacts" %}</span>
+                  <input type="text" name="contact" placeholder="email, phone">
+                </label>
+                <label class="field">
+                  <span>{% ui "links" %}</span>
+                  <input type="text" name="links" placeholder="LinkedIn, portfolio">
+                </label>
+              </div>
+            </section>
+            <section class="resume-step" data-step="1">
+              <div class="resume-step-head">
+                <strong>{% ui "resume_step_content_title" %}</strong>
+                <small>{% ui "resume_step_content_copy" %}</small>
+              </div>
+              <div class="resume-grid">
+                <label class="field field-wide">
+                  <span>{% ui "summary" %}</span>
+                  <textarea name="summary" rows="3" placeholder="{% ui "summary" %}"></textarea>
+                </label>
+                <label class="field field-wide">
+                  <span>{% ui "experience" %}</span>
+                  <textarea name="experience" rows="5" placeholder="{% ui "experience" %}"></textarea>
+                </label>
+                <label class="field">
+                  <span>{% ui "education" %}</span>
+                  <textarea name="education" rows="4"></textarea>
+                </label>
+                <label class="field">
+                  <span>{% ui "skills" %}</span>
+                  <textarea name="skills" rows="4" placeholder="Figma, Python, Strategy..."></textarea>
+                </label>
+                <label class="field">
+                  <span>{% ui "achievements" %}</span>
+                  <textarea name="achievements" rows="4"></textarea>
+                </label>
+                <label class="field">
+                  <span>{% ui "additional" %}</span>
+                  <textarea name="additional" rows="4"></textarea>
+                </label>
+              </div>
+            </section>
+            <section class="resume-step" data-step="2">
+              <div class="resume-step-head">
+                <strong>{% ui "resume_step_appearance_title" %}</strong>
+                <small>{% ui "resume_step_appearance_copy" %}</small>
+              </div>
+              <div class="resume-grid">
+                {% for value, label in resume_templates %}
+                  {% if forloop.first %}
+                    <input type="hidden" name="template" value="{{ value }}" data-template-select>
+                  {% endif %}
+                {% endfor %}
+                <div class="resume-template-picker field-wide" data-template-picker>
+                  {% for value, label in resume_templates %}
+                    <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-template-value="{{ value }}" title="{{ label }}: {% ui "template_hint" %}">
+                      <span>{{ forloop.counter }}</span>
+                      <strong>{{ label }}</strong>
+                      <small>{% ui "template_hint" %}</small>
+                    </button>
+                  {% endfor %}
+                </div>
+                <label class="field file-field compact-upload">
+                  <span>{% ui "photo" %}</span>
+                  <input type="file" name="photo" accept="image/*" data-preview="resume-preview-wizard">
+                  <span class="file-dropzone">
+                    <span class="file-icon">IMG</span>
+                    <span class="file-copy">
+                      <strong>{% ui "photo" %}</strong>
+                      <small>{% ui "optional" %}</small>
+                    </span>
+                    <span class="file-button">{% ui "choose_file" %}</span>
+                  </span>
+                  <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+                </label>
+                <div class="media-preview" id="resume-preview-wizard">
+                  <span>{% ui "photo" %}</span>
+                </div>
+              </div>
+            </section>
+            <section class="resume-step" data-step="3">
+              <div class="resume-step-head">
+                <strong>{% ui "resume_step_finish_title" %}</strong>
+                <small>{% ui "resume_step_finish_copy" %}</small>
+              </div>
+              <div class="resume-finish">
+                <span>{% ui "resume_finish_note" %}</span>
+                <button class="primary-action" type="submit">{% ui "build_pdf" %}</button>
+              </div>
+            </section>
+            <div class="resume-nav">
+              <button class="secondary-action" type="button" data-step-prev disabled>{% ui "back" %}</button>
+              <button class="primary-action" type="button" data-step-next>{% ui "next" %}</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <aside class="jobs-panel" aria-live="polite">
+        <div class="jobs-heading">
+          <h2>{% ui "tasks" %}</h2>
+          <span id="jobs-count">0</span>
+        </div>
+        {% if not has_access %}
+          <div class="paywall-mini">
+            <strong>{% ui "download_after_payment" %}</strong>
+            <span>{% ui "paywall_copy" %}</span>
+            <a href="{{ checkout_url }}">{% ui "open_checkout" %}</a>
+          </div>
+        {% endif %}
+        <div class="empty-jobs" id="empty-jobs">{% ui "results_here" %}</div>
+        <div class="jobs-list" id="jobs-list"></div>
+        <a class="jobs-all-link" href="{% url 'studio:dashboard_detail' 'all' %}">Открыть все задачи</a>
+      </aside>
+    </main>
+    {{ app_messages|json_script:"app-messages" }}
+    {{ initial_jobs|json_script:"initial-jobs" }}
+  </body>
+</html>

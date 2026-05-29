@@ -1,0 +1,30 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% ui "designer_mode" %} &middot; CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <script defer src="{% static 'studio/app.js' %}"></script>
+  </head>
+  <body class="designer-page theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="designer-page-topbar">
+      <a class="designer-switch designer-workspace-switch is-active" href="{% url 'studio:index' %}" data-workspace-launch aria-pressed="true">
+        <span class="designer-switch-track" aria-hidden="true"><span></span></span>
+        <span>
+          <b>{% ui "workspace" %}</b>
+        </span>
+      </a>
+      <div>
+        <p class="eyebrow">CherryX-Digital &middot; Design Mode</p>
+        <h1>{% ui "designer_mode" %}</h1>
+      </div>
+      {% include "studio/_language_switcher.html" %}
+    </header>
+    <main class="designer-page-main">
+      {% include "studio/_designer_mode.html" %}
+    </main>
+    {{ app_messages|json_script:"app-messages" }}
+  </body>
+</html>

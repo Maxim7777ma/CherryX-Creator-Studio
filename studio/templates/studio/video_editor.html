@@ -1,0 +1,1629 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Видео редактор - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="theme-{{ theme_mode }} detail-page video-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar detail-topbar video-editor-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:video_project_list' %}">CherryX Creator Studio</a></p>
+        <h1>Видео редактор</h1>
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
+      </div>
+    </header>
+
+    <main class="video-editor-app" data-video-editor>
+      <aside class="editor-rail" aria-label="Инструменты">
+        <button class="editor-icon-button is-active" type="button" data-editor-tool="trim" data-icon="scissors" title="Обрезка" aria-label="Обрезка"></button>
+        <button class="editor-icon-button" type="button" data-editor-tool="canvas" data-icon="panel-top" title="Холст" aria-label="Холст"></button>
+        <button class="editor-icon-button" type="button" data-editor-tool="text" data-icon="type" title="Текст" aria-label="Текст"></button>
+        <button class="editor-icon-button" type="button" data-editor-tool="audio" data-icon="music" title="Аудио" aria-label="Аудио"></button>
+        <button class="editor-icon-button" type="button" data-editor-tool="filter" data-icon="sliders-horizontal" title="Фильтр" aria-label="Фильтр"></button>
+        <button class="editor-icon-button" type="button" data-editor-tool="export" data-icon="download" title="Экспорт" aria-label="Экспорт"></button>
+      </aside>
+
+      <section class="editor-workbench">
+        <section class="editor-preview-panel">
+          <div class="editor-preview-head">
+            <div>
+              <span>Проект</span>
+              <strong data-editor-title>Новый проект</strong>
+            </div>
+            <small class="editor-save-status" data-save-status>Новый</small>
+            <div class="editor-aspect">
+              <button class="is-active" type="button" data-aspect="9/16">9:16</button>
+              <button type="button" data-aspect="1/1">1:1</button>
+              <button type="button" data-aspect="16/9">16:9</button>
+            </div>
+          </div>
+
+          <div class="editor-preview-frame" data-preview-frame style="--editor-aspect: 9 / 16;">
+            <label class="editor-import" data-editor-dropzone>
+              <input type="file" accept="video/*" data-editor-file multiple>
+              <i data-icon="video"></i>
+              <b>Импорт видео</b>
+              <span>Перетащи MP4/MOV/WebM сюда или выбери файл</span>
+            </label>
+            <video data-editor-video playsinline hidden></video>
+            <div data-preview-overlays></div>
+          </div>
+
+          <div class="editor-playbar">
+            <button class="editor-icon-button" type="button" data-editor-play data-icon="play" title="Play" aria-label="Play"></button>
+            <span data-editor-time>0:00 / 0:00</span>
+            <input type="range" min="0" max="1000" value="0" data-editor-seek aria-label="Seek">
+            <button class="editor-icon-button" type="button" data-editor-fit data-icon="maximize-2" title="Fit/Crop" aria-label="Fit/Crop"></button>
+          </div>
+        </section>
+
+        <section class="editor-timeline-panel">
+          <div class="editor-timeline-head">
+            <strong>Таймлайн</strong>
+            <div class="editor-layer-actions">
+              <button class="editor-icon-button" type="button" data-add-kind="text" data-icon="type" title="Добавить текст" aria-label="Добавить текст"></button>
+              <button class="editor-icon-button" type="button" data-add-kind="image" data-icon="image-plus" title="Добавить фото" aria-label="Добавить фото"></button>
+              <button class="editor-icon-button" type="button" data-add-kind="audio" data-icon="music" title="Добавить аудио" aria-label="Добавить аудио"></button>
+              <button class="editor-icon-button" type="button" data-add-kind="voice" data-icon="mic" title="Записать голос" aria-label="Записать голос"></button>
+              <button class="editor-icon-button" type="button" data-undo data-icon="undo-2" title="Undo" aria-label="Undo"></button>
+              <button class="editor-icon-button" type="button" data-redo data-icon="redo-2" title="Redo" aria-label="Redo"></button>
+              <button class="editor-icon-button" type="button" data-duplicate-clip data-icon="copy-plus" title="Дублировать клип" aria-label="Дублировать клип"></button>
+              <button class="editor-icon-button" type="button" data-split-clip data-icon="scissors" title="Разрезать клип" aria-label="Разрезать клип"></button>
+              <button class="editor-icon-button" type="button" data-zoom-timeline="-1" data-icon="minus" title="Уменьшить таймлайн" aria-label="Уменьшить таймлайн"></button>
+              <button class="editor-icon-button" type="button" data-zoom-timeline="1" data-icon="plus" title="Увеличить таймлайн" aria-label="Увеличить таймлайн"></button>
+              <button class="editor-icon-button" type="button" data-zoom-fit data-icon="maximize" title="Вписать таймлайн" aria-label="Вписать таймлайн"></button>
+              <button class="editor-icon-button" type="button" data-add-track="text" data-icon="panel-top-open" title="Новая текстовая дорожка" aria-label="Новая текстовая дорожка"></button>
+              <button class="editor-icon-button" type="button" data-add-track="image" data-icon="panel-bottom-open" title="Новая дорожка фото" aria-label="Новая дорожка фото"></button>
+              <button class="editor-icon-button" type="button" data-add-track="audio" data-icon="list-music" title="Новая аудио дорожка" aria-label="Новая аудио дорожка"></button>
+              <button class="editor-icon-button is-active" type="button" data-toggle-snap data-icon="magnet" title="Snap" aria-label="Snap"></button>
+              <button class="editor-icon-button" type="button" data-toggle-density data-icon="rows-3" title="Компактные дорожки" aria-label="Компактные дорожки"></button>
+            </div>
+            <span data-editor-duration>00:00</span>
+          </div>
+          <div class="editor-timeline-scroll">
+            <div class="editor-timeline" data-editor-timeline>
+              <div class="editor-playhead" data-editor-playhead></div>
+              <div class="editor-snap-line" data-snap-line hidden></div>
+              <div class="editor-time-ruler" data-time-ruler></div>
+              <div data-track-list></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="editor-properties">
+        <div class="editor-properties-head">
+          <span>Клип</span>
+          <strong data-tool-title>Проект</strong>
+        </div>
+        <div class="editor-property-tabs">
+          <button class="is-active" type="button" data-panel-tab="trim">Клип</button>
+          <button type="button" data-panel-tab="filter">Стиль</button>
+          <button type="button" data-panel-tab="animation">Анимация</button>
+          <button type="button" data-panel-tab="audio">Аудио</button>
+          <button type="button" data-panel-tab="media">Медиа</button>
+        </div>
+
+        <section class="editor-tool-panel is-active" data-tool-panel="trim">
+          <label class="editor-audio-picker editor-file-picker">
+            <span>Видео</span>
+            <input type="file" accept="video/*" data-video-file-panel multiple>
+            <strong><i data-icon="video"></i><em data-video-panel-name>Файл не выбран</em></strong>
+          </label>
+          <div class="editor-duo">
+            <button type="button" data-skip="-5">-5</button>
+            <button type="button" data-skip="5">+5</button>
+          </div>
+          <div class="editor-clip-grid">
+            <label><span>Старт</span><input type="number" min="0" step="0.05" data-clip-start></label>
+            <label><span>Длина</span><input type="number" min="0.25" step="0.05" data-clip-duration></label>
+            <label><span>Конец</span><input type="number" min="0" step="0.05" data-clip-end></label>
+            <label><span>X</span><input type="number" min="0" max="100" step="1" data-clip-x></label>
+            <label><span>Y</span><input type="number" min="0" max="100" step="1" data-clip-y></label>
+            <label><span>Размер</span><input type="number" min="8" max="160" step="1" data-clip-scale></label>
+            <label><span>Поворот</span><input type="number" min="-360" max="360" step="1" data-clip-rotation></label>
+          </div>
+          <label>
+            <span>Fit / Fill</span>
+            <input type="hidden" value="contain" data-clip-fit>
+            <div class="editor-choice" data-choice="clip-fit">
+              <button type="button" data-choice-current>Fit</button>
+              <div>
+                <button type="button" data-choice-value="contain">Fit</button>
+                <button type="button" data-choice-value="cover">Fill</button>
+                <button type="button" data-choice-value="crop">Crop</button>
+              </div>
+            </div>
+          </label>
+          <label>
+            <span>Скорость</span>
+            <input type="hidden" value="1" data-clip-speed>
+            <div class="editor-choice" data-choice="clip-speed">
+              <button type="button" data-choice-current>1x</button>
+              <div>
+                <button type="button" data-choice-value="0.25">0.25x</button>
+                <button type="button" data-choice-value="0.5">0.5x</button>
+                <button type="button" data-choice-value="1">1x</button>
+                <button type="button" data-choice-value="1.5">1.5x</button>
+                <button type="button" data-choice-value="2">2x</button>
+              </div>
+            </div>
+          </label>
+          <button class="editor-export-button" type="button" data-split-clip>Разрезать по playhead</button>
+          <button type="button" data-duplicate-clip>Дублировать</button>
+          <button type="button" data-delete-clip>Удалить клип</button>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="canvas">
+          <button class="is-selected" type="button" data-bg="#020617">Темный</button>
+          <button type="button" data-bg="#f8fafc">Светлый</button>
+          <button type="button" data-bg="linear-gradient(135deg,#2563eb,#ec4899)">Градиент</button>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="text">
+          <button class="editor-export-button" type="button" data-add-text>T+ Текст</button>
+          <button type="button" data-delete-clip>Удалить</button>
+          <label>
+            <span>Текст</span>
+            <input type="text" value="Твой заголовок" data-text-value>
+          </label>
+          <label>
+            <span>Шрифт</span>
+            <select data-text-font>
+              <option value="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">System</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="'Courier New', monospace">Mono</option>
+            </select>
+          </label>
+          <label><span>Размер <b data-text-size-label>22</b></span><input type="range" min="12" max="72" value="22" data-text-size></label>
+          <div class="editor-color-row">
+            <label><span>Текст</span><input type="color" value="#ffffff" data-text-color></label>
+            <label><span>Контур</span><input type="color" value="#000000" data-text-stroke></label>
+            <label><span>Блок</span><input type="color" value="#000000" data-text-bg></label>
+          </div>
+          <label><span>Заливка <b data-text-bg-alpha-label>48%</b></span><input type="range" min="0" max="100" value="48" data-text-bg-alpha></label>
+          <label><span>Контур <b data-text-stroke-width-label>1</b></span><input type="range" min="0" max="8" value="1" data-text-stroke-width></label>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="audio">
+          <label class="editor-audio-picker">
+            <span>Аудио</span>
+            <input type="file" accept="audio/*" data-audio-file-panel>
+          </label>
+          <div class="editor-duo">
+            <button class="editor-icon-button" type="button" data-record-audio data-icon="mic" title="Записать" aria-label="Записать"></button>
+            <button class="editor-icon-button" type="button" data-delete-clip data-icon="trash-2" title="Удалить" aria-label="Удалить"></button>
+          </div>
+          <div class="editor-export-card" data-audio-status>Аудио не выбрано</div>
+          <label><span>Громкость клипа <b data-volume-label>100%</b></span><input type="range" min="0" max="1.5" step="0.01" value="1" data-volume></label>
+          <button class="editor-icon-button" type="button" data-mute data-icon="volume-2" title="Mute" aria-label="Mute"></button>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="animation">
+          <label><span>Fade in <b data-fade-in-label>0.0s</b></span><input type="range" min="0" max="5" step="0.1" value="0" data-fade-in></label>
+          <label><span>Fade out <b data-fade-out-label>0.0s</b></span><input type="range" min="0" max="5" step="0.1" value="0" data-fade-out></label>
+          <label>
+            <span>Transition</span>
+            <select data-transition>
+              <option value="none">None</option>
+              <option value="fade">Fade</option>
+              <option value="slide">Slide</option>
+              <option value="zoom">Zoom</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="filter">
+          <div class="editor-filter-grid">
+            <button type="button" data-filter="none">Оригинал</button>
+            <button type="button" data-filter="contrast(1.16) saturate(1.22)">Pop</button>
+            <button type="button" data-filter="grayscale(1) contrast(1.08)">Mono</button>
+            <button type="button" data-filter="sepia(.36) saturate(1.12)">Warm</button>
+            <button type="button" data-filter="brightness(1.08) contrast(1.18) saturate(1.35)">Vivid</button>
+            <button type="button" data-filter="contrast(1.22) saturate(.72) brightness(.94)">Drama</button>
+            <button type="button" data-filter="hue-rotate(18deg) saturate(1.28)">Neon</button>
+            <button type="button" data-filter="sepia(.2) contrast(.92) brightness(1.08)">Soft</button>
+            <button type="button" data-filter="contrast(1.35) brightness(.9)">Noir</button>
+            <button type="button" data-filter="saturate(.55) brightness(1.05)">Fade</button>
+          </div>
+          <label><span>Яркость <b data-filter-brightness-label>100%</b></span><input type="range" min="50" max="150" value="100" data-filter-brightness></label>
+          <label><span>Контраст <b data-filter-contrast-label>100%</b></span><input type="range" min="50" max="170" value="100" data-filter-contrast></label>
+          <label><span>Насыщенность <b data-filter-saturate-label>100%</b></span><input type="range" min="0" max="220" value="100" data-filter-saturate></label>
+          <label><span>Прозрачность <b data-filter-opacity-label>100%</b></span><input type="range" min="0" max="100" value="100" data-filter-opacity></label>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="export">
+          <div class="editor-export-card">
+            <strong>MP4 1080p</strong>
+            <span>Экспорт будет следующим этапом</span>
+          </div>
+        </section>
+
+        <section class="editor-tool-panel" data-tool-panel="media">
+          <div class="editor-media-bin" data-media-bin></div>
+        </section>
+      </aside>
+      <div class="editor-context-menu" data-clip-menu hidden>
+        <button type="button" data-menu-action="duplicate">Дублировать</button>
+        <button type="button" data-menu-action="split">Разрезать</button>
+        <button type="button" data-menu-action="front">Вперед</button>
+        <button type="button" data-menu-action="back">Назад</button>
+        <button type="button" data-menu-action="delete">Удалить</button>
+      </div>
+    </main>
+
+    {{ current_video_project|json_script:"video-project-data" }}
+    <input type="file" accept="image/*" data-image-file hidden>
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+
+        const root = document.querySelector("[data-video-editor]");
+        if (!root) return;
+        const api = "{{ video_projects_api_url }}";
+        const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
+        const currentProject = JSON.parse(document.getElementById("video-project-data").textContent || "null");
+        const video = root.querySelector("[data-editor-video]");
+        const fileInput = root.querySelector("[data-editor-file]");
+        const videoPanelInput = root.querySelector("[data-video-file-panel]");
+        const videoPanelName = root.querySelector("[data-video-panel-name]");
+        const audioInput = root.querySelector("[data-audio-file-panel]");
+        const imageInput = document.querySelector("[data-image-file]");
+        const dropzone = root.querySelector("[data-editor-dropzone]");
+        const frame = root.querySelector("[data-preview-frame]");
+        const overlayRoot = root.querySelector("[data-preview-overlays]");
+        const trackList = root.querySelector("[data-track-list]");
+        const timeline = root.querySelector("[data-editor-timeline]");
+        const timeRuler = root.querySelector("[data-time-ruler]");
+        const playhead = root.querySelector("[data-editor-playhead]");
+        const snapLine = root.querySelector("[data-snap-line]");
+        const mediaBin = root.querySelector("[data-media-bin]");
+        const clipMenu = document.querySelector("[data-clip-menu]");
+        const play = root.querySelector("[data-editor-play]");
+        const seek = root.querySelector("[data-editor-seek]");
+        const time = root.querySelector("[data-editor-time]");
+        const durationNode = root.querySelector("[data-editor-duration]");
+        const title = root.querySelector("[data-editor-title]");
+        const saveStatus = root.querySelector("[data-save-status]");
+        const toolTitle = root.querySelector("[data-tool-title]");
+
+        const defaults = {
+          tracks: [
+            {id: "video-main", type: "video", name: "Видео", order: 0},
+            {id: "text-1", type: "text", name: "Текст", order: 1},
+            {id: "image-1", type: "image", name: "Фото", order: 2},
+            {id: "audio-1", type: "audio", name: "Аудио", order: 3},
+          ],
+          clips: [],
+          aspect: "9 / 16",
+          background: "",
+          title: "Новый проект",
+        };
+        let projectId = currentProject && currentProject.id ? String(currentProject.id) : "";
+        let assets = currentProject && currentProject.assets ? currentProject.assets : [];
+        let state = normalizeState(currentProject && currentProject.state ? currentProject.state : {});
+        let selectedClipId = state.clips[0] ? state.clips[0].id : "";
+        let saveTimer = 0;
+        let recorder = null;
+        let recordChunks = [];
+        let draggingClip = null;
+        let draggingOverlay = null;
+        let projectTime = 0;
+        let playing = false;
+        let rafId = 0;
+        let lastTick = 0;
+        let activeVideoClipId = "";
+        let timelineScale = Number(localStorage.getItem("videoEditorTimelineScale") || 64);
+        const audioPool = new Map();
+        let internalVideoPause = false;
+        let historyPast = [];
+        let historyFuture = [];
+        let snapEnabled = true;
+        let timelineDensity = localStorage.getItem("videoEditorDensity") || "normal";
+        let copiedClip = null;
+        let selectedAssetId = "";
+
+        function normalizeState(raw) {
+          const value = {...defaults, ...raw};
+          value.tracks = Array.isArray(raw.tracks) && raw.tracks.length ? raw.tracks : defaults.tracks;
+          value.clips = Array.isArray(raw.clips) ? raw.clips.map(normalizeClip) : [];
+          return value;
+        }
+        function normalizeClip(clip) {
+          const duration = Math.max(0.25, Number(clip.duration || clip.sourceEnd || 4));
+          const normalized = {
+            ...clip,
+            start: Math.max(0, Number(clip.start || 0)),
+            duration,
+            x: Number.isFinite(Number(clip.x)) ? Number(clip.x) : 50,
+            y: Number.isFinite(Number(clip.y)) ? Number(clip.y) : 50,
+            scale: Number.isFinite(Number(clip.scale)) ? Number(clip.scale) : (clip.type === "image" ? 42 : 100),
+            rotation: Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
+            style: {speed: 1, fit: "contain", opacity: 100, transition: "none", fadeIn: 0, fadeOut: 0, ...(clip.style || {})},
+          };
+          if (["video", "audio"].includes(normalized.type)) {
+            normalized.sourceStart = Math.max(0, Number(clip.sourceStart || 0));
+            normalized.sourceEnd = Math.max(normalized.sourceStart + 0.25, Number(clip.sourceEnd || normalized.sourceStart + duration));
+            normalized.duration = Math.max(0.25, normalized.sourceEnd - normalized.sourceStart);
+          }
+          return normalized;
+        }
+        const fmt = (value) => {
+          const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+          return `${Math.floor(safe / 60)}:${String(Math.floor(safe % 60)).padStart(2, "0")}`;
+        };
+        const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const assetById = (id) => assets.find((asset) => String(asset.id) === String(id));
+        const clipById = (id) => state.clips.find((clip) => clip.id === id);
+        const selectedClip = () => clipById(selectedClipId);
+        const timelineDuration = () => Math.max(12, ...state.clips.map((clip) => Number(clip.start || 0) + Number(clip.duration || 4)));
+        const secondsToPx = (seconds) => Math.max(0, Number(seconds || 0) * timelineScale);
+        const pxToSeconds = (px) => Math.max(0, Number(px || 0) / timelineScale);
+        const pxDeltaToSeconds = (px) => Number(px || 0) / timelineScale;
+        function snapshotState() {
+          return JSON.stringify({state, selectedClipId, projectTime});
+        }
+        function restoreSnapshot(snapshot) {
+          const value = JSON.parse(snapshot);
+          state = normalizeState(value.state || {});
+          selectedClipId = value.selectedClipId || (state.clips[0] ? state.clips[0].id : "");
+          projectTime = Number(value.projectTime || 0);
+          render();
+          scheduleSave();
+        }
+        function pushHistory() {
+          historyPast.push(snapshotState());
+          if (historyPast.length > 80) historyPast.shift();
+          historyFuture = [];
+        }
+        function undo() {
+          if (!historyPast.length) return;
+          historyFuture.push(snapshotState());
+          restoreSnapshot(historyPast.pop());
+        }
+        function redo() {
+          if (!historyFuture.length) return;
+          historyPast.push(snapshotState());
+          restoreSnapshot(historyFuture.pop());
+        }
+        function snapTime(value, excludeId = "") {
+          if (!snapEnabled) return {value: Math.max(0, value), snapped: false};
+          const threshold = pxToSeconds(10);
+          const points = [projectTime];
+          state.clips.forEach((clip) => {
+            if (clip.id === excludeId) return;
+            points.push(clip.start, clip.start + clip.duration);
+          });
+          const target = points.find((point) => Math.abs(point - value) <= threshold);
+          return {value: Math.max(0, Number.isFinite(target) ? target : value), snapped: Number.isFinite(target)};
+        }
+        function showSnapLine(seconds, visible) {
+          if (!snapLine) return;
+          snapLine.hidden = !visible;
+          if (visible) snapLine.style.left = `${secondsToPx(seconds)}px`;
+        }
+        const jsonFetch = async (url, options = {}) => {
+          const response = await fetch(url, {
+            ...options,
+            headers: {"Accept": "application/json", ...(options.headers || {}), ...(options.body && !(options.body instanceof FormData) ? {"Content-Type": "application/json"} : {}), "X-CSRFToken": decodeURIComponent(csrf)},
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        };
+        const setStatus = (value) => saveStatus.textContent = value;
+        async function ensureProject() {
+          if (projectId) return projectId;
+          const data = await jsonFetch(`${api}create/`, {method: "POST", body: JSON.stringify({title: state.title, state})});
+          projectId = String(data.project.id);
+          window.history.replaceState({}, "", `${window.location.pathname}?project=${projectId}`);
+          return projectId;
+        }
+        function collectState() {
+          state.title = title.textContent.trim() || "Новый проект";
+          state.aspect = frame.style.getPropertyValue("--editor-aspect").trim() || "9 / 16";
+          state.background = frame.style.background || "";
+          return state;
+        }
+        function scheduleSave() {
+          setStatus("Сохранение...");
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(saveProject, 500);
+        }
+        async function saveProject() {
+          try {
+            await ensureProject();
+            const body = {title: state.title || "Новый проект", state: collectState()};
+            const data = await jsonFetch(`${api}${projectId}/save/`, {method: "POST", body: JSON.stringify(body)});
+            assets = data.project.assets || assets;
+            setStatus("Сохранено");
+          } catch (error) {
+            setStatus("Не сохранено");
+          }
+        }
+        async function uploadAsset(file, kind, thumbnail = "", duration = 0) {
+          if (!file) return null;
+          await ensureProject();
+          const form = new FormData();
+          form.append("file", file);
+          form.append("kind", kind);
+          if (thumbnail) form.append("thumbnail", thumbnail);
+          if (duration) form.append("duration", String(duration));
+          const data = await jsonFetch(`${api}${projectId}/assets/`, {method: "POST", body: form});
+          assets = data.project.assets || [...assets, data.asset];
+          return data.asset;
+        }
+        async function thumbnailFromVideo(file) {
+          const url = URL.createObjectURL(file);
+          const source = document.createElement("video");
+          source.muted = true;
+          source.src = url;
+          const wait = (event) => new Promise((resolve, reject) => {
+            source.addEventListener(event, resolve, {once: true});
+            source.addEventListener("error", reject, {once: true});
+          });
+          try {
+            await wait("loadedmetadata");
+            const duration = Number.isFinite(source.duration) ? source.duration : 1;
+            source.currentTime = Math.max(0, Math.min(duration - 0.05, duration * (0.18 + Math.random() * 0.64)));
+            await wait("seeked");
+            const canvas = document.createElement("canvas");
+            canvas.width = 640;
+            canvas.height = 360;
+            const ctx = canvas.getContext("2d");
+            const ratio = Math.max(canvas.width / (source.videoWidth || 640), canvas.height / (source.videoHeight || 360));
+            const w = (source.videoWidth || 640) * ratio;
+            const h = (source.videoHeight || 360) * ratio;
+            ctx.drawImage(source, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+            return canvas.toDataURL("image/jpeg", 0.78);
+          } catch (error) {
+            return "";
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        }
+        async function mediaDuration(file, kind) {
+          if (!["video", "audio"].includes(kind)) return 0;
+          const url = URL.createObjectURL(file);
+          const media = document.createElement(kind === "video" ? "video" : "audio");
+          media.preload = "metadata";
+          media.src = url;
+          try {
+            await new Promise((resolve, reject) => {
+              media.addEventListener("loadedmetadata", resolve, {once: true});
+              media.addEventListener("error", reject, {once: true});
+            });
+            return Number.isFinite(media.duration) ? media.duration : 0;
+          } catch (error) {
+            return 0;
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        }
+        function addClip(clip) {
+          pushHistory();
+          const normalized = normalizeClip(clip);
+          state.clips.push(normalized);
+          selectedClipId = normalized.id;
+          render();
+          scheduleSave();
+        }
+        function defaultStartForKind(kind) {
+          if (kind === "video" && projectTime <= 0.05) {
+            const end = Math.max(0, ...state.clips.filter((clip) => clip.type === "video").map((clip) => clip.start + clip.duration));
+            return end;
+          }
+          return currentTime();
+        }
+        async function handleFile(file, kind) {
+          if (!file) return;
+          if (kind === "video" && videoPanelName) videoPanelName.textContent = file.name;
+          const thumbnail = kind === "video" ? await thumbnailFromVideo(file) : "";
+          const mediaSeconds = await mediaDuration(file, kind);
+          const asset = await uploadAsset(file, kind, thumbnail, mediaSeconds);
+          if (!asset) return;
+          const track = state.tracks.find((item) => item.type === kind) || state.tracks[state.tracks.length - 1];
+          const duration = asset.duration || (kind === "video" ? 12 : kind === "audio" ? 10 : 5);
+          const clipDuration = kind === "image" ? 5 : duration;
+          addClip({
+            id: uid(kind),
+            type: kind,
+            trackId: track.id,
+            assetId: asset.id,
+            start: defaultStartForKind(kind),
+            duration: clipDuration,
+            sourceStart: 0,
+            sourceEnd: clipDuration,
+            x: 50,
+            y: 50,
+            scale: kind === "image" ? 42 : 100,
+            style: {},
+            text: "",
+          });
+        }
+        function addTextClip() {
+          const track = state.tracks.find((item) => item.type === "text") || state.tracks[1];
+          addClip({
+            id: uid("text"),
+            type: "text",
+            trackId: track.id,
+            start: currentTime(),
+            duration: 4,
+            x: 50,
+            y: 78,
+            scale: 100,
+            text: "Твой заголовок",
+            style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 22, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 48},
+          });
+        }
+        function addTrack(type) {
+          pushHistory();
+          const order = Math.max(0, ...state.tracks.map((track) => Number(track.order || 0))) + 1;
+          state.tracks.push({id: uid(type), type, name: typeName(type), order});
+          render();
+          scheduleSave();
+        }
+        function deleteTrack(id) {
+          const track = state.tracks.find((item) => item.id === id);
+          if (!track || track.id === "video-main") return;
+          pushHistory();
+          state.tracks = state.tracks.filter((item) => item.id !== id);
+          state.clips = state.clips.filter((clip) => clip.trackId !== id);
+          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          render();
+          scheduleSave();
+        }
+        function currentTime() {
+          return projectTime;
+        }
+        function isClipActive(clip, at = projectTime) {
+          return at >= Number(clip.start || 0) && at <= Number(clip.start || 0) + Number(clip.duration || 0);
+        }
+        function activeVideoClip() {
+          return state.clips
+            .filter((clip) => clip.type === "video" && isClipActive(clip))
+            .sort((a, b) => (state.tracks.find((track) => track.id === b.trackId)?.order || 0) - (state.tracks.find((track) => track.id === a.trackId)?.order || 0))[0] || null;
+        }
+        function activeAudioClips() {
+          return state.clips.filter((clip) => clip.type === "audio" && isClipActive(clip));
+        }
+        function clipFilterValue(clip) {
+          const style = clip && clip.style ? clip.style : {};
+          const preset = style.filter && style.filter !== "none" ? style.filter : "";
+          const brightness = Number(style.brightness || 100);
+          const contrast = Number(style.contrast || 100);
+          const saturate = Number(style.saturate || 100);
+          const custom = `brightness(${brightness / 100}) contrast(${contrast / 100}) saturate(${saturate / 100})`;
+          return [preset, custom].filter(Boolean).join(" ");
+        }
+        function clipOpacityValue(clip) {
+          return Math.max(0, Math.min(1, Number(clip?.style?.opacity ?? 100) / 100));
+        }
+        function clipVolumeValue(clip) {
+          return Math.max(0, Math.min(1.5, Number(clip?.style?.volume ?? 1)));
+        }
+        function clipSpeedValue(clip) {
+          return Math.max(0.25, Math.min(2, Number(clip?.style?.speed ?? 1)));
+        }
+        function fadeOpacity(clip, base = 1) {
+          const offset = Math.max(0, projectTime - clip.start);
+          const remaining = Math.max(0, clip.start + clip.duration - projectTime);
+          const fadeIn = Number(clip.style?.fadeIn || 0);
+          const fadeOut = Number(clip.style?.fadeOut || 0);
+          let value = base;
+          if (fadeIn > 0) value = Math.min(value, offset / fadeIn);
+          if (fadeOut > 0) value = Math.min(value, remaining / fadeOut);
+          return Math.max(0, Math.min(1, value));
+        }
+        function audioForAsset(asset) {
+          if (!asset) return null;
+          if (!audioPool.has(String(asset.id))) {
+            const item = new Audio(asset.preview_url);
+            item.preload = "metadata";
+            audioPool.set(String(asset.id), item);
+          }
+          return audioPool.get(String(asset.id));
+        }
+        function syncMediaForProjectTime(shouldPlay = playing) {
+          const clip = activeVideoClip();
+          const asset = clip && assetById(clip.assetId);
+          if (asset && clip) {
+            if (!video.src.endsWith(asset.preview_url)) {
+              video.src = asset.preview_url;
+              video.load();
+            }
+            video.hidden = false;
+            dropzone.hidden = true;
+            video.style.filter = clipFilterValue(clip);
+            video.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
+            video.style.objectFit = clip.style?.fit === "crop" ? "cover" : (clip.style?.fit || "contain");
+            video.volume = clipVolumeValue(clip);
+            video.playbackRate = clipSpeedValue(clip);
+            const local = Math.max(clip.sourceStart || 0, Math.min(clip.sourceEnd || clip.duration, (clip.sourceStart || 0) + ((projectTime - clip.start) * clipSpeedValue(clip))));
+            if (Math.abs((video.currentTime || 0) - local) > 0.18) video.currentTime = local;
+            if (shouldPlay && video.paused) video.play().catch(() => {});
+            activeVideoClipId = clip.id;
+          } else {
+            internalVideoPause = true;
+            video.pause();
+            internalVideoPause = false;
+            activeVideoClipId = "";
+            if (state.clips.some((item) => item.type === "video")) {
+              video.hidden = true;
+              dropzone.hidden = playing;
+            } else {
+              video.removeAttribute("src");
+              video.hidden = true;
+              dropzone.hidden = false;
+            }
+          }
+          const activeAudioIds = new Set();
+          activeAudioClips().forEach((audioClip) => {
+            const audioAsset = assetById(audioClip.assetId);
+            const media = audioForAsset(audioAsset);
+            if (!media) return;
+            activeAudioIds.add(String(audioAsset.id));
+            const local = Math.max(audioClip.sourceStart || 0, Math.min(audioClip.sourceEnd || audioClip.duration, (audioClip.sourceStart || 0) + ((projectTime - audioClip.start) * clipSpeedValue(audioClip))));
+            if (Math.abs((media.currentTime || 0) - local) > 0.18) media.currentTime = local;
+            media.volume = clipVolumeValue(audioClip) * fadeOpacity(audioClip, 1);
+            media.playbackRate = clipSpeedValue(audioClip);
+            media.muted = video.muted;
+            if (shouldPlay && media.paused) media.play().catch(() => {});
+            if (!shouldPlay && !media.paused) media.pause();
+          });
+          audioPool.forEach((media, id) => {
+            if (!activeAudioIds.has(id) && !media.paused) media.pause();
+          });
+        }
+        function updateOverlayVisibility() {
+          const now = currentTime();
+          overlayRoot.querySelectorAll("[data-clip-id]").forEach((node) => {
+            const clip = clipById(node.dataset.clipId);
+            node.hidden = !clip || now < clip.start || now > clip.start + clip.duration;
+          });
+        }
+        function selectClip(id) {
+          selectedClipId = id;
+          render();
+        }
+        function deleteSelectedClip() {
+          if (!selectedClipId) return;
+          deleteClipById(selectedClipId);
+        }
+        function deleteClipById(id) {
+          if (!id) return;
+          const exists = state.clips.some((clip) => String(clip.id) === String(id));
+          if (!exists) return;
+          pushHistory();
+          state.clips = state.clips.filter((clip) => String(clip.id) !== String(id));
+          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          render();
+          scheduleSave();
+        }
+        function render() {
+          title.textContent = state.title || "Новый проект";
+          frame.style.setProperty("--editor-aspect", state.aspect || "9 / 16");
+          if (state.background) frame.style.background = state.background;
+          root.classList.toggle("is-compact-timeline", timelineDensity === "compact");
+          renderTracks();
+          renderPreview();
+          renderProperties();
+          renderMediaBin();
+          sync();
+        }
+        function renderTracks() {
+          const duration = timelineDuration();
+          const width = Math.max(720, secondsToPx(duration));
+          timeline.style.setProperty("--timeline-width", `${width}px`);
+          renderRuler(duration);
+          const ordered = [...state.tracks].sort((a, b) => (a.order || 0) - (b.order || 0));
+          trackList.replaceChildren(...ordered.map((track) => {
+            const row = document.createElement("div");
+            row.className = `editor-track is-${track.type}`;
+            row.dataset.trackId = track.id;
+            const label = document.createElement("div");
+            label.className = "editor-track-label";
+            label.title = track.name;
+            const labelIcon = document.createElement("span");
+            labelIcon.className = "editor-track-icon";
+            labelIcon.dataset.icon = trackIcon(track.type);
+            const removeTrack = document.createElement("button");
+            removeTrack.className = "editor-icon-button";
+            removeTrack.type = "button";
+            removeTrack.title = "Удалить дорожку";
+            removeTrack.dataset.icon = "trash-2";
+            removeTrack.hidden = track.id === "video-main";
+            removeTrack.addEventListener("click", () => deleteTrack(track.id));
+            label.append(labelIcon, removeTrack);
+            const lane = document.createElement("div");
+            lane.className = "editor-track-lane";
+            lane.dataset.trackId = track.id;
+            lane.dataset.trackType = track.type;
+            if (!state.clips.some((clip) => clip.trackId === track.id)) {
+              const empty = document.createElement("span");
+              empty.className = "editor-track-empty";
+              empty.textContent = track.type === "video" ? "добавь видео" : track.type === "text" ? "добавь текст" : track.type === "audio" ? "добавь музыку" : "добавь фото";
+              lane.append(empty);
+            }
+            lane.addEventListener("dblclick", (event) => {
+              if (track.type === "text") {
+                seekFromClient(event.clientX);
+                addTextClip();
+              }
+            });
+            state.clips.filter((clip) => clip.trackId === track.id).forEach((clip) => lane.append(renderClip(clip, duration)));
+            row.append(label, lane);
+            return row;
+          }));
+        }
+        function renderRuler(duration) {
+          const ticks = [];
+          const max = Math.ceil(duration);
+          for (let second = 0; second <= max; second += 1) {
+            const tick = document.createElement("span");
+            tick.className = `editor-ruler-tick${second % 5 === 0 ? " is-major" : ""}`;
+            tick.style.left = `${secondsToPx(second)}px`;
+            if (second % 5 === 0) tick.textContent = fmt(second);
+            ticks.push(tick);
+          }
+          timeRuler.replaceChildren(...ticks);
+        }
+        function laneFromPoint(x, y, type) {
+          const lanes = document.elementsFromPoint(x, y)
+            .map((item) => item.closest ? item.closest(".editor-track-lane") : null)
+            .filter(Boolean);
+          return lanes.find((lane, index, list) => lane.dataset.trackType === type && list.indexOf(lane) === index) || null;
+        }
+        function renderClip(clip, total) {
+          const node = document.createElement("div");
+          node.className = `editor-layer-clip is-${clip.type}${clip.id === selectedClipId ? " is-selected" : ""}`;
+          positionClipNode(node, clip);
+          node.dataset.clipId = clip.id;
+          node.innerHTML = `<span class="editor-trim-handle is-left" data-trim="left"></span><span class="editor-clip-kind" data-icon="${trackIcon(clip.type)}"></span><b></b><small></small><button class="editor-icon-button" type="button" data-delete-inline data-icon="trash-2" title="Удалить" aria-label="Удалить"></button><span class="editor-trim-handle is-right" data-trim="right"></span>`;
+          const asset = assetById(clip.assetId);
+          const clipTitle = clip.type === "text" ? clip.text : (asset && asset.name) || clip.type;
+          node.querySelector("b").textContent = shortClipName(clipTitle);
+          node.title = clipTitle;
+          node.querySelector("small").textContent = `${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}`;
+          if (clip.type === "video" && asset && asset.thumbnail_url) node.style.setProperty("--clip-thumb", `url("${asset.thumbnail_url}")`);
+          if (clip.type === "image" && asset && asset.preview_url) node.style.setProperty("--clip-thumb", `url("${asset.preview_url}")`);
+          if (clip.style?.transition && clip.style.transition !== "none") node.dataset.transition = clip.style.transition;
+          node.querySelector("[data-delete-inline]").addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+          });
+          node.querySelector("[data-delete-inline]").addEventListener("click", (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            deleteClipById(node.dataset.clipId);
+          });
+          node.addEventListener("pointerdown", (event) => {
+            if (event.target.closest("button")) return;
+            selectedClipId = clip.id;
+            root.querySelectorAll(".editor-layer-clip").forEach((item) => item.classList.toggle("is-selected", item === node));
+            node.classList.add("is-dragging");
+            renderProperties();
+            const mode = event.target.dataset.trim || "move";
+            const lane = node.closest(".editor-track-lane");
+            draggingClip = {
+              id: clip.id,
+              mode,
+              startX: event.clientX,
+              startY: event.clientY,
+              start: clip.start,
+              duration: clip.duration,
+              sourceStart: clip.sourceStart || 0,
+              sourceEnd: clip.sourceEnd || clip.duration,
+              laneRect: lane ? lane.getBoundingClientRect() : timeline.getBoundingClientRect(),
+            };
+            pushHistory();
+            if (node.isConnected) node.setPointerCapture(event.pointerId);
+            event.preventDefault();
+          });
+          node.addEventListener("pointermove", (event) => {
+            if (!draggingClip || draggingClip.id !== clip.id) return;
+            const delta = pxDeltaToSeconds(event.clientX - draggingClip.startX);
+            if (draggingClip.mode === "left") {
+              const nextStart = Math.max(0, Math.min(draggingClip.start + draggingClip.duration - 0.25, draggingClip.start + delta));
+              const sourceDelta = nextStart - draggingClip.start;
+              clip.start = nextStart;
+              clip.sourceStart = Math.max(0, draggingClip.sourceStart + sourceDelta);
+              clip.duration = Math.max(0.25, draggingClip.duration - sourceDelta);
+            } else if (draggingClip.mode === "right") {
+              clip.duration = Math.max(0.25, draggingClip.duration + delta);
+              clip.sourceEnd = Math.max((clip.sourceStart || 0) + 0.25, draggingClip.sourceStart + clip.duration);
+            } else {
+              const snapped = snapTime(draggingClip.start + delta, clip.id);
+              clip.start = snapped.value;
+              showSnapLine(clip.start, snapped.snapped);
+              const lane = laneFromPoint(event.clientX, event.clientY, clip.type);
+              if (lane && lane.dataset.trackId !== clip.trackId) {
+                clip.trackId = lane.dataset.trackId;
+                lane.append(node);
+              }
+            }
+            positionClipNode(node, clip);
+            node.querySelector("small").textContent = `${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}`;
+            sync();
+          });
+          const finishDrag = (event) => {
+            if (event && node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+            draggingClip = null;
+            node.classList.remove("is-dragging");
+            showSnapLine(0, false);
+            renderTracks();
+            renderProperties();
+            scheduleSave();
+          };
+          node.addEventListener("pointerup", finishDrag);
+          node.addEventListener("pointercancel", finishDrag);
+          node.addEventListener("click", () => selectClip(clip.id));
+          node.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            selectedClipId = clip.id;
+            showClipMenu(event.clientX, event.clientY);
+            renderProperties();
+          });
+          return node;
+        }
+        function positionClipNode(node, clip) {
+          node.style.left = `${secondsToPx(clip.start)}px`;
+          node.style.width = `${Math.max(36, secondsToPx(clip.duration))}px`;
+        }
+        function shortClipName(value) {
+          const raw = String(value || "").trim();
+          if (raw.length <= 18) return raw;
+          const dot = raw.lastIndexOf(".");
+          const ext = dot > 0 ? raw.slice(dot) : "";
+          return `${raw.slice(0, 13)}…${ext.slice(0, 5)}`;
+        }
+        function renderPreview() {
+          const hasVideo = state.clips.some((clip) => clip.type === "video");
+          const hasActiveVisual = state.clips.some((clip) => ["video", "image"].includes(clip.type) && isClipActive(clip));
+          if (!hasVideo) {
+            video.removeAttribute("src");
+            video.hidden = true;
+            dropzone.hidden = false;
+          } else {
+            dropzone.hidden = playing || hasActiveVisual;
+          }
+          overlayRoot.replaceChildren();
+          state.clips.filter((clip) => ["text", "image"].includes(clip.type)).forEach((clip) => {
+            const node = document.createElement("div");
+            node.className = `editor-overlay-item is-${clip.type}${clip.id === selectedClipId ? " is-selected" : ""}`;
+            node.dataset.clipId = clip.id;
+            node.style.left = `${clip.x ?? 50}%`;
+            node.style.top = `${clip.y ?? 50}%`;
+            node.style.transform = `translate(-50%, -50%) rotate(${clip.rotation || 0}deg)`;
+            node.style.width = clip.type === "image" ? `${clip.scale || 42}%` : "auto";
+            node.style.zIndex = String(clip.style?.zIndex || 2);
+            if (clip.type === "image") {
+              const asset = assetById(clip.assetId);
+              const img = document.createElement("img");
+              img.src = asset ? asset.preview_url : "";
+              img.alt = "";
+              img.style.filter = clipFilterValue(clip);
+              img.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
+              img.style.objectFit = clip.style?.fit === "cover" || clip.style?.fit === "crop" ? "cover" : "contain";
+              const resize = document.createElement("span");
+              resize.className = "editor-overlay-handle is-resize";
+              resize.dataset.overlayHandle = "resize";
+              resize.title = "Размер";
+              const rotate = document.createElement("span");
+              rotate.className = "editor-overlay-handle is-rotate";
+              rotate.dataset.overlayHandle = "rotate";
+              rotate.title = "Поворот";
+              const remove = document.createElement("button");
+              remove.type = "button";
+              remove.className = "editor-overlay-delete";
+              remove.dataset.overlayDelete = "true";
+              remove.dataset.icon = "trash-2";
+              remove.title = "Удалить";
+              remove.setAttribute("aria-label", "Удалить");
+              node.append(img, resize, rotate, remove);
+            } else {
+              node.contentEditable = "true";
+              node.spellcheck = false;
+              node.textContent = clip.text || "Текст";
+              applyTextStyle(node, clip.style || {});
+              node.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
+              const remove = document.createElement("button");
+              remove.type = "button";
+              remove.contentEditable = "false";
+              remove.className = "editor-overlay-delete";
+              remove.dataset.overlayDelete = "true";
+              remove.dataset.icon = "trash-2";
+              remove.title = "Удалить";
+              remove.setAttribute("aria-label", "Удалить");
+              node.append(remove);
+              node.addEventListener("input", () => {
+                clip.text = Array.from(node.childNodes)
+                  .filter((child) => child.nodeType === Node.TEXT_NODE)
+                  .map((child) => child.textContent)
+                  .join("")
+                  .trim() || "Текст";
+                updateTextControls(clip);
+                renderTracks();
+                scheduleSave();
+              });
+            }
+            node.addEventListener("pointerdown", (event) => {
+              if (event.target.closest("[data-overlay-delete]")) {
+                event.stopPropagation();
+                event.preventDefault();
+                deleteClipById(clip.id);
+                return;
+              }
+              selectedClipId = clip.id;
+              renderProperties();
+              overlayRoot.querySelectorAll(".editor-overlay-item").forEach((item) => item.classList.toggle("is-selected", item === node));
+              const rect = frame.getBoundingClientRect();
+              const handle = event.target.dataset.overlayHandle || "move";
+              draggingOverlay = {
+                id: clip.id,
+                mode: handle,
+                startX: event.clientX,
+                startY: event.clientY,
+                x: clip.x ?? 50,
+                y: clip.y ?? 50,
+                scale: clip.scale || 42,
+                rotation: clip.rotation || 0,
+                centerX: rect.left + ((clip.x ?? 50) / 100) * rect.width,
+                centerY: rect.top + ((clip.y ?? 50) / 100) * rect.height,
+                frameWidth: rect.width,
+              };
+              pushHistory();
+              if (node.isConnected) node.setPointerCapture(event.pointerId);
+              event.preventDefault();
+            });
+            node.addEventListener("pointermove", (event) => {
+              if (!draggingOverlay || draggingOverlay.id !== clip.id) return;
+              const rect = frame.getBoundingClientRect();
+              if (draggingOverlay.mode === "resize") {
+                const distance = Math.hypot(event.clientX - draggingOverlay.centerX, event.clientY - draggingOverlay.centerY);
+                clip.scale = Math.max(8, Math.min(120, (distance * 2 / draggingOverlay.frameWidth) * 100));
+                node.style.width = `${clip.scale}%`;
+              } else if (draggingOverlay.mode === "rotate") {
+                const radians = Math.atan2(event.clientY - draggingOverlay.centerY, event.clientX - draggingOverlay.centerX);
+                clip.rotation = Math.round((radians * 180 / Math.PI) + 90);
+                node.style.transform = `translate(-50%, -50%) rotate(${clip.rotation}deg)`;
+              } else {
+                clip.x = Math.max(4, Math.min(96, ((event.clientX - rect.left) / rect.width) * 100));
+                clip.y = Math.max(4, Math.min(96, ((event.clientY - rect.top) / rect.height) * 100));
+                node.style.left = `${clip.x}%`;
+                node.style.top = `${clip.y}%`;
+              }
+            });
+            node.addEventListener("pointerup", (event) => {
+              if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+              draggingOverlay = null;
+              scheduleSave();
+            });
+            node.addEventListener("wheel", (event) => {
+              if (clip.type !== "image") return;
+              event.preventDefault();
+              clip.scale = Math.max(10, Math.min(96, (clip.scale || 42) + (event.deltaY > 0 ? -3 : 3)));
+              node.style.width = `${clip.scale}%`;
+              scheduleSave();
+            }, {passive: false});
+            overlayRoot.append(node);
+          });
+          updateOverlayVisibility();
+          syncMediaForProjectTime(false);
+        }
+        function renderProperties() {
+          const clip = selectedClip();
+          toolTitle.textContent = clip ? `${typeName(clip.type)} · ${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}` : "Проект";
+          if (clip && clip.type === "text") updateTextControls(clip);
+          updateClipControls(clip);
+          updateEffectControls(clip);
+        }
+        function updateClipControls(clip) {
+          const set = (selector, value, disabled = !clip) => {
+            const input = root.querySelector(selector);
+            if (!input) return;
+            input.value = value;
+            input.disabled = disabled;
+          };
+          const style = clip?.style || {};
+          set("[data-clip-start]", clip ? clip.start.toFixed(2) : "");
+          set("[data-clip-duration]", clip ? clip.duration.toFixed(2) : "");
+          set("[data-clip-end]", clip ? (clip.start + clip.duration).toFixed(2) : "");
+          set("[data-clip-x]", clip ? Math.round(clip.x ?? 50) : "", !clip || !["text", "image"].includes(clip.type));
+          set("[data-clip-y]", clip ? Math.round(clip.y ?? 50) : "", !clip || !["text", "image"].includes(clip.type));
+          set("[data-clip-scale]", clip ? Math.round(clip.scale ?? 100) : "", !clip || !["text", "image"].includes(clip.type));
+          set("[data-clip-rotation]", clip ? Math.round(clip.rotation ?? 0) : "", !clip || !["text", "image"].includes(clip.type));
+          set("[data-clip-fit]", style.fit || "contain", !clip || !["video", "image"].includes(clip.type));
+          set("[data-clip-speed]", String(style.speed || 1), !clip || !["video", "audio"].includes(clip.type));
+          updateChoice("clip-fit", style.fit || "contain", !clip || !["video", "image"].includes(clip.type));
+          updateChoice("clip-speed", String(style.speed || 1), !clip || !["video", "audio"].includes(clip.type));
+          const fadeIn = root.querySelector("[data-fade-in]");
+          const fadeOut = root.querySelector("[data-fade-out]");
+          const transition = root.querySelector("[data-transition]");
+          if (fadeIn) { fadeIn.value = style.fadeIn || 0; fadeIn.disabled = !clip; }
+          if (fadeOut) { fadeOut.value = style.fadeOut || 0; fadeOut.disabled = !clip; }
+          if (transition) { transition.value = style.transition || "none"; transition.disabled = !clip || clip.type !== "video"; }
+          root.querySelector("[data-fade-in-label]").textContent = `${Number(fadeIn?.value || 0).toFixed(1)}s`;
+          root.querySelector("[data-fade-out-label]").textContent = `${Number(fadeOut?.value || 0).toFixed(1)}s`;
+        }
+        function updateChoice(name, value, disabled = false) {
+          const choice = root.querySelector(`[data-choice="${name}"]`);
+          if (!choice) return;
+          const current = choice.querySelector("[data-choice-current]");
+          const selected = choice.querySelector(`[data-choice-value="${CSS.escape(String(value))}"]`);
+          if (current) {
+            current.textContent = selected ? selected.textContent : value;
+            current.disabled = disabled;
+          }
+          choice.querySelectorAll("[data-choice-value]").forEach((button) => {
+            button.classList.toggle("is-selected", button.dataset.choiceValue === String(value));
+            button.disabled = disabled;
+          });
+        }
+        function applyTextStyle(node, style) {
+          const bg = hexToRgb(style.bg || "#000000");
+          const alpha = Math.max(0, Math.min(100, Number(style.bgAlpha ?? 48))) / 100;
+          node.style.fontFamily = style.font || "system-ui";
+          node.style.fontSize = `${style.size || 22}px`;
+          node.style.color = style.color || "#ffffff";
+          node.style.background = `rgba(${bg.r}, ${bg.g}, ${bg.b}, ${alpha})`;
+          node.style.webkitTextStroke = `${style.strokeWidth || 0}px ${style.stroke || "#000000"}`;
+        }
+        function updateTextControls(clip) {
+          clip.style = clip.style || {};
+          root.querySelector("[data-text-value]").value = clip.text || "";
+          root.querySelector("[data-text-font]").value = clip.style.font || root.querySelector("[data-text-font]").value;
+          root.querySelector("[data-text-size]").value = clip.style.size || 22;
+          root.querySelector("[data-text-color]").value = clip.style.color || "#ffffff";
+          root.querySelector("[data-text-stroke]").value = clip.style.stroke || "#000000";
+          root.querySelector("[data-text-stroke-width]").value = clip.style.strokeWidth || 0;
+          root.querySelector("[data-text-bg]").value = clip.style.bg || "#000000";
+          root.querySelector("[data-text-bg-alpha]").value = clip.style.bgAlpha ?? 48;
+          root.querySelector("[data-text-size-label]").textContent = root.querySelector("[data-text-size]").value;
+          root.querySelector("[data-text-stroke-width-label]").textContent = root.querySelector("[data-text-stroke-width]").value;
+          root.querySelector("[data-text-bg-alpha-label]").textContent = `${root.querySelector("[data-text-bg-alpha]").value}%`;
+        }
+        function updateEffectControls(clip) {
+          const style = clip && clip.style ? clip.style : {};
+          const volume = root.querySelector("[data-volume]");
+          const volumeLabel = root.querySelector("[data-volume-label]");
+          if (volume) {
+            volume.value = String(style.volume ?? 1);
+            volume.disabled = !clip || !["video", "audio"].includes(clip.type);
+          }
+          if (volumeLabel) volumeLabel.textContent = `${Math.round(Number(volume?.value || 1) * 100)}%`;
+          ["brightness", "contrast", "saturate", "opacity"].forEach((name) => {
+            const input = root.querySelector(`[data-filter-${name}]`);
+            const label = root.querySelector(`[data-filter-${name}-label]`);
+            const fallback = name === "opacity" ? 100 : 100;
+            if (input) {
+              input.value = String(style[name] ?? fallback);
+              input.disabled = !clip || !["video", "image"].includes(clip.type);
+            }
+            if (label) label.textContent = `${input ? input.value : fallback}%`;
+          });
+          root.querySelectorAll("[data-filter]").forEach((button) => {
+            button.classList.toggle("is-selected", (style.filter || "none") === button.dataset.filter);
+          });
+        }
+        function applyClipEffects() {
+          const clip = selectedClip();
+          if (!clip) return;
+          clip.style = clip.style || {};
+          renderPreview();
+          syncMediaForProjectTime(playing);
+          updateClipControls(clip);
+          updateEffectControls(clip);
+          scheduleSave();
+        }
+        function duplicateSelectedClip() {
+          const clip = selectedClip();
+          if (!clip) return;
+          pushHistory();
+          const copy = normalizeClip({...clip, id: uid(`${clip.type}-copy`), start: clip.start + Math.min(1, Math.max(0.25, clip.duration * 0.15))});
+          state.clips.push(copy);
+          selectedClipId = copy.id;
+          render();
+          scheduleSave();
+        }
+        function addAssetToTimeline(asset) {
+          if (!asset) return;
+          const track = state.tracks.find((item) => item.type === asset.kind) || state.tracks[state.tracks.length - 1];
+          const duration = asset.kind === "image" ? 5 : Math.max(1, Number(asset.duration || 5));
+          addClip({
+            id: uid(asset.kind),
+            type: asset.kind,
+            trackId: track.id,
+            assetId: asset.id,
+            start: defaultStartForKind(asset.kind),
+            duration,
+            sourceStart: 0,
+            sourceEnd: duration,
+            x: 50,
+            y: 50,
+            scale: asset.kind === "image" ? 42 : 100,
+            style: {},
+            text: "",
+          });
+        }
+        async function deleteAsset(asset) {
+          if (!asset || !asset.delete_url) return;
+          pushHistory();
+          const data = await jsonFetch(asset.delete_url, {method: "POST"});
+          assets = data.project.assets || assets.filter((item) => item.id !== asset.id);
+          state = normalizeState(data.project.state || state);
+          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          render();
+        }
+        function renderMediaBin() {
+          if (!mediaBin) return;
+          if (!assets.length) {
+            mediaBin.innerHTML = `<div class="editor-media-empty">Медиа пока нет</div>`;
+            return;
+          }
+          mediaBin.replaceChildren(...assets.map((asset) => {
+            const item = document.createElement("article");
+            item.className = `editor-media-item is-${asset.kind}${String(asset.id) === String(selectedAssetId) ? " is-selected" : ""}`;
+            const preview = document.createElement("button");
+            preview.type = "button";
+            preview.className = "editor-media-preview";
+            preview.style.backgroundImage = asset.thumbnail_url ? `url("${asset.thumbnail_url}")` : "";
+            preview.dataset.icon = asset.kind === "video" ? "film" : asset.kind === "audio" ? "music" : "image";
+            preview.addEventListener("click", () => { selectedAssetId = asset.id; addAssetToTimeline(asset); });
+            const meta = document.createElement("div");
+            meta.innerHTML = `<b></b><small></small>`;
+            meta.querySelector("b").textContent = asset.name || asset.kind;
+            meta.querySelector("small").textContent = `${typeName(asset.kind)} · ${asset.size_text || ""}`;
+            const actions = document.createElement("div");
+            actions.className = "editor-media-actions";
+            const add = document.createElement("button");
+            add.type = "button";
+            add.textContent = "Добавить";
+            add.addEventListener("click", () => addAssetToTimeline(asset));
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.textContent = "Удалить";
+            remove.addEventListener("click", () => deleteAsset(asset));
+            actions.append(add, remove);
+            item.append(preview, meta, actions);
+            return item;
+          }));
+        }
+        function showClipMenu(x, y) {
+          if (!clipMenu) return;
+          clipMenu.hidden = false;
+          clipMenu.style.left = `${x}px`;
+          clipMenu.style.top = `${y}px`;
+        }
+        function hideClipMenu() {
+          if (clipMenu) clipMenu.hidden = true;
+        }
+        function changeSelectedZ(delta) {
+          const clip = selectedClip();
+          if (!clip) return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.zIndex = Number(clip.style.zIndex || 2) + delta;
+          renderPreview();
+          scheduleSave();
+        }
+        function hexToRgb(hex) {
+          const raw = String(hex || "#000").replace("#", "").padEnd(6, "0");
+          return {r: parseInt(raw.slice(0, 2), 16) || 0, g: parseInt(raw.slice(2, 4), 16) || 0, b: parseInt(raw.slice(4, 6), 16) || 0};
+        }
+        function trackIcon(type) {
+          return {video: "film", text: "type", image: "image", audio: "music"}[type] || "circle";
+        }
+        function typeName(type) {
+          return {video: "Видео", text: "Текст", image: "Фото", audio: "Аудио"}[type] || "Слой";
+        }
+        function sync() {
+          const duration = timelineDuration();
+          projectTime = Math.max(0, Math.min(projectTime, duration));
+          const current = projectTime;
+          const ratio = duration ? current / duration : 0;
+          seek.value = String(Math.round(ratio * 1000));
+          seek.style.setProperty("--seek", `${ratio * 100}%`);
+          playhead.style.left = `${secondsToPx(current)}px`;
+          time.textContent = `${fmt(current)} / ${fmt(duration)}`;
+          durationNode.textContent = fmt(duration);
+          play.dataset.icon = playing ? "pause" : "play";
+          updateOverlayVisibility();
+        }
+        function seekTo(seconds) {
+          projectTime = Math.max(0, Math.min(timelineDuration(), Number(seconds) || 0));
+          syncMediaForProjectTime(playing);
+          sync();
+        }
+        function seekFromClient(clientX) {
+          const rect = timeRuler.getBoundingClientRect();
+          seekTo(pxToSeconds(clientX - rect.left));
+        }
+        function startPlayback() {
+          playing = true;
+          lastTick = performance.now();
+          syncMediaForProjectTime(true);
+          tickPlayback(lastTick);
+          sync();
+        }
+        function pausePlayback() {
+          playing = false;
+          cancelAnimationFrame(rafId);
+          video.pause();
+          audioPool.forEach((media) => media.pause());
+          sync();
+        }
+        function tickPlayback(now) {
+          if (!playing) return;
+          const delta = Math.max(0, (now - lastTick) / 1000);
+          lastTick = now;
+          projectTime = Math.min(timelineDuration(), projectTime + delta);
+          if (projectTime >= timelineDuration()) {
+            pausePlayback();
+            return;
+          }
+          syncMediaForProjectTime(true);
+          sync();
+          rafId = requestAnimationFrame(tickPlayback);
+        }
+        function splitSelectedClip() {
+          const clip = selectedClip();
+          if (!clip || projectTime <= clip.start + 0.08 || projectTime >= clip.start + clip.duration - 0.08) return;
+          const offset = projectTime - clip.start;
+          const right = normalizeClip({
+            ...clip,
+            id: uid(`${clip.type}-split`),
+            start: projectTime,
+            duration: clip.duration - offset,
+            sourceStart: (clip.sourceStart || 0) + offset,
+            sourceEnd: clip.sourceEnd || (clip.sourceStart || 0) + clip.duration,
+          });
+          clip.duration = offset;
+          if (["video", "audio"].includes(clip.type)) clip.sourceEnd = (clip.sourceStart || 0) + offset;
+          state.clips.push(right);
+          selectedClipId = right.id;
+          render();
+          scheduleSave();
+        }
+        function setTimelineScale(value) {
+          timelineScale = Math.max(28, Math.min(180, value));
+          localStorage.setItem("videoEditorTimelineScale", String(timelineScale));
+          renderTracks();
+          sync();
+        }
+
+        fileInput.addEventListener("change", () => Array.from(fileInput.files || []).forEach((file) => handleFile(file, "video")));
+        videoPanelInput.addEventListener("change", () => Array.from(videoPanelInput.files || []).forEach((file) => handleFile(file, "video")));
+        audioInput.addEventListener("change", () => handleFile(audioInput.files[0], "audio"));
+        imageInput.addEventListener("change", () => handleFile(imageInput.files[0], "image"));
+        dropzone.addEventListener("dragover", (event) => { event.preventDefault(); dropzone.classList.add("is-dragging"); });
+        dropzone.addEventListener("dragleave", () => dropzone.classList.remove("is-dragging"));
+        dropzone.addEventListener("drop", (event) => {
+          event.preventDefault();
+          dropzone.classList.remove("is-dragging");
+          handleFile(event.dataTransfer.files[0], "video");
+        });
+        play.addEventListener("click", () => playing ? pausePlayback() : startPlayback());
+        seek.addEventListener("input", () => seekTo((Number(seek.value) / 1000) * timelineDuration()));
+        timeline.addEventListener("pointerdown", (event) => {
+          const deleteButton = event.target.closest("[data-delete-inline]");
+          if (deleteButton) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            const clipNode = deleteButton.closest(".editor-layer-clip");
+            deleteClipById(clipNode?.dataset.clipId || "");
+            return;
+          }
+          if (event.target.closest(".editor-layer-clip,button,input,label")) return;
+          if (timeline.isConnected) timeline.setPointerCapture(event.pointerId);
+          timeline.dataset.scrubbing = "true";
+          seekFromClient(event.clientX);
+        }, true);
+        timeline.addEventListener("pointermove", (event) => {
+          if (timeline.dataset.scrubbing === "true") seekFromClient(event.clientX);
+        });
+        timeline.addEventListener("pointerup", (event) => {
+          timeline.dataset.scrubbing = "false";
+          if (timeline.hasPointerCapture(event.pointerId)) timeline.releasePointerCapture(event.pointerId);
+        });
+        timeline.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-delete-inline]");
+          if (!button) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const clipNode = button.closest(".editor-layer-clip");
+          deleteClipById(clipNode?.dataset.clipId || "");
+        }, true);
+        video.addEventListener("timeupdate", sync);
+        video.addEventListener("loadedmetadata", sync);
+        video.addEventListener("pause", () => { if (playing && !internalVideoPause) pausePlayback(); });
+        root.querySelectorAll("[data-aspect]").forEach((button) => button.addEventListener("click", () => {
+          state.aspect = button.dataset.aspect.replace("/", " / ");
+          root.querySelectorAll("[data-aspect]").forEach((item) => item.classList.toggle("is-active", item === button));
+          render();
+          scheduleSave();
+        }));
+        root.querySelectorAll("[data-editor-tool]").forEach((button) => button.addEventListener("click", () => {
+          const tool = button.dataset.editorTool;
+          root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item === button));
+          root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
+          root.querySelectorAll("[data-panel-tab]").forEach((item) => item.classList.toggle("is-active", item.dataset.panelTab === tool));
+        }));
+        root.querySelectorAll("[data-panel-tab]").forEach((button) => button.addEventListener("click", () => {
+          const tool = button.dataset.panelTab;
+          root.querySelectorAll("[data-panel-tab]").forEach((item) => item.classList.toggle("is-active", item === button));
+          root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
+          root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item.dataset.editorTool === tool));
+        }));
+        root.querySelectorAll("[data-add-kind]").forEach((button) => button.addEventListener("click", () => {
+          const kind = button.dataset.addKind;
+          if (kind === "text") addTextClip();
+          if (kind === "image") imageInput.click();
+          if (kind === "audio") audioInput.click();
+          if (kind === "voice") root.querySelector("[data-record-audio]").click();
+        }));
+        root.querySelectorAll("[data-add-track]").forEach((button) => button.addEventListener("click", () => addTrack(button.dataset.addTrack)));
+        root.querySelectorAll("[data-undo]").forEach((button) => button.addEventListener("click", undo));
+        root.querySelectorAll("[data-redo]").forEach((button) => button.addEventListener("click", redo));
+        root.querySelectorAll("[data-duplicate-clip]").forEach((button) => button.addEventListener("click", duplicateSelectedClip));
+        root.querySelector("[data-toggle-snap]").addEventListener("click", (event) => {
+          snapEnabled = !snapEnabled;
+          event.currentTarget.classList.toggle("is-active", snapEnabled);
+        });
+        root.querySelector("[data-toggle-density]").addEventListener("click", (event) => {
+          timelineDensity = timelineDensity === "compact" ? "normal" : "compact";
+          localStorage.setItem("videoEditorDensity", timelineDensity);
+          event.currentTarget.classList.toggle("is-active", timelineDensity === "compact");
+          renderTracks();
+        });
+        root.querySelectorAll("[data-split-clip]").forEach((button) => button.addEventListener("click", splitSelectedClip));
+        root.querySelectorAll("[data-zoom-timeline]").forEach((button) => button.addEventListener("click", () => setTimelineScale(timelineScale + Number(button.dataset.zoomTimeline) * 12)));
+        root.querySelector("[data-zoom-fit]").addEventListener("click", () => {
+          const rect = timeline.closest(".editor-timeline-scroll").getBoundingClientRect();
+          setTimelineScale(Math.max(28, (rect.width - 90) / timelineDuration()));
+        });
+        root.querySelector("[data-add-text]").addEventListener("click", addTextClip);
+        root.querySelectorAll("[data-delete-clip]").forEach((button) => button.addEventListener("click", deleteSelectedClip));
+        ["start", "duration", "end", "x", "y", "scale", "rotation"].forEach((name) => {
+          const input = root.querySelector(`[data-clip-${name}]`);
+          input.addEventListener("change", () => {
+            const clip = selectedClip();
+            if (!clip) return;
+            pushHistory();
+            const value = Number(input.value);
+            if (name === "start") clip.start = Math.max(0, value);
+            if (name === "duration") clip.duration = Math.max(0.25, value);
+            if (name === "end") clip.duration = Math.max(0.25, value - clip.start);
+            if (name === "x") clip.x = Math.max(0, Math.min(100, value));
+            if (name === "y") clip.y = Math.max(0, Math.min(100, value));
+            if (name === "scale") clip.scale = Math.max(8, Math.min(160, value));
+            if (name === "rotation") clip.rotation = value;
+            render();
+            scheduleSave();
+          });
+        });
+        root.querySelector("[data-clip-fit]").addEventListener("change", (event) => {
+          const clip = selectedClip();
+          if (!clip) return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.fit = event.target.value;
+          renderPreview();
+          syncMediaForProjectTime(playing);
+          scheduleSave();
+        });
+        root.querySelector("[data-clip-speed]").addEventListener("change", (event) => {
+          const clip = selectedClip();
+          if (!clip) return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.speed = Number(event.target.value);
+          syncMediaForProjectTime(playing);
+          scheduleSave();
+        });
+        root.querySelectorAll(".editor-choice").forEach((choice) => {
+          const input = choice.closest("label")?.querySelector("input[type='hidden']");
+          const current = choice.querySelector("[data-choice-current]");
+          current.addEventListener("click", () => choice.classList.toggle("is-open"));
+          choice.querySelectorAll("[data-choice-value]").forEach((button) => {
+            button.addEventListener("click", () => {
+              if (!input || button.disabled) return;
+              input.value = button.dataset.choiceValue;
+              input.dispatchEvent(new Event("change", {bubbles: true}));
+              choice.classList.remove("is-open");
+            });
+          });
+        });
+        document.addEventListener("click", (event) => {
+          root.querySelectorAll(".editor-choice.is-open").forEach((choice) => {
+            if (!choice.contains(event.target)) choice.classList.remove("is-open");
+          });
+        });
+        root.querySelectorAll("[data-bg]").forEach((button) => button.addEventListener("click", () => {
+          state.background = button.dataset.bg;
+          frame.style.background = state.background;
+          scheduleSave();
+        }));
+        root.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => {
+          const clip = selectedClip();
+          if (!clip || !["video", "image"].includes(clip.type)) return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.filter = button.dataset.filter;
+          applyClipEffects();
+        }));
+        ["brightness", "contrast", "saturate", "opacity"].forEach((name) => {
+          const input = root.querySelector(`[data-filter-${name}]`);
+          input.addEventListener("input", () => {
+            const clip = selectedClip();
+            if (!clip || !["video", "image"].includes(clip.type)) return;
+            pushHistory();
+            clip.style = clip.style || {};
+            clip.style[name] = Number(input.value);
+            applyClipEffects();
+          });
+        });
+        root.querySelector("[data-editor-fit]").addEventListener("click", () => {
+          video.style.objectFit = video.style.objectFit === "cover" ? "contain" : "cover";
+        });
+        root.querySelectorAll("[data-skip]").forEach((button) => button.addEventListener("click", () => seekTo(currentTime() + Number(button.dataset.skip))));
+        root.querySelector("[data-volume]").addEventListener("input", (event) => {
+          const clip = selectedClip();
+          if (!clip || !["video", "audio"].includes(clip.type)) return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.volume = Number(event.target.value);
+          syncMediaForProjectTime(playing);
+          updateEffectControls(clip);
+          scheduleSave();
+        });
+        root.querySelector("[data-mute]").addEventListener("click", () => {
+          video.muted = !video.muted;
+          audioPool.forEach((media) => media.muted = video.muted);
+          root.querySelector("[data-mute]").dataset.icon = video.muted ? "volume-x" : "volume-2";
+        });
+        ["fade-in", "fade-out"].forEach((name) => {
+          const input = root.querySelector(`[data-${name}]`);
+          input.addEventListener("input", () => {
+            const clip = selectedClip();
+            if (!clip) return;
+            if (!input.dataset.historyStarted) {
+              pushHistory();
+              input.dataset.historyStarted = "true";
+            }
+            clip.style = clip.style || {};
+            clip.style[name === "fade-in" ? "fadeIn" : "fadeOut"] = Number(input.value);
+            updateClipControls(clip);
+            renderPreview();
+            syncMediaForProjectTime(playing);
+            scheduleSave();
+          });
+          input.addEventListener("change", () => {
+            delete input.dataset.historyStarted;
+          });
+        });
+        root.querySelector("[data-transition]").addEventListener("change", (event) => {
+          const clip = selectedClip();
+          if (!clip || clip.type !== "video") return;
+          pushHistory();
+          clip.style = clip.style || {};
+          clip.style.transition = event.target.value;
+          renderTracks();
+          scheduleSave();
+        });
+        clipMenu?.addEventListener("click", (event) => {
+          const action = event.target.dataset.menuAction;
+          if (!action) return;
+          if (action === "duplicate") duplicateSelectedClip();
+          if (action === "split") splitSelectedClip();
+          if (action === "front") changeSelectedZ(1);
+          if (action === "back") changeSelectedZ(-1);
+          if (action === "delete") deleteSelectedClip();
+          hideClipMenu();
+        });
+        document.addEventListener("click", (event) => {
+          if (!clipMenu?.contains(event.target)) hideClipMenu();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+          if (event.code === "Space") {
+            event.preventDefault();
+            playing ? pausePlayback() : startPlayback();
+          }
+          if (event.key.toLowerCase() === "s") splitSelectedClip();
+          if (event.key === "Delete" || event.key === "Backspace") deleteSelectedClip();
+          if (event.ctrlKey && event.key.toLowerCase() === "d") {
+            event.preventDefault();
+            duplicateSelectedClip();
+          }
+          if (event.ctrlKey && event.key.toLowerCase() === "c") {
+            const clip = selectedClip();
+            if (clip) copiedClip = JSON.stringify(clip);
+          }
+          if (event.ctrlKey && event.key.toLowerCase() === "v" && copiedClip) {
+            event.preventDefault();
+            pushHistory();
+            const clip = normalizeClip({...JSON.parse(copiedClip), id: uid("paste"), start: projectTime});
+            state.clips.push(clip);
+            selectedClipId = clip.id;
+            render();
+            scheduleSave();
+          }
+          if (event.ctrlKey && event.key.toLowerCase() === "z") {
+            event.preventDefault();
+            undo();
+          }
+          if (event.ctrlKey && event.key.toLowerCase() === "y") {
+            event.preventDefault();
+            redo();
+          }
+        });
+        root.querySelector("[data-record-audio]").addEventListener("click", async (event) => {
+          if (recorder && recorder.state === "recording") {
+            recorder.stop();
+            event.currentTarget.dataset.icon = "mic";
+            return;
+          }
+          const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+          recordChunks = [];
+          recorder = new MediaRecorder(stream);
+          recorder.addEventListener("dataavailable", (item) => item.data.size && recordChunks.push(item.data));
+          recorder.addEventListener("stop", () => {
+            stream.getTracks().forEach((track) => track.stop());
+            const blob = new Blob(recordChunks, {type: recorder.mimeType || "audio/webm"});
+            handleFile(new File([blob], `voice-${Date.now()}.webm`, {type: blob.type}), "audio");
+          }, {once: true});
+          recorder.start();
+          event.currentTarget.dataset.icon = "square";
+        });
+        const textInputs = ["value", "font", "size", "color", "stroke", "stroke-width", "bg", "bg-alpha"].map((name) => root.querySelector(`[data-text-${name}]`)).filter(Boolean);
+        textInputs.forEach((input) => input.addEventListener("input", () => {
+          const clip = selectedClip();
+          if (!clip || clip.type !== "text") return;
+          if (!input.dataset.historyStarted) {
+            pushHistory();
+            input.dataset.historyStarted = "true";
+          }
+          clip.text = root.querySelector("[data-text-value]").value;
+          clip.style = {
+            font: root.querySelector("[data-text-font]").value,
+            size: Number(root.querySelector("[data-text-size]").value),
+            color: root.querySelector("[data-text-color]").value,
+            stroke: root.querySelector("[data-text-stroke]").value,
+            strokeWidth: Number(root.querySelector("[data-text-stroke-width]").value),
+            bg: root.querySelector("[data-text-bg]").value,
+            bgAlpha: Number(root.querySelector("[data-text-bg-alpha]").value),
+          };
+          renderPreview();
+          renderTracks();
+          updateTextControls(clip);
+          scheduleSave();
+        }));
+        textInputs.forEach((input) => input.addEventListener("change", () => {
+          delete input.dataset.historyStarted;
+        }));
+
+        render();
+      })();
+    </script>
+  </body>
+</html>

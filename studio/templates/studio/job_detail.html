@@ -1,0 +1,420 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ job.title }} - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar detail-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
+        <h1>{{ job.title }}</h1>
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <img class="account-avatar" src="{{ avatar_url }}" alt="">
+        {% if is_guest %}
+          <span>{% ui "guest_session" %}</span>
+          <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
+        {% else %}
+          <span>{{ request.user.email }}</span>
+        {% endif %}
+        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
+        {% if has_access %}
+          <span>{% ui "download_active" %}</span>
+        {% else %}
+          <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
+        {% endif %}
+        <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
+        <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
+        <span>{{ job.kind_label }}</span>
+        <span data-job-progress-text>{{ job.progress }}%</span>
+      </div>
+    </header>
+
+    <main class="detail-layout">
+      <section class="detail-main">
+        {% if job.outputs and not has_access %}
+          <section class="paywall-hero">
+            <div>
+              <p class="eyebrow">{% ui "result_ready" %}</p>
+              <h2>{% ui "preview_unlock" %}</h2>
+              <p>{% ui "checkout_transfer" %}</p>
+            </div>
+            <a class="primary-link" href="{{ checkout_url }}">{% ui "pay_download" %}</a>
+          </section>
+        {% endif %}
+
+        <section class="detail-panel" data-detail-job data-job-id="{{ job.id }}">
+          <div class="job-topline">
+            <div>
+              <p class="detail-label">{% ui "status" %}</p>
+              <p class="detail-status" data-job-status>{{ job.status_label }}</p>
+            </div>
+            <div class="detail-actions">
+              {% if job.repeatable %}
+                <form class="inline-repeat-form" method="post" action="{{ job.repeat_url }}">
+                  {% csrf_token %}
+                  <button class="secondary-action" type="submit">{% ui "repeat" %}</button>
+                </form>
+              {% endif %}
+              {% if job.outputs %}
+                <a class="secondary-action" href="{{ job.download_all_url }}">{% if has_access %}{% ui "download_all" %}{% else %}{% ui "open_download" %}{% endif %}</a>
+              {% endif %}
+              {% if job.status != "queued" and job.status != "running" %}
+                <form method="post" action="{{ job.delete_url }}">
+                  {% csrf_token %}
+                  <button class="danger-action" type="submit">{% ui "remove_history" %}</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+          <p class="job-message" data-job-message-wrap>
+            <span data-job-message>{{ job.error|default:job.message }}</span>
+            <small class="job-eta" data-job-eta{% if not job.eta_text or job.status == "completed" or job.status == "failed" %} hidden{% endif %}>{{ job.eta_text }}</small>
+          </p>
+          <div class="progress detail-progress" aria-label="progress">
+            <span data-job-progress style="width: {{ job.progress }}%"></span>
+          </div>
+        </section>
+
+        <section class="detail-panel">
+          <div class="section-title">
+            <h2>{% ui "results" %}</h2>
+            <span><b data-output-count>{{ job.outputs|length }}</b> {% ui "files" %}</span>
+          </div>
+          <div class="empty-jobs" data-empty-outputs{% if job.outputs %} hidden{% endif %}>{% ui "no_outputs" %}</div>
+          {% if job.outputs %}
+            <div class="preview-grid" data-preview-grid>
+              {% for output in job.outputs %}
+                <article class="preview-card" data-output-index="{{ forloop.counter0 }}">
+                  <div class="preview-head">
+                    <div>
+                      <h3>{{ output.label }}</h3>
+                      <p>{{ output.name }} · {{ output.size_text }}</p>
+                    </div>
+                    <a class="output-link compact" href="{{ output.url }}" download>{% if has_access %}{% ui "download" %}{% else %}Checkout{% endif %}</a>
+                  </div>
+
+                  {% if not output.exists %}
+                    <div class="preview-missing">{% ui "file_missing" %}</div>
+                  {% elif output.preview_kind == "image" %}
+                    <a href="{{ output.preview_url }}" target="_blank" rel="noreferrer">
+                      <img class="result-preview" src="{{ output.preview_url }}" alt="{{ output.label }}">
+                    </a>
+                  {% elif output.preview_kind == "video" %}
+                    <div class="cx-player" data-cx-player>
+                      <video class="result-preview cx-player-video" src="{{ output.preview_url }}" preload="metadata" playsinline></video>
+                      <div class="cx-player-controls">
+                        <button type="button" class="cx-player-btn" data-player-play aria-label="Play">▶</button>
+                        <button type="button" class="cx-player-btn" data-player-back aria-label="Back 5 seconds">-5</button>
+                        <span class="cx-player-time" data-player-time>0:00 / 0:00</span>
+                        <input class="cx-player-seek" data-player-seek type="range" min="0" max="1000" value="0" aria-label="Seek">
+                        <button type="button" class="cx-player-btn" data-player-forward aria-label="Forward 5 seconds">+5</button>
+                        <button type="button" class="cx-player-btn" data-player-mute aria-label="Mute">♪</button>
+                        <input class="cx-player-volume" data-player-volume type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+                        <button type="button" class="cx-player-btn" data-player-fullscreen aria-label="Fullscreen">⛶</button>
+                      </div>
+                    </div>
+                  {% elif output.preview_kind == "embed" %}
+                    <iframe class="result-preview embed-preview" src="{{ output.preview_url }}" title="{{ output.label }}"></iframe>
+                  {% else %}
+                    <div class="preview-missing">{% ui "preview_unavailable" %}</div>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="preview-grid" data-preview-grid></div>
+          {% endif %}
+        </section>
+      </section>
+
+      <aside class="detail-side">
+        <section class="detail-panel">
+          <div class="section-title">
+            <h2>{% ui "timeline" %}</h2>
+            <span>{{ events|length }} {% ui "steps" %}</span>
+          </div>
+          {% if events %}
+            <ol class="timeline">
+              {% for event in events %}
+                <li>
+                  <span class="timeline-dot"></span>
+                  <div>
+                    <p class="timeline-meta">{{ event.created_at_text }} · {{ event.progress }}% · {{ event.status_label }}</p>
+                    <p>{{ event.message }}</p>
+                  </div>
+                </li>
+              {% endfor %}
+            </ol>
+          {% else %}
+            <div class="empty-jobs">{% ui "timeline_empty" %}</div>
+          {% endif %}
+        </section>
+      </aside>
+    </main>
+    <script>
+      (() => {
+        const root = document.querySelector("[data-detail-job]");
+        if (!root) return;
+        const jobId = root.dataset.jobId;
+        const hasAccess = {{ has_access|yesno:"true,false" }};
+        const labels = {
+          queued: "{% ui "queued" %}",
+          running: "{% ui "active_jobs" %}",
+          completed: "{% ui "completed" %}",
+          failed: "{% ui "failed" %}",
+          download: "{% ui "download" %}",
+          checkout: "Checkout",
+        };
+        const statusNode = document.querySelector("[data-job-status]");
+        const messageNode = document.querySelector("[data-job-message]");
+        const etaNode = document.querySelector("[data-job-eta]");
+        const progressNode = document.querySelector("[data-job-progress]");
+        const progressTextNode = document.querySelector("[data-job-progress-text]");
+        const outputCountNode = document.querySelector("[data-output-count]");
+        const grid = document.querySelector("[data-preview-grid]");
+        const empty = document.querySelector("[data-empty-outputs]");
+
+        const html = (value) => String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
+        const renderOutput = (output) => {
+          const label = html(output.label || output.name || "");
+          const name = html(output.name || "");
+          const size = html(output.size_text || "");
+          const action = hasAccess ? labels.download : labels.checkout;
+            let body = `<div class="preview-missing">{% ui "preview_unavailable" %}</div>`;
+          if (!output.exists) {
+            body = `<div class="preview-missing">{% ui "file_missing" %}</div>`;
+          } else if (output.preview_kind === "image") {
+            body = `<a href="${html(output.preview_url)}" target="_blank" rel="noreferrer"><img class="result-preview" src="${html(output.preview_url)}" alt="${label}"></a>`;
+          } else if (output.preview_kind === "video") {
+            body = `
+              <div class="cx-player" data-cx-player>
+                <video class="result-preview cx-player-video" src="${html(output.preview_url)}" preload="metadata" playsinline></video>
+                <div class="cx-player-controls">
+                  <button type="button" class="cx-player-btn" data-player-play aria-label="Play">▶</button>
+                  <button type="button" class="cx-player-btn" data-player-back aria-label="Back 5 seconds">-5</button>
+                  <span class="cx-player-time" data-player-time>0:00 / 0:00</span>
+                  <input class="cx-player-seek" data-player-seek type="range" min="0" max="1000" value="0" aria-label="Seek">
+                  <button type="button" class="cx-player-btn" data-player-forward aria-label="Forward 5 seconds">+5</button>
+                  <button type="button" class="cx-player-btn" data-player-mute aria-label="Mute">♪</button>
+                  <input class="cx-player-volume" data-player-volume type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+                  <button type="button" class="cx-player-btn" data-player-fullscreen aria-label="Fullscreen">⛶</button>
+                </div>
+              </div>
+            `;
+          } else if (output.preview_kind === "embed") {
+            body = `<iframe class="result-preview embed-preview" src="${html(output.preview_url)}" title="${label}"></iframe>`;
+          }
+          return `
+            <article class="preview-card" data-output-index="${Number(output.index || 0)}">
+              <div class="preview-head">
+                <div>
+                  <h3>${label}</h3>
+                  <p>${name} · ${size}</p>
+                </div>
+                <a class="output-link compact" href="${html(output.url)}" download>${html(action)}</a>
+              </div>
+              ${body}
+            </article>
+          `;
+        };
+
+        const updateJob = (job) => {
+          const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+          statusNode.textContent = labels[job.status] || job.status || "";
+          messageNode.textContent = job.error || job.message || "";
+          progressNode.style.width = `${progress}%`;
+          progressTextNode.textContent = `${progress}%`;
+          if (job.eta_text && job.status !== "completed" && job.status !== "failed") {
+            etaNode.hidden = false;
+            etaNode.textContent = job.eta_text;
+          } else {
+            etaNode.hidden = true;
+            etaNode.textContent = "";
+          }
+          const outputs = Array.isArray(job.outputs) ? job.outputs : [];
+          outputCountNode.textContent = String(outputs.length);
+          empty.hidden = outputs.length > 0;
+          const liveIndexes = new Set();
+          outputs.forEach((output) => {
+            const index = String(Number(output.index || 0));
+            liveIndexes.add(index);
+            if (!grid.querySelector(`[data-output-index="${index}"]`)) {
+              grid.insertAdjacentHTML("beforeend", renderOutput(output));
+            }
+          });
+          grid.querySelectorAll("[data-output-index]").forEach((card) => {
+            if (!liveIndexes.has(card.dataset.outputIndex || "")) card.remove();
+          });
+          initPlayers();
+          return job.status === "queued" || job.status === "running";
+        };
+
+        const formatTime = (value) => {
+          const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+          const hours = Math.floor(safe / 3600);
+          const minutes = Math.floor((safe % 3600) / 60);
+          const seconds = Math.floor(safe % 60);
+          if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+          return `${minutes}:${String(seconds).padStart(2, "0")}`;
+        };
+
+        const initPlayers = () => {
+          document.querySelectorAll("[data-cx-player]").forEach((player) => {
+            if (player.dataset.ready === "1") return;
+            player.dataset.ready = "1";
+            const video = player.querySelector("video");
+            const play = player.querySelector("[data-player-play]");
+            const time = player.querySelector("[data-player-time]");
+            const seek = player.querySelector("[data-player-seek]");
+            const back = player.querySelector("[data-player-back]");
+            const forward = player.querySelector("[data-player-forward]");
+            const mute = player.querySelector("[data-player-mute]");
+            const volume = player.querySelector("[data-player-volume]");
+            const fullscreen = player.querySelector("[data-player-fullscreen]");
+            if (!video || !play || !time || !seek) return;
+            video.controls = false;
+
+            const sync = () => {
+              const duration = Number.isFinite(video.duration) ? video.duration : 0;
+              const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+              seek.value = duration ? String(Math.round((current / duration) * 1000)) : "0";
+              seek.style.setProperty("--seek", `${Number(seek.value) / 10}%`);
+              time.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+              play.textContent = video.paused ? "▶" : "❚❚";
+              if (mute) mute.textContent = video.muted || video.volume === 0 ? "×" : "♪";
+              if (volume) volume.style.setProperty("--value", String(video.muted ? 0 : video.volume));
+            };
+
+            const seekToPointer = (event) => {
+              const duration = Number.isFinite(video.duration) ? video.duration : 0;
+              if (!duration) return;
+              const rect = seek.getBoundingClientRect();
+              const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+              const ratio = rect.width ? x / rect.width : 0;
+              video.currentTime = ratio * duration;
+              seek.value = String(Math.round(ratio * 1000));
+              sync();
+            };
+
+            const jumpBy = (seconds) => {
+              const duration = Number.isFinite(video.duration) ? video.duration : 0;
+              if (!duration) return;
+              video.currentTime = Math.max(0, Math.min(duration, video.currentTime + seconds));
+              sync();
+            };
+
+            play.addEventListener("click", () => {
+              if (video.paused) {
+                document.querySelectorAll("[data-cx-player] video").forEach((item) => {
+                  if (item !== video) item.pause();
+                });
+                video.play().catch(() => {});
+              } else {
+                video.pause();
+              }
+            });
+            video.addEventListener("click", () => play.click());
+            video.addEventListener("loadedmetadata", sync);
+            video.addEventListener("durationchange", sync);
+            video.addEventListener("timeupdate", sync);
+            video.addEventListener("play", sync);
+            video.addEventListener("pause", sync);
+            video.addEventListener("seeking", sync);
+            video.addEventListener("seeked", sync);
+            if (back) back.addEventListener("click", () => jumpBy(-5));
+            if (forward) forward.addEventListener("click", () => jumpBy(5));
+            seek.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              seek.setPointerCapture?.(event.pointerId);
+              seek.dataset.dragging = "1";
+              seekToPointer(event);
+            });
+            seek.addEventListener("pointermove", (event) => {
+              if (seek.dataset.dragging === "1") seekToPointer(event);
+            });
+            seek.addEventListener("pointerup", (event) => {
+              seek.dataset.dragging = "";
+              seekToPointer(event);
+            });
+            seek.addEventListener("click", seekToPointer);
+            seek.addEventListener("input", () => {
+              const duration = Number.isFinite(video.duration) ? video.duration : 0;
+              if (duration) video.currentTime = (Number(seek.value) / 1000) * duration;
+              sync();
+            });
+            seek.addEventListener("change", () => {
+              const duration = Number.isFinite(video.duration) ? video.duration : 0;
+              if (duration) video.currentTime = (Number(seek.value) / 1000) * duration;
+              sync();
+            });
+            player.addEventListener("keydown", (event) => {
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                jumpBy(-5);
+              }
+              if (event.key === "ArrowRight") {
+                event.preventDefault();
+                jumpBy(5);
+              }
+            });
+            if (mute) {
+              mute.addEventListener("click", () => {
+                video.muted = !video.muted;
+                sync();
+              });
+            }
+            if (volume) {
+              volume.addEventListener("input", () => {
+                video.volume = Number(volume.value);
+                video.muted = video.volume === 0;
+                sync();
+              });
+            }
+            if (fullscreen) {
+              fullscreen.addEventListener("click", () => {
+                if (document.fullscreenElement) {
+                  document.exitFullscreen().catch(() => {});
+                } else {
+                  player.requestFullscreen?.();
+                }
+              });
+            }
+            sync();
+          });
+        };
+
+        const tick = async () => {
+          if (document.hidden) {
+            window.setTimeout(tick, 12000);
+            return;
+          }
+          try {
+            const response = await fetch(`/api/jobs/${jobId}/`, { headers: { Accept: "application/json" } });
+            if (!response.ok) throw new Error("status");
+            const payload = await response.json();
+            if (updateJob(payload.job)) {
+              window.setTimeout(tick, payload.job.status === "queued" ? 8000 : 5000);
+            }
+          } catch {
+            window.setTimeout(tick, 10000);
+          }
+        };
+
+        initPlayers();
+        window.setTimeout(tick, 1200);
+      })();
+    </script>
+  </body>
+</html>

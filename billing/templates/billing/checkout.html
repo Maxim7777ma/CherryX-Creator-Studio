@@ -1,0 +1,119 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Checkout - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="auth-page">
+    <main class="checkout-shell">
+      <section class="checkout-copy">
+        <a class="back-link eyebrow" href="{% url 'studio:index' %}">Back to Studio</a>
+        <h1>Choose a plan and pick up your ready files.</h1>
+        <p>{% ui "pay_to_deliver_copy" %}</p>
+        {% include "studio/_language_switcher.html" %}
+
+        <div class="checkout-summary" id="checkout-summary">
+          <span id="summary-badge">{{ selected_plan.badge }}</span>
+          <strong id="summary-title">{{ selected_plan.name }} - {{ selected_plan.price_label }}</strong>
+          <p id="summary-copy">{{ selected_plan.headline }}</p>
+        </div>
+
+        <div class="checkout-help">
+          <span>Not sure which plan fits?</span>
+          <a href="{% url 'billing:pricing' %}">Open plan details</a>
+        </div>
+      </section>
+
+      <section class="auth-card checkout-card">
+        <div class="section-title">
+          <h2>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}Payment and account{% endif %}</h2>
+          <span>Demo checkout</span>
+        </div>
+
+        <form method="post" class="auth-form" id="checkout-form">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+            <div class="form-errors">{{ form.non_field_errors }}</div>
+          {% endif %}
+
+          <input type="hidden" name="{{ form.plan.name }}" id="id_plan" value="{{ selected_plan.code }}">
+          {{ form.next }}
+
+          <fieldset class="plan-picker" aria-label="Plan selection">
+            {% for plan in plans %}
+              <button
+                class="plan-button {% if plan.code == selected_plan.code %}is-selected{% endif %}"
+                type="button"
+                data-plan="{{ plan.code }}"
+                data-name="{{ plan.name }}"
+                data-badge="{{ plan.badge }}"
+                data-price="{{ plan.price_display }}"
+                data-price-label="{{ plan.price_label }}"
+                data-headline="{{ plan.headline }}"
+                aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
+              >
+                <span>{{ plan.badge }}</span>
+                <strong>{{ plan.name }}</strong>
+                <em>{{ plan.price_label }}</em>
+              </button>
+            {% endfor %}
+          </fieldset>
+
+          {% for field in form %}
+            {% if field.name != "plan" and field.name != "next" %}
+              <label class="field">
+                <span>{{ field.label }}</span>
+                {{ field }}
+                {% if field.errors %}
+                  <small class="field-error">{{ field.errors|striptags }}</small>
+                {% endif %}
+              </label>
+            {% endif %}
+          {% endfor %}
+
+          <div class="payment-box">
+            <span>Total</span>
+            <strong id="payment-total">{{ selected_plan.price_display }}</strong>
+            <small>The amount updates instantly when you choose a plan. Demo payment confirmation is enabled.</small>
+          </div>
+
+          <button class="primary-action" type="submit">Pay and unlock downloads</button>
+        </form>
+
+        <p class="auth-switch">
+          Already have an account? <a href="{% url 'studio:login' %}">{% ui "login" %}</a>
+        </p>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const buttons = document.querySelectorAll(".plan-button");
+        const planInput = document.getElementById("id_plan");
+        const total = document.getElementById("payment-total");
+        const badge = document.getElementById("summary-badge");
+        const title = document.getElementById("summary-title");
+        const copy = document.getElementById("summary-copy");
+
+        buttons.forEach((button) => {
+          button.addEventListener("click", () => {
+            buttons.forEach((item) => {
+              item.classList.remove("is-selected");
+              item.setAttribute("aria-pressed", "false");
+            });
+            button.classList.add("is-selected");
+            button.setAttribute("aria-pressed", "true");
+            planInput.value = button.dataset.plan;
+            total.textContent = button.dataset.price;
+            badge.textContent = button.dataset.badge;
+            title.textContent = `${button.dataset.name} - ${button.dataset.priceLabel}`;
+            copy.textContent = button.dataset.headline;
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

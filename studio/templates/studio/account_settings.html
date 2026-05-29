@@ -1,0 +1,270 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% ui "settings" %} - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="auth-page theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <main class="auth-shell settings-shell">
+      <section class="auth-brand">
+        <a class="back-link eyebrow" href="{% url 'studio:index' %}">CherryX Studio</a>
+        <h1>{% ui "settings" %}</h1>
+        <p>{% ui "settings_intro" %}</p>
+        <div class="profile-preview">
+          <img class="profile-preview-avatar" src="{{ avatar_url }}" alt="">
+          <div>
+            <strong>{{ display_name }}</strong>
+            <span>{{ request.user.email }}</span>
+          </div>
+        </div>
+        <a class="workspace-return" href="{% url 'studio:index' %}">
+          <span>{% ui "workspace" %}</span>
+          <strong>Studio</strong>
+        </a>
+      </section>
+
+      <section class="auth-card account-settings-card">
+        <div class="section-title">
+          <h2>{% ui "settings" %}</h2>
+          <span>{% include "studio/_language_switcher.html" %}</span>
+        </div>
+
+        <form method="post" enctype="multipart/form-data" class="auth-form account-settings-form">
+          {% csrf_token %}
+          {{ form.avatar_crop_data }}
+          {% if form.non_field_errors %}
+            <div class="form-errors">{{ form.non_field_errors }}</div>
+          {% endif %}
+
+          <details class="settings-section">
+            <summary>
+              <span>
+                <strong>{% ui "profile" %}</strong>
+                <small>{% ui "profile_hint" %}</small>
+              </span>
+            </summary>
+            <div class="settings-section-body">
+              <label class="field">
+                <span>{{ form.name.label }}</span>
+                {{ form.name }}
+                {% if form.name.errors %}<small class="field-error">{{ form.name.errors|striptags }}</small>{% endif %}
+              </label>
+
+              <label class="field account-photo-upload">
+                <span>{{ form.avatar_file.label }}</span>
+                {{ form.avatar_file }}
+                <span class="photo-upload-surface">
+                  <img src="{{ avatar_url }}" alt="">
+                  <span>
+                    <strong>{% ui "upload_new_photo" %}</strong>
+                    <small>{% ui "photo_hint" %}</small>
+                  </span>
+                  <em>{% ui "choose_file" %}</em>
+                </span>
+                {% if form.avatar_file.errors %}<small class="field-error">{{ form.avatar_file.errors|striptags }}</small>{% endif %}
+              </label>
+
+              <label class="field">
+                <span>{{ form.avatar_url.label }}</span>
+                {{ form.avatar_url }}
+                {% if form.avatar_url.errors %}<small class="field-error">{{ form.avatar_url.errors|striptags }}</small>{% endif %}
+              </label>
+            </div>
+          </details>
+
+          <details class="settings-section">
+            <summary>
+              <span>
+                <strong>{% ui "interface" %}</strong>
+                <small>{% ui "interface_hint" %}</small>
+              </span>
+            </summary>
+            <div class="settings-section-body">
+              <fieldset class="theme-picker">
+                <legend>{{ form.theme_mode.label }}</legend>
+                {% for radio in form.theme_mode %}
+                  <label class="theme-option">
+                    {{ radio.tag }}
+                    <span>
+                      <b>{{ radio.choice_label }}</b>
+                      <small></small>
+                    </span>
+                  </label>
+                {% endfor %}
+              </fieldset>
+
+              <fieldset class="accent-picker">
+                <legend>{{ form.accent_color.label }}</legend>
+                {% for radio in form.accent_color %}
+                  <label style="--swatch: {{ radio.data.value }};" title="{{ radio.choice_label }}">
+                    {{ radio.tag }}
+                    <span></span>
+                  </label>
+                {% endfor %}
+              </fieldset>
+
+              <fieldset class="language-settings">
+                <legend>{% ui "language" %}</legend>
+                <div class="language-grid">
+                  {% for language in language_options %}
+                    <label class="language-button">
+                      <input type="radio" name="interface_language" value="{{ language.code }}" {% if language.active %}checked{% endif %}>
+                      <img src="{{ language.flag }}" alt="">
+                      <span>{{ language.native }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            </div>
+          </details>
+
+          <details class="settings-section">
+            <summary>
+              <span>
+                <strong>{% ui "password" %}</strong>
+                <small>{% ui "password_hint" %}</small>
+              </span>
+            </summary>
+            <div class="settings-section-body">
+              <label class="field">
+                <span>{{ form.current_password.label }}</span>
+                {{ form.current_password }}
+                {% if form.current_password.errors %}<small class="field-error">{{ form.current_password.errors|striptags }}</small>{% endif %}
+              </label>
+              <label class="field">
+                <span>{{ form.new_password.label }}</span>
+                {{ form.new_password }}
+                {% if form.new_password.errors %}<small class="field-error">{{ form.new_password.errors|striptags }}</small>{% endif %}
+              </label>
+              <label class="field">
+                <span>{{ form.new_password_confirm.label }}</span>
+                {{ form.new_password_confirm }}
+                {% if form.new_password_confirm.errors %}<small class="field-error">{{ form.new_password_confirm.errors|striptags }}</small>{% endif %}
+              </label>
+            </div>
+          </details>
+
+          <button class="primary-action" type="submit">{% ui "save_settings" %}</button>
+        </form>
+      </section>
+    </main>
+    <div class="avatar-crop-modal" id="avatar-crop-modal" hidden>
+      <div class="avatar-crop-dialog">
+        <div class="section-title">
+          <h2>{% ui "photo_frame" %}</h2>
+          <span>Avatar</span>
+        </div>
+        <canvas id="avatar-crop-canvas" width="360" height="360"></canvas>
+        <div class="avatar-crop-grid" aria-hidden="true"></div>
+        <label class="field">
+          <span>{% ui "zoom" %}</span>
+          <input type="range" id="avatar-crop-zoom" min="1" max="3" step="0.01" value="1">
+        </label>
+        <div class="avatar-crop-controls">
+          <button class="secondary-action" type="button" id="avatar-crop-cancel">{% ui "cancel" %}</button>
+          <button class="primary-action" type="button" id="avatar-crop-apply">{% ui "apply_frame" %}</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+
+        const input = document.querySelector("input[name='avatar_file']");
+        const hidden = document.querySelector("input[name='avatar_crop_data']");
+        const modal = document.getElementById("avatar-crop-modal");
+        const canvas = document.getElementById("avatar-crop-canvas");
+        const zoom = document.getElementById("avatar-crop-zoom");
+        const apply = document.getElementById("avatar-crop-apply");
+        const cancel = document.getElementById("avatar-crop-cancel");
+        const previews = document.querySelectorAll(".profile-preview-avatar, .photo-upload-surface img");
+        if (!input || !hidden || !modal || !canvas || !zoom || !apply || !cancel) return;
+
+        const ctx = canvas.getContext("2d");
+        const image = new Image();
+        let offsetX = 0;
+        let offsetY = 0;
+        let dragging = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        const draw = () => {
+          const scale = Number(zoom.value || 1);
+          const base = Math.max(canvas.width / image.width, canvas.height / image.height);
+          const width = image.width * base * scale;
+          const height = image.height * base * scale;
+          const x = (canvas.width - width) / 2 + offsetX;
+          const y = (canvas.height - height) / 2 + offsetY;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#0b1220";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(image, x, y, width, height);
+        };
+
+        input.addEventListener("change", () => {
+          const file = input.files && input.files[0];
+          if (!file || !file.type.startsWith("image/")) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            image.onload = () => {
+              offsetX = 0;
+              offsetY = 0;
+              zoom.value = "1";
+              modal.hidden = false;
+              draw();
+            };
+            image.src = reader.result;
+          };
+          reader.readAsDataURL(file);
+        });
+
+        zoom.addEventListener("input", draw);
+        canvas.addEventListener("pointerdown", (event) => {
+          dragging = true;
+          lastX = event.clientX;
+          lastY = event.clientY;
+          canvas.setPointerCapture(event.pointerId);
+        });
+        canvas.addEventListener("pointermove", (event) => {
+          if (!dragging) return;
+          offsetX += event.clientX - lastX;
+          offsetY += event.clientY - lastY;
+          lastX = event.clientX;
+          lastY = event.clientY;
+          draw();
+        });
+        canvas.addEventListener("pointerup", () => {
+          dragging = false;
+        });
+        cancel.addEventListener("click", () => {
+          modal.hidden = true;
+          input.value = "";
+        });
+        apply.addEventListener("click", () => {
+          const data = canvas.toDataURL("image/jpeg", 0.92);
+          hidden.value = data;
+          previews.forEach((preview) => {
+            preview.src = data;
+          });
+          modal.hidden = true;
+        });
+      })();
+    </script>
+  </body>
+</html>
