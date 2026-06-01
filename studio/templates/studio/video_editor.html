@@ -4,17 +4,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Видео редактор - CherryX Creator Studio</title>
+    <title>Video editor - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar video-editor-topbar">
       <div class="topbar-copy">
-        <p class="eyebrow"><a class="back-link" href="{% url 'studio:video_project_list' %}">CherryX Creator Studio</a></p>
-        <h1>Видео редактор</h1>
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:video_project_list' %}">Back to projects</a></p>
+        <h1>Video editor</h1>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
+        {% if current_video_project.can_share %}
+          <button class="topbar-link detail-workspace-link" type="button" data-share-open>Share</button>
+        {% elif current_video_project and not current_video_project.is_owner %}
+          <span class="topbar-link detail-workspace-link shared-project-badge">Shared &middot; {{ current_video_project.access_role }}</span>
+        {% endif %}
+        <button class="topbar-link detail-workspace-link" type="button" data-editor-export-shortcut>Export</button>
         <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
       </div>
     </header>
@@ -33,20 +40,29 @@
         <section class="editor-preview-panel">
           <div class="editor-preview-head">
             <div>
-              <span>Проект</span>
-              <strong data-editor-title>Новый проект</strong>
+              <span>Project</span>
+              <strong class="editor-title-inline" data-editor-title title="Double-click to rename">New project</strong>
             </div>
-            <small class="editor-save-status" data-save-status>Новый</small>
-            <div class="editor-aspect">
-              <button class="is-active" type="button" data-aspect="9/16">9:16</button>
-              <button type="button" data-aspect="1/1">1:1</button>
-              <button type="button" data-aspect="16/9">16:9</button>
+            <div class="editor-save-wrap">
+              <small class="editor-save-status" data-save-status>Unsaved</small>
+              <button type="button" data-save-retry hidden>Retry</button>
+            </div>
+            <div class="editor-aspect" data-aspect-menu>
+              <button class="editor-aspect-toggle" type="button" data-aspect-toggle data-icon="smartphone" aria-label="Canvas size" aria-expanded="false"><b data-aspect-current>9:16</b><small data-aspect-size>Shorts 1080x1920</small></button>
+              <div class="editor-aspect-menu" data-aspect-options hidden>
+                <button class="is-active" type="button" data-aspect="9/16" data-size="1080x1920" data-label="Shorts" title="TikTok, Reels, Shorts - 1080x1920"><b>9:16</b><small>TikTok / Reels / Shorts - 1080x1920</small></button>
+                <button type="button" data-aspect="1/1" data-size="1080x1080" data-label="IG square" title="Instagram square feed - 1080x1080"><b>1:1</b><small>Instagram square - 1080x1080</small></button>
+                <button type="button" data-aspect="4/5" data-size="1080x1350" data-label="IG portrait" title="Instagram portrait feed - 1080x1350"><b>4:5</b><small>Instagram portrait - 1080x1350</small></button>
+                <button type="button" data-aspect="16/9" data-size="1920x1080" data-label="YouTube" title="YouTube, X, Facebook landscape - 1920x1080"><b>16:9</b><small>YouTube / X / Facebook - 1920x1080</small></button>
+                <button type="button" data-aspect="21/9" data-size="2560x1080" data-label="Wide" title="Wide cinematic cover - 2560x1080"><b>21:9</b><small>Wide cinematic - 2560x1080</small></button>
+                <button type="button" data-aspect="3/4" data-size="1080x1440" data-label="Pinterest" title="Pinterest/portrait posts - 1080x1440"><b>3:4</b><small>Pinterest portrait - 1080x1440</small></button>
+              </div>
             </div>
           </div>
 
           <div class="editor-preview-frame" data-preview-frame style="--editor-aspect: 9 / 16;">
             <label class="editor-import" data-editor-dropzone>
-              <input type="file" accept="video/*" data-editor-file multiple>
+              <input type="file" accept="video/*,image/*,application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.txt" data-editor-file multiple>
               <i data-icon="video"></i>
               <b>Импорт видео</b>
               <span>Перетащи MP4/MOV/WebM сюда или выбери файл</span>
@@ -68,6 +84,7 @@
             <strong>Таймлайн</strong>
             <div class="editor-layer-actions">
               <button class="editor-icon-button" type="button" data-add-kind="text" data-icon="type" title="Добавить текст" aria-label="Добавить текст"></button>
+              <button class="editor-icon-button" type="button" data-add-kind="video" data-icon="video" title="Добавить видео" aria-label="Добавить видео"></button>
               <button class="editor-icon-button" type="button" data-add-kind="image" data-icon="image-plus" title="Добавить фото" aria-label="Добавить фото"></button>
               <button class="editor-icon-button" type="button" data-add-kind="audio" data-icon="music" title="Добавить аудио" aria-label="Добавить аудио"></button>
               <button class="editor-icon-button" type="button" data-add-kind="voice" data-icon="mic" title="Записать голос" aria-label="Записать голос"></button>
@@ -88,7 +105,7 @@
           </div>
           <div class="editor-timeline-scroll">
             <div class="editor-timeline" data-editor-timeline>
-              <div class="editor-playhead" data-editor-playhead></div>
+              <div class="editor-playhead" data-editor-playhead><span data-playhead-label>0:00</span></div>
               <div class="editor-snap-line" data-snap-line hidden></div>
               <div class="editor-time-ruler" data-time-ruler></div>
               <div data-track-list></div>
@@ -113,7 +130,7 @@
         <section class="editor-tool-panel is-active" data-tool-panel="trim">
           <label class="editor-audio-picker editor-file-picker">
             <span>Видео</span>
-            <input type="file" accept="video/*" data-video-file-panel multiple>
+            <input type="file" accept="video/*,image/*,application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.txt" data-video-file-panel multiple>
             <strong><i data-icon="video"></i><em data-video-panel-name>Файл не выбран</em></strong>
           </label>
           <div class="editor-duo">
@@ -143,6 +160,10 @@
           </label>
           <label>
             <span>Скорость</span>
+            <div class="editor-duo">
+              <button type="button" data-crop-mode>Crop box</button>
+              <button type="button" data-fit-auto>Auto fit</button>
+            </div>
             <input type="hidden" value="1" data-clip-speed>
             <div class="editor-choice" data-choice="clip-speed">
               <button type="button" data-choice-current>1x</button>
@@ -161,12 +182,23 @@
         </section>
 
         <section class="editor-tool-panel" data-tool-panel="canvas">
+          <div class="editor-export-quality">
+            <button class="is-active" type="button" data-bg-mode="solid">Solid</button>
+            <button type="button" data-bg-mode="blur">Blur</button>
+            <button type="button" data-bg-mode="gradient">Gradient</button>
+          </div>
           <button class="is-selected" type="button" data-bg="#020617">Темный</button>
           <button type="button" data-bg="#f8fafc">Светлый</button>
           <button type="button" data-bg="linear-gradient(135deg,#2563eb,#ec4899)">Градиент</button>
         </section>
 
         <section class="editor-tool-panel" data-tool-panel="text">
+          <button class="editor-export-button" type="button" data-add-caption>CC Caption</button>
+          <label class="editor-audio-picker editor-file-picker">
+            <span>Subtitles SRT/VTT</span>
+            <input type="file" accept=".srt,.vtt,text/vtt,text/plain" data-subtitle-file>
+            <strong><i data-icon="file-text"></i><em>Import captions</em></strong>
+          </label>
           <button class="editor-export-button" type="button" data-add-text>T+ Текст</button>
           <button type="button" data-delete-clip>Удалить</button>
           <label>
@@ -193,9 +225,10 @@
         </section>
 
         <section class="editor-tool-panel" data-tool-panel="audio">
-          <label class="editor-audio-picker">
-            <span>Аудио</span>
+          <label class="editor-audio-picker editor-file-picker">
+            <span>Audio</span>
             <input type="file" accept="audio/*" data-audio-file-panel>
+            <strong><i data-icon="music"></i><em data-audio-panel-name>No audio selected</em></strong>
           </label>
           <div class="editor-duo">
             <button class="editor-icon-button" type="button" data-record-audio data-icon="mic" title="Записать" aria-label="Записать"></button>
@@ -240,16 +273,42 @@
         </section>
 
         <section class="editor-tool-panel" data-tool-panel="export">
-          <div class="editor-export-card">
-            <strong>MP4 1080p</strong>
-            <span>Экспорт будет следующим этапом</span>
+          <div class="editor-export-card editor-render-card">
+            <strong>Export MP4</strong>
+            <span>Render the current timeline as an MP4 file.</span>
+            <div class="editor-export-presets">
+              <button type="button" data-export-preset="shorts">Shorts</button>
+              <button type="button" data-export-preset="youtube">YouTube</button>
+              <button type="button" data-export-preset="square">Square</button>
+            </div>
+            <div class="editor-export-quality">
+              <button class="is-active" type="button" data-export-quality="720p">720p</button>
+              <button type="button" data-export-quality="1080p">1080p</button>
+            </div>
+            <button class="editor-export-button" type="button" data-render-export>Render MP4</button>
+            <button type="button" data-export-cover>Export cover</button>
+            <div class="editor-export-progress" data-export-progress hidden>
+              <i><b style="width: 0%" data-export-progress-bar></b></i>
+              <small data-export-status>Queued</small>
+            </div>
+            <a class="editor-export-download" data-export-download href="#" download hidden>Download MP4</a>
+            <div class="editor-export-queue" data-export-queue></div>
           </div>
         </section>
 
         <section class="editor-tool-panel" data-tool-panel="media">
+          <div class="editor-media-filters" data-media-filters>
+            <button class="is-active" type="button" data-media-filter="all">All</button>
+            <button type="button" data-media-filter="video">Video</button>
+            <button type="button" data-media-filter="image">Image</button>
+            <button type="button" data-media-filter="audio">Audio</button>
+            <button type="button" data-media-filter="docs">Docs</button>
+            <button type="button" data-media-filter="text">Text</button>
+          </div>
           <div class="editor-media-bin" data-media-bin></div>
         </section>
       </aside>
+      <div class="editor-asset-preview" data-asset-preview hidden></div>
       <div class="editor-context-menu" data-clip-menu hidden>
         <button type="button" data-menu-action="duplicate">Дублировать</button>
         <button type="button" data-menu-action="split">Разрезать</button>
@@ -259,8 +318,22 @@
       </div>
     </main>
 
+    <div class="editor-confirm-modal" data-editor-confirm hidden>
+      <div class="editor-confirm-backdrop" data-confirm-cancel></div>
+      <section class="editor-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-confirm-title">
+        <span>Confirm</span>
+        <h2 id="editor-confirm-title" data-confirm-title>Delete item?</h2>
+        <p data-confirm-copy>This action cannot be undone.</p>
+        <footer>
+          <button type="button" data-confirm-cancel>Cancel</button>
+          <button class="is-danger" type="button" data-confirm-action>Delete</button>
+        </footer>
+      </section>
+    </div>
+
     {{ current_video_project|json_script:"video-project-data" }}
-    <input type="file" accept="image/*" data-image-file hidden>
+    {% include "studio/_share_modal.html" with share_resource_type="video_project" share_resource_id=current_video_project.id %}
+    <input type="file" accept="image/*,application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.txt" data-image-file hidden>
     <script>
       (() => {
         document.querySelectorAll(".language-switcher").forEach((switcher) => {
@@ -283,21 +356,27 @@
         const api = "{{ video_projects_api_url }}";
         const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
         const currentProject = JSON.parse(document.getElementById("video-project-data").textContent || "null");
+        const readOnly = Boolean(currentProject && currentProject.can_edit === false);
         const video = root.querySelector("[data-editor-video]");
         const fileInput = root.querySelector("[data-editor-file]");
         const videoPanelInput = root.querySelector("[data-video-file-panel]");
         const videoPanelName = root.querySelector("[data-video-panel-name]");
         const audioInput = root.querySelector("[data-audio-file-panel]");
+        const audioPanelName = root.querySelector("[data-audio-panel-name]");
         const imageInput = document.querySelector("[data-image-file]");
         const dropzone = root.querySelector("[data-editor-dropzone]");
         const frame = root.querySelector("[data-preview-frame]");
         const overlayRoot = root.querySelector("[data-preview-overlays]");
         const trackList = root.querySelector("[data-track-list]");
         const timeline = root.querySelector("[data-editor-timeline]");
+        const timelineScroll = timeline.closest(".editor-timeline-scroll");
         const timeRuler = root.querySelector("[data-time-ruler]");
         const playhead = root.querySelector("[data-editor-playhead]");
+        const playheadLabel = root.querySelector("[data-playhead-label]");
         const snapLine = root.querySelector("[data-snap-line]");
         const mediaBin = root.querySelector("[data-media-bin]");
+        const mediaFilters = root.querySelector("[data-media-filters]");
+        const assetPreview = document.querySelector("[data-asset-preview]");
         const clipMenu = document.querySelector("[data-clip-menu]");
         const play = root.querySelector("[data-editor-play]");
         const seek = root.querySelector("[data-editor-seek]");
@@ -305,7 +384,27 @@
         const durationNode = root.querySelector("[data-editor-duration]");
         const title = root.querySelector("[data-editor-title]");
         const saveStatus = root.querySelector("[data-save-status]");
+        const saveRetry = root.querySelector("[data-save-retry]");
+        const aspectMenu = root.querySelector("[data-aspect-menu]");
+        const aspectToggle = root.querySelector("[data-aspect-toggle]");
+        const aspectOptions = root.querySelector("[data-aspect-options]");
+        const aspectCurrent = root.querySelector("[data-aspect-current]");
+        const aspectSize = root.querySelector("[data-aspect-size]");
         const toolTitle = root.querySelector("[data-tool-title]");
+        const exportShortcut = document.querySelector("[data-editor-export-shortcut]");
+        const renderExport = root.querySelector("[data-render-export]");
+        const exportProgress = root.querySelector("[data-export-progress]");
+        const exportProgressBar = root.querySelector("[data-export-progress-bar]");
+        const exportStatus = root.querySelector("[data-export-status]");
+        const exportDownload = root.querySelector("[data-export-download]");
+        const exportQueue = root.querySelector("[data-export-queue]");
+        const exportCover = root.querySelector("[data-export-cover]");
+        const subtitleInput = root.querySelector("[data-subtitle-file]");
+        const confirmModal = document.querySelector("[data-editor-confirm]");
+        const confirmTitle = confirmModal?.querySelector("[data-confirm-title]");
+        const confirmCopy = confirmModal?.querySelector("[data-confirm-copy]");
+        const confirmAction = confirmModal?.querySelector("[data-confirm-action]");
+        const confirmCancel = confirmModal?.querySelectorAll("[data-confirm-cancel]") || [];
 
         const defaults = {
           tracks: [
@@ -317,12 +416,13 @@
           clips: [],
           aspect: "9 / 16",
           background: "",
-          title: "Новый проект",
+          title: "New project",
         };
         let projectId = currentProject && currentProject.id ? String(currentProject.id) : "";
         let assets = currentProject && currentProject.assets ? currentProject.assets : [];
         let state = normalizeState(currentProject && currentProject.state ? currentProject.state : {});
         let selectedClipId = state.clips[0] ? state.clips[0].id : "";
+        let selectedClipIds = new Set(selectedClipId ? [selectedClipId] : []);
         let saveTimer = 0;
         let recorder = null;
         let recordChunks = [];
@@ -333,7 +433,9 @@
         let rafId = 0;
         let lastTick = 0;
         let activeVideoClipId = "";
-        let timelineScale = Number(localStorage.getItem("videoEditorTimelineScale") || 64);
+        let timelineScale = Number(localStorage.getItem("videoEditorTimelineScale") || 76);
+        const timelineScaleMin = 8;
+        const timelineScaleMax = 520;
         const audioPool = new Map();
         let internalVideoPause = false;
         let historyPast = [];
@@ -341,12 +443,26 @@
         let snapEnabled = true;
         let timelineDensity = localStorage.getItem("videoEditorDensity") || "normal";
         let copiedClip = null;
+        let copiedClips = [];
         let selectedAssetId = "";
+        let mediaFilter = "all";
+        let marquee = null;
+        let dirty = false;
+        let saving = false;
+        let saveFailed = false;
+        let exportQuality = "720p";
+        let exportPreset = "";
+        let cropMode = false;
+        let pendingConfirm = null;
+        const timelineScrollbar = createTimelineScrollbar();
+        installInspectorResetButtons();
 
         function normalizeState(raw) {
           const value = {...defaults, ...raw};
           value.tracks = Array.isArray(raw.tracks) && raw.tracks.length ? raw.tracks : defaults.tracks;
           value.clips = Array.isArray(raw.clips) ? raw.clips.map(normalizeClip) : [];
+          value.backgroundMode = raw.backgroundMode || "solid";
+          value.backgroundValue = raw.backgroundValue || raw.background || "#020617";
           return value;
         }
         function normalizeClip(clip) {
@@ -361,6 +477,7 @@
             rotation: Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
             style: {speed: 1, fit: "contain", opacity: 100, transition: "none", fadeIn: 0, fadeOut: 0, ...(clip.style || {})},
           };
+          if (normalized.type === "caption") normalized.type = "caption";
           if (["video", "audio"].includes(normalized.type)) {
             normalized.sourceStart = Math.max(0, Number(clip.sourceStart || 0));
             normalized.sourceEnd = Math.max(normalized.sourceStart + 0.25, Number(clip.sourceEnd || normalized.sourceStart + duration));
@@ -376,20 +493,110 @@
         const assetById = (id) => assets.find((asset) => String(asset.id) === String(id));
         const clipById = (id) => state.clips.find((clip) => clip.id === id);
         const selectedClip = () => clipById(selectedClipId);
+        const selectedClips = () => state.clips.filter((clip) => selectedClipIds.has(clip.id));
+        const selectedClipIdList = () => Array.from(selectedClipIds).filter((id) => clipById(id));
         const timelineDuration = () => Math.max(12, ...state.clips.map((clip) => Number(clip.start || 0) + Number(clip.duration || 4)));
         const secondsToPx = (seconds) => Math.max(0, Number(seconds || 0) * timelineScale);
         const pxToSeconds = (px) => Math.max(0, Number(px || 0) / timelineScale);
         const pxDeltaToSeconds = (px) => Number(px || 0) / timelineScale;
         function snapshotState() {
-          return JSON.stringify({state, selectedClipId, projectTime});
+          return JSON.stringify({state, selectedClipId, selectedClipIds: selectedClipIdList(), projectTime});
         }
         function restoreSnapshot(snapshot) {
           const value = JSON.parse(snapshot);
           state = normalizeState(value.state || {});
           selectedClipId = value.selectedClipId || (state.clips[0] ? state.clips[0].id : "");
+          selectedClipIds = new Set((value.selectedClipIds || [selectedClipId]).filter((id) => clipById(id)));
+          if (!selectedClipIds.size && selectedClipId) selectedClipIds.add(selectedClipId);
           projectTime = Number(value.projectTime || 0);
           render();
           scheduleSave();
+        }
+        function setSelection(ids, primary = "") {
+          selectedClipIds = new Set(ids.filter((id) => clipById(id)));
+          selectedClipId = primary && selectedClipIds.has(primary) ? primary : (selectedClipIdList()[0] || "");
+        }
+        function selectOnly(id) {
+          setSelection(id ? [id] : [], id);
+        }
+        function toggleClipSelection(id) {
+          if (!id) return;
+          if (selectedClipIds.has(id)) selectedClipIds.delete(id);
+          else selectedClipIds.add(id);
+          selectedClipId = id;
+          if (!selectedClipIds.size) selectedClipId = "";
+        }
+        function ensureClipSelected(id) {
+          if (!selectedClipIds.has(id)) selectOnly(id);
+          else selectedClipId = id;
+        }
+        function normalizeSelection() {
+          setSelection(selectedClipIdList(), selectedClipId);
+        }
+        function updateClipPatch(ids, patch, options = {}) {
+          const clips = ids.map((id) => clipById(id)).filter(Boolean);
+          if (!clips.length) return;
+          if (options.history !== false) pushHistory();
+          clips.forEach((clip) => {
+            if (patch.start !== undefined) clip.start = Math.max(0, Number(patch.start) || 0);
+            if (patch.duration !== undefined) clip.duration = Math.max(0.25, Number(patch.duration) || 0.25);
+            if (patch.end !== undefined) clip.duration = Math.max(0.25, Number(patch.end) - clip.start);
+            if (patch.x !== undefined) clip.x = Math.max(0, Math.min(100, Number(patch.x) || 0));
+            if (patch.y !== undefined) clip.y = Math.max(0, Math.min(100, Number(patch.y) || 0));
+            if (patch.scale !== undefined) clip.scale = Math.max(8, Math.min(160, Number(patch.scale) || 100));
+            if (patch.rotation !== undefined) clip.rotation = Number(patch.rotation) || 0;
+            if (patch.style) clip.style = {...(clip.style || {}), ...patch.style};
+            if (["video", "audio"].includes(clip.type)) {
+              clip.sourceStart = Math.max(0, Number(clip.sourceStart || 0));
+              clip.sourceEnd = Math.max(clip.sourceStart + 0.25, clip.sourceStart + clip.duration);
+            }
+          });
+          if (options.render !== false) render();
+          scheduleSave();
+        }
+        function resetInspectorField(name) {
+          const ids = selectedClipIdList();
+          if (!ids.length) return;
+          const defaultsByName = {
+            start: {start: 0},
+            duration: {duration: 4},
+            end: {duration: 4},
+            x: {x: 50},
+            y: {y: 50},
+            scale: {scale: selectedClip()?.type === "image" ? 42 : 100},
+            rotation: {rotation: 0},
+            fit: {style: {fit: "contain"}},
+            speed: {style: {speed: 1}},
+            opacity: {style: {opacity: 100}},
+            volume: {style: {volume: 1}},
+            fadeIn: {style: {fadeIn: 0}},
+            fadeOut: {style: {fadeOut: 0}},
+          };
+          const patch = defaultsByName[name];
+          if (patch) updateClipPatch(ids, patch);
+        }
+        function installInspectorResetButtons() {
+          const fields = [
+            ["[data-clip-start]", "start"], ["[data-clip-duration]", "duration"], ["[data-clip-end]", "end"],
+            ["[data-clip-x]", "x"], ["[data-clip-y]", "y"], ["[data-clip-scale]", "scale"], ["[data-clip-rotation]", "rotation"],
+            ["[data-clip-fit]", "fit"], ["[data-clip-speed]", "speed"], ["[data-filter-opacity]", "opacity"],
+            ["[data-volume]", "volume"], ["[data-fade-in]", "fadeIn"], ["[data-fade-out]", "fadeOut"],
+          ];
+          fields.forEach(([selector, name]) => {
+            const input = root.querySelector(selector);
+            const label = input?.closest("label");
+            if (!input || !label || label.querySelector(`[data-reset-field="${name}"]`)) return;
+            label.classList.add("editor-reset-field");
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "editor-reset-button";
+            button.dataset.resetField = name;
+            button.dataset.icon = "rotate-ccw";
+            button.title = "Reset";
+            button.setAttribute("aria-label", "Reset");
+            button.addEventListener("click", () => resetInspectorField(name));
+            label.append(button);
+          });
         }
         function pushHistory() {
           historyPast.push(snapshotState());
@@ -409,7 +616,9 @@
         function snapTime(value, excludeId = "") {
           if (!snapEnabled) return {value: Math.max(0, value), snapped: false};
           const threshold = pxToSeconds(10);
-          const points = [projectTime];
+          const duration = timelineDuration();
+          const points = [0, projectTime];
+          for (let second = 0; second <= Math.ceil(duration); second += 1) points.push(second);
           state.clips.forEach((clip) => {
             if (clip.id === excludeId) return;
             points.push(clip.start, clip.start + clip.duration);
@@ -430,7 +639,12 @@
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
         };
-        const setStatus = (value) => saveStatus.textContent = value;
+        const setStatus = (value, failed = false) => {
+          saveStatus.textContent = value;
+          saveStatus.classList.toggle("is-error", failed);
+          if (saveRetry) saveRetry.hidden = !failed;
+        };
+        const savedTime = () => new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
         async function ensureProject() {
           if (projectId) return projectId;
           const data = await jsonFetch(`${api}create/`, {method: "POST", body: JSON.stringify({title: state.title, state})});
@@ -439,28 +653,41 @@
           return projectId;
         }
         function collectState() {
-          state.title = title.textContent.trim() || "Новый проект";
+          state.title = title.textContent.trim() || "New project";
           state.aspect = frame.style.getPropertyValue("--editor-aspect").trim() || "9 / 16";
           state.background = frame.style.background || "";
+          state.backgroundMode = state.backgroundMode || "solid";
+          state.backgroundValue = state.backgroundValue || state.background || "#020617";
           return state;
         }
         function scheduleSave() {
-          setStatus("Сохранение...");
+          if (readOnly) return;
+          dirty = true;
+          saveFailed = false;
+          setStatus("Saving...");
           clearTimeout(saveTimer);
           saveTimer = setTimeout(saveProject, 500);
         }
         async function saveProject() {
+          if (readOnly) return;
           try {
+            saving = true;
             await ensureProject();
-            const body = {title: state.title || "Новый проект", state: collectState()};
+            const body = {title: state.title || "New project", state: collectState()};
             const data = await jsonFetch(`${api}${projectId}/save/`, {method: "POST", body: JSON.stringify(body)});
             assets = data.project.assets || assets;
-            setStatus("Сохранено");
+            dirty = false;
+            saveFailed = false;
+            setStatus(`Saved ${savedTime()}`);
           } catch (error) {
-            setStatus("Не сохранено");
+            saveFailed = true;
+            setStatus("Save failed", true);
+          } finally {
+            saving = false;
           }
         }
         async function uploadAsset(file, kind, thumbnail = "", duration = 0) {
+          if (readOnly) throw new Error("View only");
           if (!file) return null;
           await ensureProject();
           const form = new FormData();
@@ -468,9 +695,14 @@
           form.append("kind", kind);
           if (thumbnail) form.append("thumbnail", thumbnail);
           if (duration) form.append("duration", String(duration));
-          const data = await jsonFetch(`${api}${projectId}/assets/`, {method: "POST", body: form});
-          assets = data.project.assets || [...assets, data.asset];
-          return data.asset;
+          try {
+            const data = await jsonFetch(`${api}${projectId}/assets/`, {method: "POST", body: form});
+            assets = data.project.assets || [...assets, data.asset];
+            return data.asset;
+          } catch (error) {
+            setStatus(`Unsupported or too large: ${file.name}`, true);
+            return null;
+          }
         }
         async function thumbnailFromVideo(file) {
           const url = URL.createObjectURL(file);
@@ -523,7 +755,7 @@
           pushHistory();
           const normalized = normalizeClip(clip);
           state.clips.push(normalized);
-          selectedClipId = normalized.id;
+          selectOnly(normalized.id);
           render();
           scheduleSave();
         }
@@ -534,9 +766,13 @@
           }
           return currentTime();
         }
-        async function handleFile(file, kind) {
+        async function handleFile(file, kind = "") {
           if (!file) return;
-          if (kind === "video" && videoPanelName) videoPanelName.textContent = file.name;
+          const fileInfo = classifyFile(file);
+          kind = kind || fileInfo.kind || "image";
+          if (["video", "image"].includes(kind) && videoPanelName) videoPanelName.textContent = file.name;
+          if (kind === "audio" && audioPanelName) audioPanelName.textContent = file.name;
+          setStatus(`Uploading ${file.name}`);
           const thumbnail = kind === "video" ? await thumbnailFromVideo(file) : "";
           const mediaSeconds = await mediaDuration(file, kind);
           const asset = await uploadAsset(file, kind, thumbnail, mediaSeconds);
@@ -575,6 +811,37 @@
             style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 22, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 48},
           });
         }
+        function addCaptionClip(text = "Caption", start = currentTime(), duration = 3) {
+          const track = state.tracks.find((item) => item.type === "text") || state.tracks[1];
+          addClip({
+            id: uid("caption"),
+            type: "caption",
+            trackId: track.id,
+            start,
+            duration,
+            x: 50,
+            y: 84,
+            scale: 100,
+            text,
+            style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 24, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 42},
+          });
+        }
+        function parseSubtitleTime(value) {
+          const parts = String(value || "").replace(",", ".").split(":").map(Number);
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          return Number(parts[0] || 0);
+        }
+        function parseSubtitleText(text) {
+          return String(text || "").replace(/\r/g, "").split(/\n\s*\n/).map((block) => {
+            const lines = block.split("\n").filter(Boolean);
+            const timeLine = lines.find((line) => line.includes("-->"));
+            if (!timeLine) return null;
+            const [startRaw, endRaw] = timeLine.split("-->").map((item) => item.trim().split(/\s+/)[0]);
+            const textLines = lines.slice(lines.indexOf(timeLine) + 1).join(" ").trim();
+            return {start: parseSubtitleTime(startRaw), end: parseSubtitleTime(endRaw), text: textLines || "Caption"};
+          }).filter(Boolean);
+        }
         function addTrack(type) {
           pushHistory();
           const order = Math.max(0, ...state.tracks.map((track) => Number(track.order || 0))) + 1;
@@ -588,7 +855,7 @@
           pushHistory();
           state.tracks = state.tracks.filter((item) => item.id !== id);
           state.clips = state.clips.filter((clip) => clip.trackId !== id);
-          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          normalizeSelection();
           render();
           scheduleSave();
         }
@@ -701,34 +968,74 @@
             node.hidden = !clip || now < clip.start || now > clip.start + clip.duration;
           });
         }
+        function applyBackgroundMode() {
+          root.classList.toggle("has-blur-background", state.backgroundMode === "blur");
+          root.classList.toggle("has-gradient-background", state.backgroundMode === "gradient");
+          frame.style.background = state.backgroundMode === "gradient" ? "linear-gradient(135deg,#2563eb,#ec4899)" : (state.backgroundValue || state.background || "#020617");
+        }
         function selectClip(id) {
-          selectedClipId = id;
+          selectOnly(id);
           render();
         }
         function deleteSelectedClip() {
-          if (!selectedClipId) return;
-          deleteClipById(selectedClipId);
+          deleteClipsByIds(selectedClipIdList());
+        }
+        async function confirmDeleteSelectedClip() {
+          const count = selectedClipIds.size;
+          if (!count) return;
+          const ok = await askConfirm({title: count > 1 ? `Delete ${count} clips?` : "Delete clip?", copy: "This removes selected clips from the timeline."});
+          if (ok) deleteSelectedClip();
         }
         function deleteClipById(id) {
-          if (!id) return;
-          const exists = state.clips.some((clip) => String(clip.id) === String(id));
-          if (!exists) return;
+          deleteClipsByIds([id]);
+        }
+        function deleteClipsByIds(ids) {
+          const targets = new Set(ids.filter(Boolean));
+          if (!targets.size) return;
           pushHistory();
-          state.clips = state.clips.filter((clip) => String(clip.id) !== String(id));
-          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          state.clips = state.clips.filter((clip) => !targets.has(String(clip.id)));
+          normalizeSelection();
           render();
           scheduleSave();
         }
         function render() {
-          title.textContent = state.title || "Новый проект";
+          normalizeSelection();
+          title.textContent = state.title || "New project";
           frame.style.setProperty("--editor-aspect", state.aspect || "9 / 16");
-          if (state.background) frame.style.background = state.background;
+          syncAspectMenu();
+          applyBackgroundMode();
           root.classList.toggle("is-compact-timeline", timelineDensity === "compact");
           renderTracks();
           renderPreview();
           renderProperties();
           renderMediaBin();
           sync();
+        }
+        function syncAspectMenu() {
+          const compact = String(state.aspect || "9 / 16").replace(/\s+/g, "");
+          const buttons = [...root.querySelectorAll("[data-aspect]")];
+          const active = buttons.find((button) => button.dataset.aspect === compact) || buttons[0];
+          buttons.forEach((button) => button.classList.toggle("is-active", button === active));
+          if (!active) return;
+          const label = active.querySelector("b")?.textContent || active.dataset.aspect || "9:16";
+          const size = [active.dataset.label, active.dataset.size].filter(Boolean).join(" ");
+          if (aspectCurrent) aspectCurrent.textContent = label;
+          if (aspectSize) aspectSize.textContent = size || active.querySelector("small")?.textContent || "";
+        }
+        function closeAspectMenu() {
+          if (!aspectOptions) return;
+          aspectOptions.hidden = true;
+          aspectMenu?.classList.remove("is-open");
+          aspectToggle?.setAttribute("aria-expanded", "false");
+        }
+        function setAspectFromButton(button) {
+          if (!button) return;
+          state.aspect = button.dataset.aspect.replace("/", " / ");
+          frame.style.setProperty("--editor-aspect", state.aspect);
+          syncAspectMenu();
+          closeAspectMenu();
+          render();
+          scheduleSave();
         }
         function renderTracks() {
           const duration = timelineDuration();
@@ -761,7 +1068,7 @@
             if (!state.clips.some((clip) => clip.trackId === track.id)) {
               const empty = document.createElement("span");
               empty.className = "editor-track-empty";
-              empty.textContent = track.type === "video" ? "добавь видео" : track.type === "text" ? "добавь текст" : track.type === "audio" ? "добавь музыку" : "добавь фото";
+              empty.textContent = track.type === "video" ? "Drop video or image here" : track.type === "text" ? "Double-click to add text" : track.type === "audio" ? "Drop audio here" : "Drop image here";
               lane.append(empty);
             }
             lane.addEventListener("dblclick", (event) => {
@@ -770,10 +1077,41 @@
                 addTextClip();
               }
             });
+            lane.addEventListener("dragover", (event) => {
+              if (!hasDraggedFiles(event) && !hasDraggedAsset(event)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+              lane.classList.add("is-drop-target");
+              showSnapLine(pxToSeconds(event.clientX - timeRuler.getBoundingClientRect().left), true);
+            });
+            lane.addEventListener("dragleave", () => {
+              lane.classList.remove("is-drop-target");
+              showSnapLine(0, false);
+            });
+            lane.addEventListener("drop", async (event) => {
+              const assetId = event.dataTransfer?.getData("application/x-cherryx-asset");
+              if (assetId) {
+                event.preventDefault();
+                lane.classList.remove("is-drop-target");
+                showSnapLine(0, false);
+                const rect = timeRuler.getBoundingClientRect();
+                addAssetToTimeline(assetById(assetId), {lane, start: pxToSeconds(event.clientX - rect.left)});
+                return;
+              }
+              const files = droppedFiles(event);
+              if (!files.length) return;
+              event.preventDefault();
+              lane.classList.remove("is-drop-target");
+              showSnapLine(0, false);
+              for (const [index, file] of files.entries()) {
+                await handleTimelineDrop(file, lane, event.clientX, index * 0.35);
+              }
+            });
             state.clips.filter((clip) => clip.trackId === track.id).forEach((clip) => lane.append(renderClip(clip, duration)));
             row.append(label, lane);
             return row;
           }));
+          requestAnimationFrame(updateTimelineScrollbar);
         }
         function renderRuler(duration) {
           const ticks = [];
@@ -791,39 +1129,43 @@
           const lanes = document.elementsFromPoint(x, y)
             .map((item) => item.closest ? item.closest(".editor-track-lane") : null)
             .filter(Boolean);
-          return lanes.find((lane, index, list) => lane.dataset.trackType === type && list.indexOf(lane) === index) || null;
+          return lanes.find((lane, index, list) => {
+            if (list.indexOf(lane) !== index) return false;
+            return lane.dataset.trackType === type || (type === "image" && lane.dataset.trackType === "video");
+          }) || null;
         }
         function renderClip(clip, total) {
           const node = document.createElement("div");
-          node.className = `editor-layer-clip is-${clip.type}${clip.id === selectedClipId ? " is-selected" : ""}`;
+          node.className = `editor-layer-clip is-${clip.type}${selectedClipIds.has(clip.id) ? " is-selected" : ""}${clip.id === selectedClipId ? " is-primary-selected" : ""}`;
           positionClipNode(node, clip);
           node.dataset.clipId = clip.id;
-          node.innerHTML = `<span class="editor-trim-handle is-left" data-trim="left"></span><span class="editor-clip-kind" data-icon="${trackIcon(clip.type)}"></span><b></b><small></small><button class="editor-icon-button" type="button" data-delete-inline data-icon="trash-2" title="Удалить" aria-label="Удалить"></button><span class="editor-trim-handle is-right" data-trim="right"></span>`;
+          node.innerHTML = `<span class="editor-trim-handle is-left" data-trim="left"></span><span class="editor-clip-kind" data-icon="${trackIcon(clip.type)}"></span><b></b><small></small><span class="editor-trim-handle is-right" data-trim="right"></span>`;
           const asset = assetById(clip.assetId);
           const clipTitle = clip.type === "text" ? clip.text : (asset && asset.name) || clip.type;
           node.querySelector("b").textContent = shortClipName(clipTitle);
           node.title = clipTitle;
           node.querySelector("small").textContent = `${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}`;
           if (clip.type === "video" && asset && asset.thumbnail_url) node.style.setProperty("--clip-thumb", `url("${asset.thumbnail_url}")`);
-          if (clip.type === "image" && asset && asset.preview_url) node.style.setProperty("--clip-thumb", `url("${asset.preview_url}")`);
+          if (clip.type === "image" && asset && isImageAsset(asset) && asset.preview_url) node.style.setProperty("--clip-thumb", `url("${asset.preview_url}")`);
+          if (["audio", "video"].includes(clip.type) && asset?.waveform_url) loadWaveform(asset, node);
+          if (clip.type === "image" && asset && !isImageAsset(asset)) node.classList.add("is-document");
           if (clip.style?.transition && clip.style.transition !== "none") node.dataset.transition = clip.style.transition;
-          node.querySelector("[data-delete-inline]").addEventListener("pointerdown", (event) => {
-            event.stopPropagation();
-            event.preventDefault();
-          });
-          node.querySelector("[data-delete-inline]").addEventListener("click", (event) => {
-            event.stopPropagation();
-            event.preventDefault();
-            deleteClipById(node.dataset.clipId);
-          });
           node.addEventListener("pointerdown", (event) => {
             if (event.target.closest("button")) return;
-            selectedClipId = clip.id;
+            if (event.shiftKey) {
+              toggleClipSelection(clip.id);
+              render();
+              node.dataset.skipClick = "true";
+              event.preventDefault();
+              return;
+            }
+            ensureClipSelected(clip.id);
             root.querySelectorAll(".editor-layer-clip").forEach((item) => item.classList.toggle("is-selected", item === node));
             node.classList.add("is-dragging");
             renderProperties();
             const mode = event.target.dataset.trim || "move";
             const lane = node.closest(".editor-track-lane");
+            const groupClips = mode === "move" ? selectedClips().map((item) => ({id: item.id, start: item.start, trackId: item.trackId})) : [];
             draggingClip = {
               id: clip.id,
               mode,
@@ -834,6 +1176,7 @@
               sourceStart: clip.sourceStart || 0,
               sourceEnd: clip.sourceEnd || clip.duration,
               laneRect: lane ? lane.getBoundingClientRect() : timeline.getBoundingClientRect(),
+              groupClips,
             };
             pushHistory();
             if (node.isConnected) node.setPointerCapture(event.pointerId);
@@ -853,8 +1196,16 @@
               clip.sourceEnd = Math.max((clip.sourceStart || 0) + 0.25, draggingClip.sourceStart + clip.duration);
             } else {
               const snapped = snapTime(draggingClip.start + delta, clip.id);
-              clip.start = snapped.value;
-              showSnapLine(clip.start, snapped.snapped);
+              const nextStart = snapped.value;
+              const groupDelta = Math.max(-Math.min(...draggingClip.groupClips.map((item) => item.start)), nextStart - draggingClip.start);
+              draggingClip.groupClips.forEach((item) => {
+                const groupClip = clipById(item.id);
+                if (!groupClip) return;
+                groupClip.start = Math.max(0, item.start + groupDelta);
+                const groupNode = root.querySelector(`.editor-layer-clip[data-clip-id="${CSS.escape(item.id)}"]`);
+                if (groupNode) positionClipNode(groupNode, groupClip);
+              });
+              showSnapLine(nextStart, snapped.snapped);
               const lane = laneFromPoint(event.clientX, event.clientY, clip.type);
               if (lane && lane.dataset.trackId !== clip.trackId) {
                 clip.trackId = lane.dataset.trackId;
@@ -876,11 +1227,20 @@
           };
           node.addEventListener("pointerup", finishDrag);
           node.addEventListener("pointercancel", finishDrag);
-          node.addEventListener("click", () => selectClip(clip.id));
+          node.addEventListener("click", (event) => {
+            if (node.dataset.skipClick) {
+              delete node.dataset.skipClick;
+              return;
+            }
+            if (event.shiftKey) toggleClipSelection(clip.id);
+            else if (!selectedClipIds.has(clip.id) || selectedClipIds.size <= 1) selectOnly(clip.id);
+            render();
+          });
           node.addEventListener("contextmenu", (event) => {
             event.preventDefault();
-            selectedClipId = clip.id;
-            showClipMenu(event.clientX, event.clientY);
+            ensureClipSelected(clip.id);
+            root.querySelectorAll(".editor-layer-clip").forEach((item) => item.classList.toggle("is-selected", item === node));
+            showClipMenu(event.clientX, event.clientY, node);
             renderProperties();
           });
           return node;
@@ -896,6 +1256,27 @@
           const ext = dot > 0 ? raw.slice(dot) : "";
           return `${raw.slice(0, 13)}…${ext.slice(0, 5)}`;
         }
+        async function loadWaveform(asset, node) {
+          if (node.dataset.waveformLoaded || !asset.waveform_url) return;
+          node.dataset.waveformLoaded = "true";
+          try {
+            let response = await fetch(asset.waveform_url, {headers: {"Accept": "application/json"}});
+            if (!response.ok) response = await fetch(asset.waveform_url, {method: "POST", headers: {"Accept": "application/json", "X-CSRFToken": decodeURIComponent(csrf)}});
+            const data = await response.json();
+            const samples = (data.samples || []).slice(0, 64);
+            if (!samples.length) return;
+            const wave = document.createElement("span");
+            wave.className = "editor-clip-waveform";
+            wave.replaceChildren(...samples.map((sample) => {
+              const bar = document.createElement("i");
+              bar.style.height = `${Math.max(3, Math.round(Number(sample) * 18))}px`;
+              return bar;
+            }));
+            node.append(wave);
+          } catch (error) {
+            node.dataset.waveformLoaded = "";
+          }
+        }
         function renderPreview() {
           const hasVideo = state.clips.some((clip) => clip.type === "video");
           const hasActiveVisual = state.clips.some((clip) => ["video", "image"].includes(clip.type) && isClipActive(clip));
@@ -907,7 +1288,7 @@
             dropzone.hidden = playing || hasActiveVisual;
           }
           overlayRoot.replaceChildren();
-          state.clips.filter((clip) => ["text", "image"].includes(clip.type)).forEach((clip) => {
+          state.clips.filter((clip) => ["text", "caption", "image"].includes(clip.type)).forEach((clip) => {
             const node = document.createElement("div");
             node.className = `editor-overlay-item is-${clip.type}${clip.id === selectedClipId ? " is-selected" : ""}`;
             node.dataset.clipId = clip.id;
@@ -918,12 +1299,42 @@
             node.style.zIndex = String(clip.style?.zIndex || 2);
             if (clip.type === "image") {
               const asset = assetById(clip.assetId);
-              const img = document.createElement("img");
-              img.src = asset ? asset.preview_url : "";
-              img.alt = "";
-              img.style.filter = clipFilterValue(clip);
-              img.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
-              img.style.objectFit = clip.style?.fit === "cover" || clip.style?.fit === "crop" ? "cover" : "contain";
+              if (asset && isImageAsset(asset)) {
+                const img = document.createElement("img");
+                img.src = asset.preview_url;
+                img.alt = "";
+                img.style.filter = clipFilterValue(clip);
+                img.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
+                img.style.objectFit = clip.style?.fit === "cover" || clip.style?.fit === "crop" ? "cover" : "contain";
+                if (clip.style?.crop) {
+                  const crop = clip.style.crop;
+                  img.style.clipPath = `inset(${crop.y}% ${Math.max(0, 100 - crop.x - crop.width)}% ${Math.max(0, 100 - crop.y - crop.height)}% ${crop.x}%)`;
+                }
+                node.append(img);
+              } else {
+                const fileCard = document.createElement("div");
+                fileCard.className = "editor-file-overlay";
+                fileCard.innerHTML = `<i data-icon="file-text"></i><b></b><small></small>`;
+                fileCard.querySelector("b").textContent = asset?.name || "File";
+                fileCard.querySelector("small").textContent = asset?.media_type || "document";
+                fileCard.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
+                node.append(fileCard);
+              }
+              if (cropMode && clip.id === selectedClipId && clip.style?.crop) {
+                const crop = clip.style.crop;
+                const cropBox = document.createElement("span");
+                cropBox.className = "editor-crop-box";
+                cropBox.style.left = `${crop.x}%`;
+                cropBox.style.top = `${crop.y}%`;
+                cropBox.style.width = `${crop.width}%`;
+                cropBox.style.height = `${crop.height}%`;
+                ["nw", "ne", "sw", "se"].forEach((corner) => {
+                  const handle = document.createElement("i");
+                  handle.dataset.cropHandle = corner;
+                  cropBox.append(handle);
+                });
+                node.append(cropBox);
+              }
               const resize = document.createElement("span");
               resize.className = "editor-overlay-handle is-resize";
               resize.dataset.overlayHandle = "resize";
@@ -939,11 +1350,11 @@
               remove.dataset.icon = "trash-2";
               remove.title = "Удалить";
               remove.setAttribute("aria-label", "Удалить");
-              node.append(img, resize, rotate, remove);
+              node.append(resize, rotate, remove);
             } else {
-              node.contentEditable = "true";
+              node.contentEditable = "false";
               node.spellcheck = false;
-              node.textContent = clip.text || "Текст";
+              node.textContent = clip.text || (clip.type === "caption" ? "Caption" : "Текст");
               applyTextStyle(node, clip.style || {});
               node.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
               const remove = document.createElement("button");
@@ -960,24 +1371,60 @@
                   .filter((child) => child.nodeType === Node.TEXT_NODE)
                   .map((child) => child.textContent)
                   .join("")
-                  .trim() || "Текст";
+                  .trim() || (clip.type === "caption" ? "Caption" : "Текст");
+                updateTextControls(clip);
+                renderTracks();
+                scheduleSave();
+              });
+              node.addEventListener("dblclick", (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                selectOnly(clip.id);
+                node.dataset.editing = "true";
+                node.contentEditable = "true";
+                node.focus();
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                range.collapse(false);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+              });
+              node.addEventListener("keydown", (event) => {
+                if (node.dataset.editing !== "true") return;
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  node.blur();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  node.textContent = clip.text || (clip.type === "caption" ? "Caption" : "Текст");
+                  node.blur();
+                }
+              });
+              node.addEventListener("blur", () => {
+                if (node.dataset.editing !== "true") return;
+                delete node.dataset.editing;
+                node.contentEditable = "false";
+                clip.text = node.textContent.trim() || (clip.type === "caption" ? "Caption" : "Текст");
                 updateTextControls(clip);
                 renderTracks();
                 scheduleSave();
               });
             }
             node.addEventListener("pointerdown", (event) => {
+              if (node.dataset.editing === "true") return;
               if (event.target.closest("[data-overlay-delete]")) {
                 event.stopPropagation();
                 event.preventDefault();
                 deleteClipById(clip.id);
                 return;
               }
-              selectedClipId = clip.id;
+              selectOnly(clip.id);
               renderProperties();
               overlayRoot.querySelectorAll(".editor-overlay-item").forEach((item) => item.classList.toggle("is-selected", item === node));
               const rect = frame.getBoundingClientRect();
-              const handle = event.target.dataset.overlayHandle || "move";
+              const handle = event.target.dataset.cropHandle ? `crop-${event.target.dataset.cropHandle}` : (event.target.dataset.overlayHandle || "move");
               draggingOverlay = {
                 id: clip.id,
                 mode: handle,
@@ -987,6 +1434,7 @@
                 y: clip.y ?? 50,
                 scale: clip.scale || 42,
                 rotation: clip.rotation || 0,
+                crop: {...(clip.style?.crop || {x: 10, y: 10, width: 80, height: 80})},
                 centerX: rect.left + ((clip.x ?? 50) / 100) * rect.width,
                 centerY: rect.top + ((clip.y ?? 50) / 100) * rect.height,
                 frameWidth: rect.width,
@@ -998,7 +1446,24 @@
             node.addEventListener("pointermove", (event) => {
               if (!draggingOverlay || draggingOverlay.id !== clip.id) return;
               const rect = frame.getBoundingClientRect();
-              if (draggingOverlay.mode === "resize") {
+              if (String(draggingOverlay.mode).startsWith("crop-")) {
+                clip.style = clip.style || {};
+                const dx = ((event.clientX - draggingOverlay.startX) / rect.width) * 100;
+                const dy = ((event.clientY - draggingOverlay.startY) / rect.height) * 100;
+                const crop = {...draggingOverlay.crop};
+                if (draggingOverlay.mode.includes("e")) crop.width = Math.max(10, Math.min(100 - crop.x, draggingOverlay.crop.width + dx));
+                if (draggingOverlay.mode.includes("s")) crop.height = Math.max(10, Math.min(100 - crop.y, draggingOverlay.crop.height + dy));
+                if (draggingOverlay.mode.includes("w")) {
+                  crop.x = Math.max(0, Math.min(draggingOverlay.crop.x + dx, draggingOverlay.crop.x + draggingOverlay.crop.width - 10));
+                  crop.width = draggingOverlay.crop.width + (draggingOverlay.crop.x - crop.x);
+                }
+                if (draggingOverlay.mode.includes("n")) {
+                  crop.y = Math.max(0, Math.min(draggingOverlay.crop.y + dy, draggingOverlay.crop.y + draggingOverlay.crop.height - 10));
+                  crop.height = draggingOverlay.crop.height + (draggingOverlay.crop.y - crop.y);
+                }
+                clip.style.crop = crop;
+                renderPreview();
+              } else if (draggingOverlay.mode === "resize") {
                 const distance = Math.hypot(event.clientX - draggingOverlay.centerX, event.clientY - draggingOverlay.centerY);
                 clip.scale = Math.max(8, Math.min(120, (distance * 2 / draggingOverlay.frameWidth) * 100));
                 node.style.width = `${clip.scale}%`;
@@ -1032,7 +1497,7 @@
         }
         function renderProperties() {
           const clip = selectedClip();
-          toolTitle.textContent = clip ? `${typeName(clip.type)} · ${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}` : "Проект";
+          toolTitle.textContent = selectedClipIds.size > 1 ? `${selectedClipIds.size} clips selected` : (clip ? `${typeName(clip.type)} · ${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}` : "Project");
           if (clip && clip.type === "text") updateTextControls(clip);
           updateClipControls(clip);
           updateEffectControls(clip);
@@ -1136,34 +1601,81 @@
           scheduleSave();
         }
         function duplicateSelectedClip() {
-          const clip = selectedClip();
-          if (!clip) return;
+          const clips = selectedClips();
+          if (!clips.length) return;
           pushHistory();
-          const copy = normalizeClip({...clip, id: uid(`${clip.type}-copy`), start: clip.start + Math.min(1, Math.max(0.25, clip.duration * 0.15))});
-          state.clips.push(copy);
-          selectedClipId = copy.id;
+          const copies = clips.map((clip) => normalizeClip({...clip, id: uid(`${clip.type}-copy`), start: clip.start + Math.min(1, Math.max(0.25, clip.duration * 0.15))}));
+          state.clips.push(...copies);
+          setSelection(copies.map((clip) => clip.id), copies[0].id);
           render();
           scheduleSave();
         }
-        function addAssetToTimeline(asset) {
+        function assetTimelineKind(asset) {
+          return asset.kind === "image" ? "image" : asset.kind;
+        }
+        function assetMatchesFilter(asset) {
+          if (mediaFilter === "all") return true;
+          if (mediaFilter === "docs") return asset.kind === "image" && asset.visual_kind && asset.visual_kind !== "image";
+          if (mediaFilter === "image") return asset.kind === "image" && (!asset.visual_kind || asset.visual_kind === "image");
+          return asset.kind === mediaFilter;
+        }
+        function textClipMatchesFilter() {
+          return mediaFilter === "all" || mediaFilter === "text";
+        }
+        function preferredTrackForAsset(asset, lane = null) {
+          const kind = assetTimelineKind(asset);
+          const laneType = lane?.dataset?.trackType || "";
+          if (kind === "audio" && laneType === "audio") return lane.dataset.trackId;
+          if (kind !== "audio" && ["video", "image"].includes(laneType)) return lane.dataset.trackId;
+          return (state.tracks.find((item) => item.type === kind)?.id || state.tracks.find((item) => item.type === "video")?.id || state.tracks[0]?.id);
+        }
+        function addAssetToTimeline(asset, options = {}) {
           if (!asset) return;
-          const track = state.tracks.find((item) => item.type === asset.kind) || state.tracks[state.tracks.length - 1];
-          const duration = asset.kind === "image" ? 5 : Math.max(1, Number(asset.duration || 5));
+          const kind = assetTimelineKind(asset);
+          const trackId = options.trackId || preferredTrackForAsset(asset, options.lane);
+          const duration = kind === "image" ? 5 : Math.max(1, Number(asset.duration || 5));
           addClip({
-            id: uid(asset.kind),
-            type: asset.kind,
-            trackId: track.id,
+            id: uid(kind),
+            type: kind,
+            trackId,
             assetId: asset.id,
-            start: defaultStartForKind(asset.kind),
+            start: Number.isFinite(options.start) ? Math.max(0, options.start) : defaultStartForKind(kind),
             duration,
             sourceStart: 0,
             sourceEnd: duration,
             x: 50,
             y: 50,
-            scale: asset.kind === "image" ? 42 : 100,
+            scale: kind === "image" ? 42 : 100,
             style: {},
             text: "",
           });
+        }
+        async function renameAsset(asset, name) {
+          const next = String(name || "").trim();
+          if (!asset || !asset.rename_url || !next || next === asset.name) return;
+          const data = await jsonFetch(asset.rename_url, {method: "POST", body: JSON.stringify({name: next})});
+          assets = data.project.assets || assets.map((item) => item.id === asset.id ? data.asset : item);
+          render();
+        }
+        function showAssetPreview(asset, event) {
+          if (!assetPreview || !asset) return;
+          assetPreview.hidden = false;
+          assetPreview.className = `editor-asset-preview is-${asset.kind}`;
+          if ((asset.thumbnail_url || isImageAsset(asset)) && asset.preview_url) {
+            assetPreview.innerHTML = `<div></div><b></b><small></small>`;
+            assetPreview.querySelector("div").style.backgroundImage = `url("${asset.thumbnail_url || asset.preview_url}")`;
+          } else {
+            assetPreview.innerHTML = `<i data-icon="file-text"></i><b></b><small></small>`;
+          }
+          assetPreview.querySelector("b").textContent = asset.name || "Asset";
+          assetPreview.querySelector("small").textContent = `${asset.visual_kind || asset.kind} · ${asset.size_text || ""}`;
+          const left = Math.min(window.innerWidth - 238, event.clientX + 16);
+          const top = Math.min(window.innerHeight - 190, event.clientY + 16);
+          assetPreview.style.left = `${Math.max(8, left)}px`;
+          assetPreview.style.top = `${Math.max(8, top)}px`;
+        }
+        function hideAssetPreview() {
+          if (assetPreview) assetPreview.hidden = true;
         }
         async function deleteAsset(asset) {
           if (!asset || !asset.delete_url) return;
@@ -1171,48 +1683,122 @@
           const data = await jsonFetch(asset.delete_url, {method: "POST"});
           assets = data.project.assets || assets.filter((item) => item.id !== asset.id);
           state = normalizeState(data.project.state || state);
-          selectedClipId = state.clips[0] ? state.clips[0].id : "";
+          normalizeSelection();
           render();
         }
         function renderMediaBin() {
           if (!mediaBin) return;
-          if (!assets.length) {
-            mediaBin.innerHTML = `<div class="editor-media-empty">Медиа пока нет</div>`;
+          const visibleAssets = assets.filter(assetMatchesFilter);
+          const visibleTextClips = textClipMatchesFilter() ? state.clips.filter((clip) => ["text", "caption"].includes(clip.type)) : [];
+          if (!visibleAssets.length && !visibleTextClips.length) {
+            mediaBin.innerHTML = `<div class="editor-media-empty">No media or text yet</div>`;
             return;
           }
-          mediaBin.replaceChildren(...assets.map((asset) => {
+          const textItems = visibleTextClips.map((clip) => {
             const item = document.createElement("article");
-            item.className = `editor-media-item is-${asset.kind}${String(asset.id) === String(selectedAssetId) ? " is-selected" : ""}`;
+            item.className = `editor-media-item is-text${selectedClipIds.has(clip.id) ? " is-selected" : ""}`;
             const preview = document.createElement("button");
             preview.type = "button";
             preview.className = "editor-media-preview";
-            preview.style.backgroundImage = asset.thumbnail_url ? `url("${asset.thumbnail_url}")` : "";
-            preview.dataset.icon = asset.kind === "video" ? "film" : asset.kind === "audio" ? "music" : "image";
+            preview.dataset.icon = clip.type === "caption" ? "file-text" : "type";
+            preview.addEventListener("click", () => selectClip(clip.id));
+            const meta = document.createElement("div");
+            meta.innerHTML = `<b></b><small></small>`;
+            meta.querySelector("b").textContent = clip.text || (clip.type === "caption" ? "Caption" : "Text");
+            meta.querySelector("small").textContent = `${typeName(clip.type)} · ${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}`;
+            const actions = document.createElement("div");
+            actions.className = "editor-media-actions";
+            const select = document.createElement("button");
+            select.type = "button";
+            select.textContent = "Select";
+            select.addEventListener("click", () => selectClip(clip.id));
+            const duplicate = document.createElement("button");
+            duplicate.type = "button";
+            duplicate.textContent = "Duplicate";
+            duplicate.addEventListener("click", () => {
+              selectOnly(clip.id);
+              duplicateSelectedClip();
+            });
+            actions.append(select, duplicate);
+            item.append(preview, meta, actions);
+            return item;
+          });
+          const assetItems = visibleAssets.map((asset) => {
+            const item = document.createElement("article");
+            item.className = `editor-media-item is-${asset.kind}${String(asset.id) === String(selectedAssetId) ? " is-selected" : ""}`;
+            item.draggable = true;
+            item.dataset.assetId = asset.id;
+            const preview = document.createElement("button");
+            preview.type = "button";
+            preview.className = "editor-media-preview";
+            preview.style.backgroundImage = (asset.thumbnail_url || isImageAsset(asset)) ? `url("${asset.thumbnail_url || asset.preview_url}")` : "";
+            preview.dataset.icon = asset.kind === "video" ? "film" : asset.kind === "audio" ? "music" : isImageAsset(asset) ? "image" : "file-text";
             preview.addEventListener("click", () => { selectedAssetId = asset.id; addAssetToTimeline(asset); });
             const meta = document.createElement("div");
             meta.innerHTML = `<b></b><small></small>`;
             meta.querySelector("b").textContent = asset.name || asset.kind;
-            meta.querySelector("small").textContent = `${typeName(asset.kind)} · ${asset.size_text || ""}`;
+            meta.querySelector("b").title = "Double-click to rename";
+            meta.querySelector("b").addEventListener("dblclick", () => {
+              const input = document.createElement("input");
+              input.value = asset.name || "";
+              input.className = "editor-asset-rename";
+              meta.querySelector("b").replaceWith(input);
+              input.focus();
+              input.select();
+              let finished = false;
+              const finish = async (save) => {
+                if (finished) return;
+                finished = true;
+                if (save) await renameAsset(asset, input.value);
+                else renderMediaBin();
+              };
+              input.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") finish(true);
+                if (event.key === "Escape") finish(false);
+              });
+              input.addEventListener("blur", () => finish(true), {once: true});
+            });
+            const visualLabel = asset.kind === "image" && asset.visual_kind && asset.visual_kind !== "image" ? asset.visual_kind.toUpperCase() : typeName(asset.kind);
+            meta.querySelector("small").textContent = `${visualLabel} · ${asset.size_text || ""}`;
             const actions = document.createElement("div");
             actions.className = "editor-media-actions";
             const add = document.createElement("button");
             add.type = "button";
-            add.textContent = "Добавить";
+            add.textContent = "Add";
             add.addEventListener("click", () => addAssetToTimeline(asset));
             const remove = document.createElement("button");
             remove.type = "button";
-            remove.textContent = "Удалить";
-            remove.addEventListener("click", () => deleteAsset(asset));
+            remove.textContent = "Delete";
+            remove.addEventListener("click", async () => {
+              const ok = await askConfirm({title: "Delete media asset?", copy: "This removes the file from the project and deletes clips that use it."});
+              if (ok) deleteAsset(asset);
+            });
             actions.append(add, remove);
             item.append(preview, meta, actions);
+            item.addEventListener("dragstart", (event) => {
+              selectedAssetId = asset.id;
+              event.dataTransfer.effectAllowed = "copy";
+              event.dataTransfer.setData("application/x-cherryx-asset", String(asset.id));
+              event.dataTransfer.setData("text/plain", String(asset.id));
+            });
+            item.addEventListener("pointerenter", (event) => showAssetPreview(asset, event));
+            item.addEventListener("pointermove", (event) => showAssetPreview(asset, event));
+            item.addEventListener("pointerleave", hideAssetPreview);
             return item;
-          }));
+          });
+          mediaBin.replaceChildren(...textItems, ...assetItems);
         }
-        function showClipMenu(x, y) {
+        function showClipMenu(x, y, anchor = null) {
           if (!clipMenu) return;
           clipMenu.hidden = false;
-          clipMenu.style.left = `${x}px`;
-          clipMenu.style.top = `${y}px`;
+          const menuRect = clipMenu.getBoundingClientRect();
+          const anchorRect = anchor?.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+          const preferredTop = anchorRect ? anchorRect.top - menuRect.height - 10 : y - menuRect.height - 10;
+          const fallbackTop = anchorRect ? anchorRect.bottom + 10 : y + 10;
+          const top = preferredTop > 8 ? preferredTop : Math.min(window.innerHeight - menuRect.height - 8, fallbackTop);
+          const left = Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, x - menuRect.width / 2));
+          clipMenu.style.left = `${left}px`;
+          clipMenu.style.top = `${Math.max(8, top)}px`;
         }
         function hideClipMenu() {
           if (clipMenu) clipMenu.hidden = true;
@@ -1234,7 +1820,7 @@
           return {video: "film", text: "type", image: "image", audio: "music"}[type] || "circle";
         }
         function typeName(type) {
-          return {video: "Видео", text: "Текст", image: "Фото", audio: "Аудио"}[type] || "Слой";
+          return {video: "Video", text: "Text", caption: "Caption", image: "Image", audio: "Audio"}[type] || "Layer";
         }
         function sync() {
           const duration = timelineDuration();
@@ -1244,10 +1830,55 @@
           seek.value = String(Math.round(ratio * 1000));
           seek.style.setProperty("--seek", `${ratio * 100}%`);
           playhead.style.left = `${secondsToPx(current)}px`;
+          playhead.dataset.time = fmt(current);
+          if (playheadLabel) playheadLabel.textContent = fmt(current);
           time.textContent = `${fmt(current)} / ${fmt(duration)}`;
           durationNode.textContent = fmt(duration);
           play.dataset.icon = playing ? "pause" : "play";
           updateOverlayVisibility();
+        }
+        async function refreshExportQueue() {
+          if (!projectId || !exportQueue) return;
+          try {
+            const data = await jsonFetch(`${api}${projectId}/exports/`);
+            renderExportQueue(data.jobs || []);
+          } catch (error) {
+            exportQueue.innerHTML = `<small>Export queue unavailable</small>`;
+          }
+        }
+        function renderExportQueue(jobs) {
+          if (!exportQueue) return;
+          if (!jobs.length) {
+            exportQueue.innerHTML = `<small>No exports yet</small>`;
+            return;
+          }
+          exportQueue.replaceChildren(...jobs.map((job) => {
+            const item = document.createElement("article");
+            item.className = `editor-export-job is-${job.status}`;
+            item.innerHTML = `<b></b><small></small><i><span></span></i><div></div>`;
+            item.querySelector("b").textContent = job.kind === "video_cover" ? "Cover frame" : `MP4 ${job.quality || ""}`;
+            item.querySelector("small").textContent = job.error || job.message || job.status;
+            item.querySelector("span").style.width = `${Math.max(3, Number(job.progress || 0))}%`;
+            const actions = item.querySelector("div");
+            if (job.download_url) {
+              const link = document.createElement("a");
+              link.href = job.download_url;
+              link.textContent = job.kind === "video_cover" ? "Download cover" : "Download";
+              link.download = "";
+              actions.append(link);
+            }
+            if (["queued", "running"].includes(job.status)) {
+              const cancel = document.createElement("button");
+              cancel.type = "button";
+              cancel.textContent = "Cancel";
+              cancel.addEventListener("click", async () => {
+                await jsonFetch(`${api}${projectId}/export/${job.id}/cancel/`, {method: "POST"});
+                refreshExportQueue();
+              });
+              actions.append(cancel);
+            }
+            return item;
+          }));
         }
         function seekTo(seconds) {
           projectTime = Math.max(0, Math.min(timelineDuration(), Number(seconds) || 0));
@@ -1257,6 +1888,24 @@
         function seekFromClient(clientX) {
           const rect = timeRuler.getBoundingClientRect();
           seekTo(pxToSeconds(clientX - rect.left));
+        }
+        function startPlayheadDrag(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          playhead.classList.add("is-dragging");
+          seekFromClient(event.clientX);
+          const move = (moveEvent) => seekFromClient(moveEvent.clientX);
+          const finish = (upEvent) => {
+            playhead.classList.remove("is-dragging");
+            if (playhead.hasPointerCapture(upEvent.pointerId)) playhead.releasePointerCapture(upEvent.pointerId);
+            playhead.removeEventListener("pointermove", move);
+            playhead.removeEventListener("pointerup", finish);
+            playhead.removeEventListener("pointercancel", finish);
+          };
+          playhead.setPointerCapture(event.pointerId);
+          playhead.addEventListener("pointermove", move);
+          playhead.addEventListener("pointerup", finish);
+          playhead.addEventListener("pointercancel", finish);
         }
         function startPlayback() {
           playing = true;
@@ -1300,43 +1949,359 @@
           clip.duration = offset;
           if (["video", "audio"].includes(clip.type)) clip.sourceEnd = (clip.sourceStart || 0) + offset;
           state.clips.push(right);
-          selectedClipId = right.id;
+          selectOnly(right.id);
           render();
           scheduleSave();
         }
         function setTimelineScale(value) {
-          timelineScale = Math.max(28, Math.min(180, value));
+          timelineScale = Math.max(timelineScaleMin, Math.min(timelineScaleMax, value));
           localStorage.setItem("videoEditorTimelineScale", String(timelineScale));
           renderTracks();
           sync();
         }
+        function zoomTimeline(direction) {
+          const multiplier = direction > 0 ? 1.32 : 1 / 1.5;
+          setTimelineScale(timelineScale * multiplier);
+        }
+        function askConfirm({title: modalTitle, copy, action = "Delete"}) {
+          return new Promise((resolve) => {
+            if (!confirmModal) {
+              resolve(window.confirm(modalTitle || "Continue?"));
+              return;
+            }
+            pendingConfirm = resolve;
+            if (confirmTitle) confirmTitle.textContent = modalTitle || "Confirm action";
+            if (confirmCopy) confirmCopy.textContent = copy || "This action cannot be undone.";
+            if (confirmAction) confirmAction.textContent = action;
+            confirmModal.hidden = false;
+            confirmAction?.focus();
+          });
+        }
+        function createTimelineScrollbar() {
+          if (!timelineScroll) return null;
+          timelineScroll.classList.add("has-custom-scrollbar");
+          const xRail = document.createElement("div");
+          const yRail = document.createElement("div");
+          const xThumb = document.createElement("button");
+          const yThumb = document.createElement("button");
+          xRail.className = "editor-custom-scrollbar is-horizontal";
+          yRail.className = "editor-custom-scrollbar is-vertical";
+          xThumb.className = "editor-custom-scrollbar-thumb";
+          yThumb.className = "editor-custom-scrollbar-thumb";
+          xThumb.type = "button";
+          yThumb.type = "button";
+          xThumb.setAttribute("aria-label", "Scroll timeline horizontally");
+          yThumb.setAttribute("aria-label", "Scroll timeline vertically");
+          xRail.append(xThumb);
+          yRail.append(yThumb);
+          timelineScroll.after(xRail, yRail);
+          const bindDrag = (thumb, axis) => {
+            thumb.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              thumb.setPointerCapture(event.pointerId);
+              thumb.classList.add("is-dragging");
+              const startPointer = axis === "x" ? event.clientX : event.clientY;
+              const startScroll = axis === "x" ? timelineScroll.scrollLeft : timelineScroll.scrollTop;
+              const onMove = (moveEvent) => {
+                const rail = axis === "x" ? xRail : yRail;
+                const railSize = axis === "x" ? rail.clientWidth : rail.clientHeight;
+                const thumbSize = axis === "x" ? thumb.offsetWidth : thumb.offsetHeight;
+                const scrollSize = axis === "x" ? timelineScroll.scrollWidth - timelineScroll.clientWidth : timelineScroll.scrollHeight - timelineScroll.clientHeight;
+                const dragSpace = Math.max(1, railSize - thumbSize);
+                const delta = (axis === "x" ? moveEvent.clientX : moveEvent.clientY) - startPointer;
+                const next = startScroll + (delta / dragSpace) * scrollSize;
+                if (axis === "x") timelineScroll.scrollLeft = next;
+                else timelineScroll.scrollTop = next;
+              };
+              const onEnd = (upEvent) => {
+                thumb.classList.remove("is-dragging");
+                thumb.releasePointerCapture(upEvent.pointerId);
+                thumb.removeEventListener("pointermove", onMove);
+                thumb.removeEventListener("pointerup", onEnd);
+                thumb.removeEventListener("pointercancel", onEnd);
+              };
+              thumb.addEventListener("pointermove", onMove);
+              thumb.addEventListener("pointerup", onEnd);
+              thumb.addEventListener("pointercancel", onEnd);
+            });
+          };
+          const bindRail = (rail, thumb, axis) => {
+            rail.addEventListener("pointerdown", (event) => {
+              if (event.target === thumb) return;
+              const rect = rail.getBoundingClientRect();
+              const railSize = axis === "x" ? rect.width : rect.height;
+              const thumbSize = axis === "x" ? thumb.offsetWidth : thumb.offsetHeight;
+              const scrollSize = axis === "x" ? timelineScroll.scrollWidth - timelineScroll.clientWidth : timelineScroll.scrollHeight - timelineScroll.clientHeight;
+              const position = (axis === "x" ? event.clientX - rect.left : event.clientY - rect.top) - thumbSize / 2;
+              const next = (position / Math.max(1, railSize - thumbSize)) * scrollSize;
+              if (axis === "x") timelineScroll.scrollLeft = next;
+              else timelineScroll.scrollTop = next;
+            });
+          };
+          bindDrag(xThumb, "x");
+          bindDrag(yThumb, "y");
+          bindRail(xRail, xThumb, "x");
+          bindRail(yRail, yThumb, "y");
+          timelineScroll.addEventListener("scroll", updateTimelineScrollbar, {passive: true});
+          window.addEventListener("resize", updateTimelineScrollbar);
+          if ("ResizeObserver" in window) {
+            const resizeObserver = new ResizeObserver(() => updateTimelineScrollbar());
+            resizeObserver.observe(timelineScroll);
+            resizeObserver.observe(timeline);
+            resizeObserver.observe(timelineScroll.closest(".editor-timeline-panel") || timelineScroll);
+          }
+          return {xRail, yRail, xThumb, yThumb};
+        }
+        function updateTimelineScrollbar() {
+          if (!timelineScrollbar || !timelineScroll) return;
+          const {xRail, yRail, xThumb, yThumb} = timelineScrollbar;
+          const maxX = Math.max(0, timelineScroll.scrollWidth - timelineScroll.clientWidth);
+          const maxY = Math.max(0, timelineScroll.scrollHeight - timelineScroll.clientHeight);
+          xRail.hidden = maxX <= 1;
+          yRail.hidden = maxY <= 1;
+          if (maxX > 1) {
+            const railWidth = Math.max(1, xRail.clientWidth);
+            const thumbWidth = Math.max(48, Math.round((timelineScroll.clientWidth / timelineScroll.scrollWidth) * railWidth));
+            const safeThumbWidth = Math.min(railWidth, thumbWidth);
+            const left = Math.round((timelineScroll.scrollLeft / maxX) * Math.max(1, railWidth - safeThumbWidth));
+            xThumb.style.width = `${safeThumbWidth}px`;
+            xThumb.style.transform = `translateX(${left}px)`;
+          }
+          if (maxY > 1) {
+            const railHeight = Math.max(1, yRail.clientHeight);
+            const thumbHeight = Math.max(42, Math.round((timelineScroll.clientHeight / timelineScroll.scrollHeight) * railHeight));
+            const safeThumbHeight = Math.min(railHeight, thumbHeight);
+            const top = Math.round((timelineScroll.scrollTop / maxY) * Math.max(1, railHeight - safeThumbHeight));
+            yThumb.style.height = `${safeThumbHeight}px`;
+            yThumb.style.transform = `translateY(${top}px)`;
+          }
+        }
+        function startMarqueeSelection(event) {
+          const startX = event.clientX;
+          const startY = event.clientY;
+          const additive = event.shiftKey;
+          const initial = new Set(selectedClipIds);
+          const box = document.createElement("div");
+          box.className = "editor-marquee";
+          timeline.append(box);
+          marquee = {box, startX, startY, additive, initial};
+          const update = (moveEvent) => {
+            const left = Math.min(startX, moveEvent.clientX);
+            const top = Math.min(startY, moveEvent.clientY);
+            const width = Math.abs(moveEvent.clientX - startX);
+            const height = Math.abs(moveEvent.clientY - startY);
+            const timelineRect = timeline.getBoundingClientRect();
+            box.style.left = `${left - timelineRect.left}px`;
+            box.style.top = `${top - timelineRect.top}px`;
+            box.style.width = `${width}px`;
+            box.style.height = `${height}px`;
+            const rect = {left, top, right: left + width, bottom: top + height};
+            const ids = new Set(additive ? initial : []);
+            root.querySelectorAll(".editor-layer-clip").forEach((node) => {
+              const item = node.getBoundingClientRect();
+              const intersects = item.left <= rect.right && item.right >= rect.left && item.top <= rect.bottom && item.bottom >= rect.top;
+              if (intersects) ids.add(node.dataset.clipId);
+            });
+            setSelection(Array.from(ids), selectedClipId);
+            root.querySelectorAll(".editor-layer-clip").forEach((node) => node.classList.toggle("is-selected", selectedClipIds.has(node.dataset.clipId)));
+            renderProperties();
+          };
+          const finish = (upEvent) => {
+            timeline.releasePointerCapture(upEvent.pointerId);
+            box.remove();
+            marquee = null;
+            timeline.removeEventListener("pointermove", update);
+            timeline.removeEventListener("pointerup", finish);
+            timeline.removeEventListener("pointercancel", finish);
+            if (Math.abs(upEvent.clientX - startX) < 4 && Math.abs(upEvent.clientY - startY) < 4 && !additive) {
+              selectOnly("");
+              seekFromClient(upEvent.clientX);
+            }
+            render();
+          };
+          timeline.setPointerCapture(event.pointerId);
+          timeline.addEventListener("pointermove", update);
+          timeline.addEventListener("pointerup", finish);
+          timeline.addEventListener("pointercancel", finish);
+        }
+        function closeConfirm(result = false) {
+          if (confirmModal) confirmModal.hidden = true;
+          if (pendingConfirm) pendingConfirm(result);
+          pendingConfirm = null;
+        }
+        async function renameProjectTitle(nextTitle) {
+          await ensureProject();
+          const data = await jsonFetch(`${api}${projectId}/rename/`, {method: "POST", body: JSON.stringify({title: nextTitle})});
+          const savedTitle = data.project?.title || nextTitle;
+          title.textContent = savedTitle;
+          state.title = savedTitle;
+          return savedTitle;
+        }
+        function startTitleEdit() {
+          if (title.querySelector("input")) return;
+          const original = title.textContent.trim() || "New project";
+          const input = document.createElement("input");
+          input.className = "editor-title-input";
+          input.value = original;
+          input.maxLength = 180;
+          title.textContent = "";
+          title.append(input);
+          input.focus();
+          input.select();
+          let done = false;
+          const finish = async (save) => {
+            if (done) return;
+            done = true;
+            const next = input.value.trim() || original;
+            title.textContent = original;
+            if (!save || next === original) return;
+            setStatus("Saving...");
+            try {
+              await renameProjectTitle(next);
+              setStatus(`Saved ${savedTime()}`);
+            } catch (error) {
+              setStatus("Rename failed", true);
+            }
+          };
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") finish(true);
+            if (event.key === "Escape") finish(false);
+          });
+          input.addEventListener("blur", () => finish(true));
+        }
+        async function startExport() {
+          if (!renderExport) return;
+          clearTimeout(saveTimer);
+          await saveProject();
+          renderExport.disabled = true;
+          if (exportDownload) exportDownload.hidden = true;
+          if (exportProgress) exportProgress.hidden = false;
+          if (exportProgressBar) exportProgressBar.style.width = "4%";
+          if (exportStatus) exportStatus.textContent = "Starting export...";
+          try {
+            const data = await jsonFetch(`${api}${projectId}/export/`, {method: "POST", body: JSON.stringify({quality: exportQuality, preset: exportPreset})});
+            pollExport(data.job);
+            refreshExportQueue();
+          } catch (error) {
+            if (exportStatus) exportStatus.textContent = "Export failed";
+            renderExport.disabled = false;
+          }
+        }
+        function pollExport(job) {
+          if (!job) return;
+          if (exportProgressBar) exportProgressBar.style.width = `${Math.max(4, Number(job.progress || 0))}%`;
+          if (exportStatus) exportStatus.textContent = job.error || job.message || job.status || "Rendering...";
+          if (job.status === "done") {
+            if (exportDownload) {
+              exportDownload.href = job.download_url;
+              exportDownload.hidden = false;
+              exportDownload.textContent = job.size_text ? `Download MP4 (${job.size_text})` : "Download MP4";
+            }
+            renderExport.disabled = false;
+            refreshExportQueue();
+            return;
+          }
+          if (job.status === "failed") {
+            renderExport.disabled = false;
+            refreshExportQueue();
+            return;
+          }
+          window.setTimeout(async () => {
+            try {
+              const data = await jsonFetch(`${api}${projectId}/export/${job.id}/`);
+              pollExport(data.job);
+            } catch (error) {
+              if (exportStatus) exportStatus.textContent = "Export status failed";
+              renderExport.disabled = false;
+            }
+          }, 1200);
+        }
+        function classifyFile(file) {
+          const type = (file?.type || "").toLowerCase();
+          const name = (file?.name || "").toLowerCase();
+          const extension = (name.match(/\.[a-z0-9]+$/) || [""])[0];
+          const isVideo = type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv|avi|gif)$/.test(name);
+          const isAudio = type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac)$/.test(name);
+          const isImage = type.startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|avif|bmp|tif|tiff|svg)$/.test(name);
+          const isPdf = type === "application/pdf" || extension === ".pdf";
+          const isDocument = type.startsWith("text/") || /\.(doc|docx|ppt|pptx|xls|xlsx|txt|csv|json|rtf)$/.test(name);
+          const visualKind = isImage ? "image" : isPdf ? "pdf" : isDocument ? "document" : isVideo ? "video" : "file";
+          const kind = isVideo ? "video" : isAudio ? "audio" : "image";
+          return {kind, visualKind, isVisual: kind === "video" || kind === "image", isAudio, isVideo, extension};
+        }
+        function kindFromFile(file) {
+          return classifyFile(file).kind;
+        }
+        function hasDraggedFiles(event) {
+          const types = Array.from(event.dataTransfer?.types || []);
+          const items = Array.from(event.dataTransfer?.items || []);
+          return types.includes("Files") || items.some((item) => item.kind === "file");
+        }
+        function hasDraggedAsset(event) {
+          return Array.from(event.dataTransfer?.types || []).includes("application/x-cherryx-asset");
+        }
+        function droppedFiles(event) {
+          return Array.from(event.dataTransfer?.files || []).filter(Boolean);
+        }
+        function isImageAsset(asset) {
+          return Boolean(asset && (asset.is_previewable_image || String(asset.media_type || "").startsWith("image/")));
+        }
+        async function handleTimelineDrop(file, lane, clientX, offset = 0) {
+          const fileInfo = classifyFile(file);
+          const kind = fileInfo.kind;
+          if (!kind) return;
+          setStatus(`Uploading ${file.name}`);
+          const acceptsVisual = fileInfo.isVisual && ["video", "image"].includes(lane.dataset.trackType);
+          const trackId = lane.dataset.trackType === kind || acceptsVisual ? lane.dataset.trackId : (state.tracks.find((track) => track.type === kind)?.id || lane.dataset.trackId);
+          const rect = timeRuler.getBoundingClientRect();
+          const start = pxToSeconds(clientX - rect.left) + offset;
+          const thumbnail = kind === "video" ? await thumbnailFromVideo(file) : "";
+          const mediaSeconds = await mediaDuration(file, kind);
+          const asset = await uploadAsset(file, kind, thumbnail, mediaSeconds);
+          if (!asset) {
+            setStatus(`Upload failed: ${file.name}`, true);
+            return;
+          }
+          const duration = kind === "image" ? 5 : Math.max(1, Number(asset.duration || mediaSeconds || 5));
+          addClip({
+            id: uid(kind),
+            type: kind,
+            trackId,
+            assetId: asset.id,
+            start,
+            duration,
+            sourceStart: 0,
+            sourceEnd: duration,
+            x: 50,
+            y: 50,
+            scale: kind === "image" ? 42 : 100,
+            style: {},
+            text: "",
+          });
+          setStatus(`Added at ${fmt(start)}`);
+        }
 
-        fileInput.addEventListener("change", () => Array.from(fileInput.files || []).forEach((file) => handleFile(file, "video")));
-        videoPanelInput.addEventListener("change", () => Array.from(videoPanelInput.files || []).forEach((file) => handleFile(file, "video")));
-        audioInput.addEventListener("change", () => handleFile(audioInput.files[0], "audio"));
+        fileInput.addEventListener("change", () => Array.from(fileInput.files || []).forEach((file) => handleFile(file)));
+        videoPanelInput.addEventListener("change", () => Array.from(videoPanelInput.files || []).forEach((file) => handleFile(file)));
+        audioInput.addEventListener("change", () => {
+          if (audioPanelName && audioInput.files[0]) audioPanelName.textContent = audioInput.files[0].name;
+          handleFile(audioInput.files[0], "audio");
+        });
         imageInput.addEventListener("change", () => handleFile(imageInput.files[0], "image"));
         dropzone.addEventListener("dragover", (event) => { event.preventDefault(); dropzone.classList.add("is-dragging"); });
         dropzone.addEventListener("dragleave", () => dropzone.classList.remove("is-dragging"));
         dropzone.addEventListener("drop", (event) => {
           event.preventDefault();
           dropzone.classList.remove("is-dragging");
-          handleFile(event.dataTransfer.files[0], "video");
+          Array.from(event.dataTransfer.files || []).forEach((file) => handleFile(file));
         });
         play.addEventListener("click", () => playing ? pausePlayback() : startPlayback());
         seek.addEventListener("input", () => seekTo((Number(seek.value) / 1000) * timelineDuration()));
+        playhead.addEventListener("pointerdown", startPlayheadDrag);
         timeline.addEventListener("pointerdown", (event) => {
-          const deleteButton = event.target.closest("[data-delete-inline]");
-          if (deleteButton) {
-            event.stopImmediatePropagation();
-            event.preventDefault();
-            const clipNode = deleteButton.closest(".editor-layer-clip");
-            deleteClipById(clipNode?.dataset.clipId || "");
-            return;
-          }
-          if (event.target.closest(".editor-layer-clip,button,input,label")) return;
-          if (timeline.isConnected) timeline.setPointerCapture(event.pointerId);
-          timeline.dataset.scrubbing = "true";
-          seekFromClient(event.clientX);
+          if (event.target.closest(".editor-playhead,.editor-layer-clip,button,input,label")) return;
+          event.preventDefault();
+          startMarqueeSelection(event);
         }, true);
         timeline.addEventListener("pointermove", (event) => {
           if (timeline.dataset.scrubbing === "true") seekFromClient(event.clientX);
@@ -1345,23 +2310,19 @@
           timeline.dataset.scrubbing = "false";
           if (timeline.hasPointerCapture(event.pointerId)) timeline.releasePointerCapture(event.pointerId);
         });
-        timeline.addEventListener("click", (event) => {
-          const button = event.target.closest("[data-delete-inline]");
-          if (!button) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          const clipNode = button.closest(".editor-layer-clip");
-          deleteClipById(clipNode?.dataset.clipId || "");
-        }, true);
         video.addEventListener("timeupdate", sync);
         video.addEventListener("loadedmetadata", sync);
         video.addEventListener("pause", () => { if (playing && !internalVideoPause) pausePlayback(); });
-        root.querySelectorAll("[data-aspect]").forEach((button) => button.addEventListener("click", () => {
-          state.aspect = button.dataset.aspect.replace("/", " / ");
-          root.querySelectorAll("[data-aspect]").forEach((item) => item.classList.toggle("is-active", item === button));
-          render();
-          scheduleSave();
-        }));
+        aspectToggle?.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const open = Boolean(aspectOptions?.hidden);
+          if (aspectOptions) aspectOptions.hidden = !open;
+          aspectMenu?.classList.toggle("is-open", open);
+          aspectToggle.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+        aspectMenu?.addEventListener("click", (event) => event.stopPropagation());
+        document.addEventListener("click", closeAspectMenu);
+        root.querySelectorAll("[data-aspect]").forEach((button) => button.addEventListener("click", () => setAspectFromButton(button)));
         root.querySelectorAll("[data-editor-tool]").forEach((button) => button.addEventListener("click", () => {
           const tool = button.dataset.editorTool;
           root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item === button));
@@ -1377,11 +2338,17 @@
         root.querySelectorAll("[data-add-kind]").forEach((button) => button.addEventListener("click", () => {
           const kind = button.dataset.addKind;
           if (kind === "text") addTextClip();
+          if (kind === "video") videoPanelInput.click();
           if (kind === "image") imageInput.click();
           if (kind === "audio") audioInput.click();
           if (kind === "voice") root.querySelector("[data-record-audio]").click();
         }));
         root.querySelectorAll("[data-add-track]").forEach((button) => button.addEventListener("click", () => addTrack(button.dataset.addTrack)));
+        mediaFilters?.querySelectorAll("[data-media-filter]").forEach((button) => button.addEventListener("click", () => {
+          mediaFilter = button.dataset.mediaFilter || "all";
+          mediaFilters.querySelectorAll("[data-media-filter]").forEach((item) => item.classList.toggle("is-active", item === button));
+          renderMediaBin();
+        }));
         root.querySelectorAll("[data-undo]").forEach((button) => button.addEventListener("click", undo));
         root.querySelectorAll("[data-redo]").forEach((button) => button.addEventListener("click", redo));
         root.querySelectorAll("[data-duplicate-clip]").forEach((button) => button.addEventListener("click", duplicateSelectedClip));
@@ -1396,49 +2363,70 @@
           renderTracks();
         });
         root.querySelectorAll("[data-split-clip]").forEach((button) => button.addEventListener("click", splitSelectedClip));
-        root.querySelectorAll("[data-zoom-timeline]").forEach((button) => button.addEventListener("click", () => setTimelineScale(timelineScale + Number(button.dataset.zoomTimeline) * 12)));
+        root.querySelectorAll("[data-zoom-timeline]").forEach((button) => button.addEventListener("click", () => zoomTimeline(Number(button.dataset.zoomTimeline))));
         root.querySelector("[data-zoom-fit]").addEventListener("click", () => {
           const rect = timeline.closest(".editor-timeline-scroll").getBoundingClientRect();
-          setTimelineScale(Math.max(28, (rect.width - 90) / timelineDuration()));
+          setTimelineScale(Math.max(timelineScaleMin, (rect.width - 90) / timelineDuration()));
         });
         root.querySelector("[data-add-text]").addEventListener("click", addTextClip);
-        root.querySelectorAll("[data-delete-clip]").forEach((button) => button.addEventListener("click", deleteSelectedClip));
+        root.querySelector("[data-add-caption]")?.addEventListener("click", () => addCaptionClip("Caption", currentTime(), 3));
+        subtitleInput?.addEventListener("change", async () => {
+          const file = subtitleInput.files?.[0];
+          if (!file) return;
+          const text = await file.text();
+          parseSubtitleText(text).forEach((cue) => addCaptionClip(cue.text, cue.start, cue.end - cue.start));
+          subtitleInput.value = "";
+        });
+        root.querySelectorAll("[data-delete-clip]").forEach((button) => button.addEventListener("click", confirmDeleteSelectedClip));
+        title.addEventListener("dblclick", startTitleEdit);
+        saveRetry?.addEventListener("click", saveProject);
+        exportShortcut?.addEventListener("click", () => {
+          root.querySelector('[data-editor-tool="export"]')?.click();
+          root.querySelector("[data-tool-panel='export']")?.scrollIntoView({block: "nearest"});
+        });
+        root.querySelectorAll("[data-export-quality]").forEach((button) => button.addEventListener("click", () => {
+          exportQuality = button.dataset.exportQuality || "720p";
+          root.querySelectorAll("[data-export-quality]").forEach((item) => item.classList.toggle("is-active", item === button));
+        }));
+        renderExport?.addEventListener("click", startExport);
+        exportCover?.addEventListener("click", async () => {
+          await ensureProject();
+          const data = await jsonFetch(`${api}${projectId}/cover/`, {method: "POST", body: JSON.stringify({time: currentTime()})});
+          renderExportQueue([data.job]);
+          refreshExportQueue();
+        });
+        root.querySelectorAll("[data-export-preset]").forEach((button) => button.addEventListener("click", () => {
+          exportPreset = button.dataset.exportPreset || "";
+          const aspect = exportPreset === "youtube" ? "16 / 9" : exportPreset === "square" ? "1 / 1" : "9 / 16";
+          state.aspect = aspect;
+          frame.style.setProperty("--editor-aspect", aspect);
+          exportQuality = "1080p";
+          root.querySelectorAll("[data-export-quality]").forEach((item) => item.classList.toggle("is-active", item.dataset.exportQuality === "1080p"));
+          syncAspectMenu();
+          scheduleSave();
+        }));
+        confirmCancel.forEach((button) => button.addEventListener("click", () => closeConfirm(false)));
+        confirmAction?.addEventListener("click", () => closeConfirm(true));
         ["start", "duration", "end", "x", "y", "scale", "rotation"].forEach((name) => {
           const input = root.querySelector(`[data-clip-${name}]`);
           input.addEventListener("change", () => {
             const clip = selectedClip();
             if (!clip) return;
-            pushHistory();
             const value = Number(input.value);
-            if (name === "start") clip.start = Math.max(0, value);
-            if (name === "duration") clip.duration = Math.max(0.25, value);
-            if (name === "end") clip.duration = Math.max(0.25, value - clip.start);
-            if (name === "x") clip.x = Math.max(0, Math.min(100, value));
-            if (name === "y") clip.y = Math.max(0, Math.min(100, value));
-            if (name === "scale") clip.scale = Math.max(8, Math.min(160, value));
-            if (name === "rotation") clip.rotation = value;
-            render();
-            scheduleSave();
+            updateClipPatch([clip.id], {[name]: value});
           });
         });
         root.querySelector("[data-clip-fit]").addEventListener("change", (event) => {
           const clip = selectedClip();
           if (!clip) return;
-          pushHistory();
-          clip.style = clip.style || {};
-          clip.style.fit = event.target.value;
-          renderPreview();
+          updateClipPatch([clip.id], {style: {fit: event.target.value}});
           syncMediaForProjectTime(playing);
-          scheduleSave();
         });
         root.querySelector("[data-clip-speed]").addEventListener("change", (event) => {
           const clip = selectedClip();
           if (!clip) return;
-          pushHistory();
-          clip.style = clip.style || {};
-          clip.style.speed = Number(event.target.value);
+          updateClipPatch([clip.id], {style: {speed: Number(event.target.value)}});
           syncMediaForProjectTime(playing);
-          scheduleSave();
         });
         root.querySelectorAll(".editor-choice").forEach((choice) => {
           const input = choice.closest("label")?.querySelector("input[type='hidden']");
@@ -1460,15 +2448,31 @@
         });
         root.querySelectorAll("[data-bg]").forEach((button) => button.addEventListener("click", () => {
           state.background = button.dataset.bg;
-          frame.style.background = state.background;
+          state.backgroundValue = button.dataset.bg;
+          applyBackgroundMode();
           scheduleSave();
         }));
+        root.querySelectorAll("[data-bg-mode]").forEach((button) => button.addEventListener("click", () => {
+          state.backgroundMode = button.dataset.bgMode || "solid";
+          root.querySelectorAll("[data-bg-mode]").forEach((item) => item.classList.toggle("is-active", item === button));
+          applyBackgroundMode();
+          scheduleSave();
+        }));
+        root.querySelector("[data-fit-auto]")?.addEventListener("click", () => {
+          const clip = selectedClip();
+          if (!clip || !["video", "image"].includes(clip.type)) return;
+          updateClipPatch([clip.id], {style: {fit: state.aspect === "9 / 16" ? "cover" : "contain"}});
+        });
+        root.querySelector("[data-crop-mode]")?.addEventListener("click", (event) => {
+          cropMode = !cropMode;
+          event.currentTarget.classList.toggle("is-active", cropMode);
+          const clip = selectedClip();
+          if (clip && cropMode) updateClipPatch([clip.id], {style: {fit: "crop", crop: clip.style?.crop || {x: 10, y: 10, width: 80, height: 80}}});
+        });
         root.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => {
           const clip = selectedClip();
           if (!clip || !["video", "image"].includes(clip.type)) return;
-          pushHistory();
-          clip.style = clip.style || {};
-          clip.style.filter = button.dataset.filter;
+          updateClipPatch([clip.id], {style: {filter: button.dataset.filter}}, {render: false});
           applyClipEffects();
         }));
         ["brightness", "contrast", "saturate", "opacity"].forEach((name) => {
@@ -1476,9 +2480,7 @@
           input.addEventListener("input", () => {
             const clip = selectedClip();
             if (!clip || !["video", "image"].includes(clip.type)) return;
-            pushHistory();
-            clip.style = clip.style || {};
-            clip.style[name] = Number(input.value);
+            updateClipPatch([clip.id], {style: {[name]: Number(input.value)}}, {render: false});
             applyClipEffects();
           });
         });
@@ -1489,12 +2491,9 @@
         root.querySelector("[data-volume]").addEventListener("input", (event) => {
           const clip = selectedClip();
           if (!clip || !["video", "audio"].includes(clip.type)) return;
-          pushHistory();
-          clip.style = clip.style || {};
-          clip.style.volume = Number(event.target.value);
+          updateClipPatch([clip.id], {style: {volume: Number(event.target.value)}}, {render: false});
           syncMediaForProjectTime(playing);
           updateEffectControls(clip);
-          scheduleSave();
         });
         root.querySelector("[data-mute]").addEventListener("click", () => {
           video.muted = !video.muted;
@@ -1537,18 +2536,29 @@
           if (action === "split") splitSelectedClip();
           if (action === "front") changeSelectedZ(1);
           if (action === "back") changeSelectedZ(-1);
-          if (action === "delete") deleteSelectedClip();
+          if (action === "delete") confirmDeleteSelectedClip();
           hideClipMenu();
         });
         document.addEventListener("click", (event) => {
           if (!clipMenu?.contains(event.target)) hideClipMenu();
         });
         document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && confirmModal && !confirmModal.hidden) {
+            closeConfirm(false);
+            return;
+          }
+          if (event.key === "Escape") {
+            hideClipMenu();
+            selectOnly("");
+            render();
+            return;
+          }
           if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
           if (event.code === "Space") {
             event.preventDefault();
             playing ? pausePlayback() : startPlayback();
           }
+          if (readOnly) return;
           if (event.key.toLowerCase() === "s") splitSelectedClip();
           if (event.key === "Delete" || event.key === "Backspace") deleteSelectedClip();
           if (event.ctrlKey && event.key.toLowerCase() === "d") {
@@ -1556,15 +2566,20 @@
             duplicateSelectedClip();
           }
           if (event.ctrlKey && event.key.toLowerCase() === "c") {
-            const clip = selectedClip();
-            if (clip) copiedClip = JSON.stringify(clip);
+            event.preventDefault();
+            copiedClips = selectedClips().map((clip) => JSON.parse(JSON.stringify(clip)));
+            copiedClip = copiedClips[0] ? JSON.stringify(copiedClips[0]) : null;
           }
-          if (event.ctrlKey && event.key.toLowerCase() === "v" && copiedClip) {
+          if (event.ctrlKey && event.key.toLowerCase() === "v" && (copiedClips.length || copiedClip)) {
             event.preventDefault();
             pushHistory();
-            const clip = normalizeClip({...JSON.parse(copiedClip), id: uid("paste"), start: projectTime});
-            state.clips.push(clip);
-            selectedClipId = clip.id;
+            const source = copiedClips.length ? copiedClips : [JSON.parse(copiedClip)];
+            const minStart = Math.min(...source.map((clip) => Number(clip.start || 0)));
+            const maxEnd = Math.max(...source.map((clip) => Number(clip.start || 0) + Number(clip.duration || 0)));
+            const offset = projectTime >= minStart && projectTime <= maxEnd ? 0.5 : projectTime - minStart;
+            const pasted = source.map((clip) => normalizeClip({...clip, id: uid("paste"), start: Math.max(0, Number(clip.start || 0) + offset)}));
+            state.clips.push(...pasted);
+            setSelection(pasted.map((clip) => clip.id), pasted[0]?.id || "");
             render();
             scheduleSave();
           }
@@ -1576,6 +2591,11 @@
             event.preventDefault();
             redo();
           }
+        });
+        window.addEventListener("beforeunload", (event) => {
+          if (!dirty && !saving && !saveFailed) return;
+          event.preventDefault();
+          event.returnValue = "";
         });
         root.querySelector("[data-record-audio]").addEventListener("click", async (event) => {
           if (recorder && recorder.state === "recording") {
@@ -1622,7 +2642,16 @@
           delete input.dataset.historyStarted;
         }));
 
+        if (readOnly) {
+          root.classList.add("is-view-only");
+          root.querySelectorAll("button, input, select, textarea").forEach((control) => {
+            if (control.matches("[data-editor-play],[data-editor-seek]") || control.closest(".editor-playbar")) return;
+            control.disabled = true;
+          });
+          if (saveStatus) saveStatus.textContent = "View only";
+        }
         render();
+        refreshExportQueue();
       })();
     </script>
   </body>

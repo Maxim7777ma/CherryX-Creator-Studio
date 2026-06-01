@@ -1,0 +1,48 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ interface_language|default:'en' }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CherryX invite</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+  </head>
+  <body class="theme-{{ theme_mode }} invite-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <main class="invite-shell">
+      <section class="invite-hero">
+        <a class="back-link eyebrow" href="{% url 'studio:landing' %}">CherryX Creator Studio</a>
+        <span>{{ resource_label }}</span>
+        <h1>{% if status == "wrong_email" %}This invite is for another email{% elif status == "expired" %}Invite expired{% elif status == "missing" %}Project unavailable{% else %}You were invited to collaborate{% endif %}</h1>
+        <p>
+          {% if status == "ready" %}
+            {{ owner_display }} invited you to open <b>{{ resource_title }}</b> as {{ role }}.
+          {% elif status == "wrong_email" %}
+            Sign in with {{ share.email }} to accept this CherryX invite.
+          {% elif status == "expired" %}
+            Ask the owner to send a fresh invitation.
+          {% else %}
+            The project may have been removed or the invitation was revoked.
+          {% endif %}
+        </p>
+        <div class="invite-actions">
+          {% if status == "ready" or status == "wrong_email" %}
+            <a class="primary-action" href="{{ login_url }}">Sign in to accept</a>
+            <a class="topbar-link detail-workspace-link" href="{{ register_url }}">Create account</a>
+          {% else %}
+            <a class="primary-action" href="{% url 'studio:landing' %}">Back to CherryX</a>
+          {% endif %}
+        </div>
+      </section>
+      <section class="invite-card">
+        <div class="invite-preview" style="{% if preview_url %}background-image: linear-gradient(180deg, rgba(2,6,23,.04), rgba(2,6,23,.58)), url('{{ preview_url }}');{% endif %}">
+          <span>{{ resource_label }}</span>
+        </div>
+        <div>
+          <small>Shared project</small>
+          <strong>{{ resource_title }}</strong>
+          <p>{{ owner_display }} · {{ role|title }} access</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

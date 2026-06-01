@@ -92,6 +92,91 @@ class VideoEditorAsset(models.Model):
         return f"video-asset:{self.id}:{self.kind}:{self.original_name}"
 
 
+class DesignerProject(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="designer_projects", null=True, blank=True, on_delete=models.CASCADE)
+    guest_key = models.CharField(max_length=80, blank=True, db_index=True)
+    title = models.CharField(max_length=180, default="New design")
+    state_json = models.JSONField(default=dict, blank=True)
+    storage_bytes = models.BigIntegerField(default=0)
+    preview_path = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["owner", "-updated_at"]),
+            models.Index(fields=["guest_key", "-updated_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"design-project:{self.id}:{self.title}"
+
+
+class DesignerAsset(models.Model):
+    project = models.ForeignKey(DesignerProject, related_name="assets", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=16, db_index=True, default="image")
+    file_path = models.TextField()
+    media_type = models.CharField(max_length=120, default="application/octet-stream")
+    size = models.BigIntegerField(default=0)
+    original_name = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"design-asset:{self.id}:{self.original_name}"
+
+
+class WorkspaceShare(models.Model):
+    RESOURCE_DESIGN = "design_project"
+    RESOURCE_VIDEO = "video_project"
+    RESOURCE_CHOICES = [
+        (RESOURCE_DESIGN, "Design project"),
+        (RESOURCE_VIDEO, "Video project"),
+    ]
+    ROLE_VIEWER = "viewer"
+    ROLE_EDITOR = "editor"
+    ROLE_CHOICES = [
+        (ROLE_VIEWER, "Viewer"),
+        (ROLE_EDITOR, "Editor"),
+    ]
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REVOKED = "revoked"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_REVOKED, "Revoked"),
+    ]
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="owned_workspace_shares", on_delete=models.CASCADE)
+    invited_user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="workspace_shares", null=True, blank=True, on_delete=models.SET_NULL)
+    resource_type = models.CharField(max_length=32, choices=RESOURCE_CHOICES, db_index=True)
+    resource_id = models.PositiveBigIntegerField(db_index=True)
+    email = models.EmailField(db_index=True)
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_VIEWER)
+    token = models.CharField(max_length=80, unique=True, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "resource_type", "resource_id", "email"], name="unique_workspace_share_invite"),
+        ]
+        indexes = [
+            models.Index(fields=["resource_type", "resource_id", "status"]),
+            models.Index(fields=["invited_user", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"share:{self.resource_type}:{self.resource_id}:{self.email}:{self.role}:{self.status}"
+
+
 class AccountProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="studio_profile", on_delete=models.CASCADE)
     avatar_url = models.URLField(max_length=600, blank=True)

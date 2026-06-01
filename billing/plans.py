@@ -19,7 +19,7 @@ class AccessPlan:
     @property
     def price_display(self) -> str:
         whole = self.price_cents // 100
-        return f"${whole}"
+        return f"{whole}$"
 
     @property
     def price_label(self) -> str:
@@ -27,6 +27,23 @@ class AccessPlan:
 
 
 PLANS: tuple[AccessPlan, ...] = (
+    AccessPlan(
+        code="free",
+        name="Free",
+        badge="3 days",
+        price_cents=0,
+        currency="USD",
+        period_days=3,
+        headline="Explore the studio with light limits",
+        description="Three days to try the core tools, create drafts, preview results and understand the workflow.",
+        features=(
+            "All core tools included",
+            "Light storage and smaller files",
+            "Preview results before download",
+            "Perfect for a first look",
+        ),
+        storage_bytes=512 * 1024 * 1024,
+    ),
     AccessPlan(
         code="starter",
         name="Starter",

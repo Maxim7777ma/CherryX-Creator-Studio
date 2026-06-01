@@ -1,0 +1,27 @@
+<div class="workspace-share-modal" data-share-modal data-resource-type="{{ share_resource_type }}" data-resource-id="{{ share_resource_id|default:'' }}" hidden>
+  <div class="workspace-share-backdrop" data-share-close></div>
+  <section class="workspace-share-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-share-title">
+    <header>
+      <span>Workspace sharing</span>
+      <button type="button" data-share-close aria-label="Close"></button>
+    </header>
+    <h2 id="workspace-share-title">Share project</h2>
+    <form data-share-form>
+      <input type="email" name="email" placeholder="teammate@example.com" autocomplete="email" required>
+      <input type="hidden" name="role" value="viewer">
+      <button type="submit">Send invite</button>
+      <div class="workspace-role-picker" data-role-picker aria-label="Access role">
+        <button class="is-active" type="button" data-role-option="viewer" aria-pressed="true">
+          <span>View</span>
+          <small>Preview only</small>
+        </button>
+        <button type="button" data-role-option="editor" aria-pressed="false">
+          <span>Edit</span>
+          <small>Save changes</small>
+        </button>
+      </div>
+    </form>
+    <div class="workspace-share-status" data-share-status></div>
+    <div class="workspace-share-list" data-share-list></div>
+  </section>
+</div>

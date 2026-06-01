@@ -4,14 +4,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Video projects - CherryX Creator Studio</title>
+    <title>Design projects - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
   </head>
-  <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+  <body class="theme-{{ theme_mode }} detail-page video-projects-page design-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
-        <h1>Video projects</h1>
+        <h1>Design projects</h1>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
@@ -19,20 +19,20 @@
       </div>
     </header>
 
-    <main class="video-projects-shell" data-video-projects data-editor-url="{{ video_editor_url }}" data-api-url="{{ video_projects_api_url }}">
+    <main class="video-projects-shell design-projects-shell" data-design-projects data-designer-url="{{ designer_url }}" data-api-url="{{ design_projects_api_url }}">
       <section class="video-projects-head">
         <div>
-          <span>Video editing</span>
+          <span>Design workspace</span>
           <strong>Projects</strong>
-          <small><b data-project-total>{{ video_projects|length }}</b> in workspace</small>
+          <small><b data-project-total>{{ design_projects|length }}</b> in workspace</small>
         </div>
-        <button type="button" data-create-project>Create project</button>
+        <button type="button" data-create-project>New design</button>
       </section>
 
       <section class="video-project-bulk" data-project-bulk hidden>
         <div>
           <span data-selected-count>0 selected</span>
-          <strong>Manage selected projects</strong>
+          <strong>Manage selected designs</strong>
         </div>
         <div>
           <button type="button" data-clear-selection>Clear</button>
@@ -41,34 +41,37 @@
       </section>
 
       <section class="video-projects-grid" data-project-grid>
-        {% for project in video_projects %}
-          <article class="video-project-card" data-project-id="{{ project.id }}" data-project-title="{{ project.title }}">
+        {% for project in design_projects %}
+          <article class="video-project-card design-project-card" data-project-id="{{ project.id }}" data-project-title="{{ project.title }}">
             <label class="video-project-select" aria-label="Select project">
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
-            <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.08), rgba(2,6,23,.72)), url('{{ project.thumbnail }}');{% endif %}">
-              <span>{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
-              <b>{{ project.layer_count }} clips · {{ project.track_count }} tracks</b>
+            <a class="video-project-thumb design-project-thumb" href="{{ designer_url }}?project={{ project.id }}" style="{% if project.preview_url %}background-image: linear-gradient(180deg, rgba(2,6,23,.06), rgba(2,6,23,.62)), url('{{ project.preview_url }}');{% endif %}">
+              <span>{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} frames{% endif %}</span>
+              <b>{{ project.object_count }} layers · {{ project.storage_text }}</b>
             </a>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="Double-click to rename">{{ project.title }}</strong>
-              <span>{% if project.clip_name %}{{ project.clip_name }} · {% endif %}{{ project.storage_text }}</span>
+              <span>{{ project.vector_count }} vectors · {{ project.storage_text }}</span>
             </div>
             <div class="video-project-actions">
-              <a href="{{ video_editor_url }}?project={{ project.id }}">Open</a>
-              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}">Delete</button>{% endif %}
+              <a href="{{ designer_url }}?project={{ project.id }}">Open</a>
+              {% if project.is_owner %}
+                <button type="button" data-duplicate-project="{{ project.id }}">Duplicate</button>
+                <button type="button" data-delete-project="{{ project.id }}">Delete</button>
+              {% endif %}
             </div>
           </article>
         {% endfor %}
       </section>
 
-      <article class="video-project-empty" data-project-empty {% if video_projects %}hidden{% endif %}>
+      <article class="video-project-empty design-project-empty" data-project-empty {% if design_projects %}hidden{% endif %}>
         <div>
-          <strong>No projects yet</strong>
-          <span>Create your first edit, upload video, and a project preview will appear here.</span>
+          <strong>No design projects yet</strong>
+          <span>Create a canvas, upload images, and your saved design previews will appear here.</span>
         </div>
-        <button type="button" data-create-project>Create project</button>
+        <button type="button" data-create-project>New design</button>
       </article>
     </main>
 
@@ -76,8 +79,8 @@
       <div class="project-delete-backdrop" data-modal-cancel></div>
       <section class="project-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="project-delete-title">
         <span>Delete confirmation</span>
-        <h2 id="project-delete-title" data-modal-title>Delete this project?</h2>
-        <p data-modal-copy>This will remove the project and its uploaded files from the server.</p>
+        <h2 id="project-delete-title" data-modal-title>Delete this design?</h2>
+        <p data-modal-copy>This will remove the design and its uploaded images from the server.</p>
         <div class="project-delete-list" data-modal-list></div>
         <footer>
           <button type="button" data-modal-cancel>Cancel</button>
@@ -97,23 +100,19 @@
             const open = switcher.classList.toggle("is-open");
             button.setAttribute("aria-expanded", open ? "true" : "false");
           });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
+          document.addEventListener("click", () => {
+            switcher.classList.remove("is-open");
+            button.setAttribute("aria-expanded", "false");
           });
         });
 
-        const root = document.querySelector("[data-video-projects]");
+        const root = document.querySelector("[data-design-projects]");
         if (!root) return;
         const apiUrl = root.dataset.apiUrl;
-        const editorUrl = root.dataset.editorUrl;
+        const designerUrl = root.dataset.designerUrl;
         const bulkBar = root.querySelector("[data-project-bulk]");
         const selectedCount = root.querySelector("[data-selected-count]");
         const totalCount = root.querySelector("[data-project-total]");
-        const clearSelection = root.querySelector("[data-clear-selection]");
-        const deleteSelected = root.querySelector("[data-delete-selected]");
         const grid = root.querySelector("[data-project-grid]");
         const emptyState = root.querySelector("[data-project-empty]");
         const modal = document.querySelector("[data-delete-modal]");
@@ -123,34 +122,19 @@
         const modalConfirm = modal?.querySelector("[data-modal-confirm]");
         const modalCancel = modal?.querySelectorAll("[data-modal-cancel]") || [];
         let pendingDelete = null;
-        const csrfToken = (() => {
-          const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
-          return match ? decodeURIComponent(match[1]) : "";
-        })();
+        const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
         const requestJson = async (url, options = {}) => {
           const response = await fetch(url, {
             ...options,
-            headers: {
-              "Accept": "application/json",
-              ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": csrfToken} : {}),
-              ...(options.headers || {}),
-            },
+            headers: {"Accept": "application/json", ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": decodeURIComponent(csrf)} : {}), ...(options.headers || {})},
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
         };
-        const escapeHtml = (value) => String(value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
+        const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         const cards = () => [...root.querySelectorAll("[data-project-id]")];
         const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
-        const projectInfo = (card) => ({
-          id: Number(card.dataset.projectId),
-          title: card.dataset.projectTitle || card.querySelector("[data-project-title-text]")?.textContent?.trim() || "Untitled project",
-        });
+        const projectInfo = (card) => ({id: Number(card.dataset.projectId), title: card.dataset.projectTitle || "Untitled design"});
         const updateEmptyState = () => {
           const count = cards().length;
           if (totalCount) totalCount.textContent = String(count);
@@ -163,31 +147,19 @@
           if (selectedCount) selectedCount.textContent = `${count} selected`;
           cards().forEach((card) => card.classList.toggle("is-selected", Boolean(card.querySelector("[data-project-select]")?.checked)));
         };
-        const setSelection = (checked) => {
-          cards().forEach((card) => {
-            const input = card.querySelector("[data-project-select]");
-            if (input) input.checked = checked;
-          });
-          updateBulkBar();
-        };
         const closeModal = () => {
           if (!modal || modalConfirm?.disabled) return;
           modal.hidden = true;
-          document.body.classList.remove("project-delete-open");
           pendingDelete = null;
         };
         const openModal = (items) => {
           if (!modal || !modalTitle || !modalCopy || !modalList) return;
           pendingDelete = items;
-          const count = items.length;
-          modalTitle.textContent = count === 1 ? "Delete this project?" : `Delete ${count} projects?`;
-          modalCopy.textContent = count === 1
-            ? "This will remove the project and its uploaded files from the server."
-            : "Selected projects and their uploaded files will be removed from the server.";
+          modalTitle.textContent = items.length === 1 ? "Delete this design?" : `Delete ${items.length} designs?`;
+          modalCopy.textContent = "Selected designs and uploaded images will be removed from the server.";
           modalList.innerHTML = items.slice(0, 5).map((item) => `<span>${escapeHtml(item.title)}</span>`).join("");
-          if (count > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${count - 5} more</small>`);
+          if (items.length > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${items.length - 5} more</small>`);
           modal.hidden = false;
-          document.body.classList.add("project-delete-open");
           modalConfirm?.focus();
         };
         const removeDeletedCards = (ids) => {
@@ -202,90 +174,66 @@
             }, 180);
           });
         };
-        const renameProject = async (card, title) => {
-          const id = Number(card.dataset.projectId);
-          const data = await requestJson(`${apiUrl}${id}/rename/`, {
-            method: "POST",
-            body: JSON.stringify({title}),
-          });
-          return data.project;
-        };
         const startRename = (titleNode) => {
           const card = titleNode.closest("[data-project-id]");
-          if (!card || card.classList.contains("is-editing-title")) return;
+          if (!card) return;
           const original = titleNode.textContent.trim();
           const input = document.createElement("input");
           input.className = "video-project-title-input";
-          input.type = "text";
           input.value = original;
           input.maxLength = 180;
-          input.setAttribute("aria-label", "Project name");
-          card.classList.add("is-editing-title");
           titleNode.replaceWith(input);
           input.focus();
           input.select();
-
-          let closed = false;
+          let done = false;
           const finish = async (save) => {
-            if (closed) return;
-            closed = true;
-            const nextTitle = input.value.trim() || original;
+            if (done) return;
+            done = true;
+            const next = input.value.trim() || original;
             const restored = document.createElement("strong");
             restored.className = "video-project-title";
             restored.dataset.projectTitleText = "";
             restored.title = "Double-click to rename";
             restored.textContent = original;
             input.replaceWith(restored);
-            card.classList.remove("is-editing-title");
             restored.addEventListener("dblclick", () => startRename(restored));
-            if (!save || nextTitle === original) return;
-            card.classList.add("is-renaming");
-            try {
-              const project = await renameProject(card, nextTitle);
-              const savedTitle = project.title || nextTitle;
-              restored.textContent = savedTitle;
-              card.dataset.projectTitle = savedTitle;
-            } finally {
-              card.classList.remove("is-renaming");
-            }
+            if (!save || next === original) return;
+            const data = await requestJson(`${apiUrl}${card.dataset.projectId}/rename/`, {method: "POST", body: JSON.stringify({title: next})});
+            restored.textContent = data.project.title || next;
+            card.dataset.projectTitle = restored.textContent;
           };
-
           input.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              finish(true);
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              finish(false);
-            }
+            if (event.key === "Enter") finish(true);
+            if (event.key === "Escape") finish(false);
           });
           input.addEventListener("blur", () => finish(true));
         };
 
         root.querySelectorAll("[data-create-project]").forEach((button) => button.addEventListener("click", async () => {
-          const state = {title: "New project", aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
-          const data = await requestJson(`${apiUrl}create/`, {
-            method: "POST",
-            body: JSON.stringify({title: "New project", state}),
-          });
-          window.location.href = `${editorUrl}?project=${data.project.id}`;
+          const data = await requestJson(`${apiUrl}create/`, {method: "POST", body: JSON.stringify({title: "New design", state: {version: 2, objects: [], vectors: []}})});
+          window.location.href = `${designerUrl}?project=${data.project.id}`;
         }));
         root.querySelectorAll("[data-project-select]").forEach((input) => input.addEventListener("change", updateBulkBar));
-        root.querySelectorAll("[data-project-title-text]").forEach((titleNode) => {
-          titleNode.addEventListener("dblclick", () => startRename(titleNode));
+        root.querySelectorAll("[data-project-title-text]").forEach((titleNode) => titleNode.addEventListener("dblclick", () => startRename(titleNode)));
+        root.querySelector("[data-clear-selection]")?.addEventListener("click", () => {
+          cards().forEach((card) => {
+            const input = card.querySelector("[data-project-select]");
+            if (input) input.checked = false;
+          });
+          updateBulkBar();
         });
-        clearSelection?.addEventListener("click", () => setSelection(false));
-        deleteSelected?.addEventListener("click", () => {
+        root.querySelector("[data-delete-selected]")?.addEventListener("click", () => {
           const items = selectedCards().map(projectInfo);
           if (items.length) openModal(items);
         });
-        root.querySelectorAll("[data-delete-project]").forEach((button) => {
-          button.addEventListener("click", () => {
-            const card = button.closest("[data-project-id]");
-            if (card) openModal([projectInfo(card)]);
-          });
-        });
+        root.querySelectorAll("[data-delete-project]").forEach((button) => button.addEventListener("click", () => {
+          const card = button.closest("[data-project-id]");
+          if (card) openModal([projectInfo(card)]);
+        }));
+        root.querySelectorAll("[data-duplicate-project]").forEach((button) => button.addEventListener("click", async () => {
+          const data = await requestJson(`${apiUrl}${button.dataset.duplicateProject}/duplicate/`, {method: "POST", body: "{}"});
+          window.location.href = `${designerUrl}?project=${data.project.id}`;
+        }));
         modalCancel.forEach((button) => button.addEventListener("click", closeModal));
         modalConfirm?.addEventListener("click", async () => {
           if (!pendingDelete?.length || !modalConfirm) return;
@@ -296,11 +244,9 @@
             const data = items.length === 1
               ? await requestJson(`${apiUrl}${items[0].id}/delete/`, {method: "POST", body: "{}"})
               : await requestJson(`${apiUrl}delete/`, {method: "POST", body: JSON.stringify({ids: items.map((item) => item.id)})});
-            const deletedIds = data.deleted_ids || items.map((item) => item.id);
             modal.hidden = true;
-            document.body.classList.remove("project-delete-open");
             pendingDelete = null;
-            removeDeletedCards(deletedIds);
+            removeDeletedCards(data.deleted_ids || items.map((item) => item.id));
           } finally {
             modalConfirm.disabled = false;
             modalConfirm.textContent = "Delete";

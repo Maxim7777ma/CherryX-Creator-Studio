@@ -45,6 +45,15 @@ def activate_access(user, plan: AccessPlan) -> CustomerAccess:
     return access
 
 
+def prorated_due_cents(current_plan: AccessPlan | None, new_plan: AccessPlan, left_seconds: float, *, renew_same_plan: bool = True) -> int:
+    if renew_same_plan and current_plan and current_plan.code == new_plan.code:
+        return new_plan.price_cents
+    if not current_plan or not current_plan.period_days or left_seconds <= 0:
+        return new_plan.price_cents
+    remaining_value = round(current_plan.price_cents * min(1, left_seconds / (current_plan.period_days * 86400)))
+    return max(0, new_plan.price_cents - remaining_value)
+
+
 def transfer_guest_workspace(guest_key: str, user) -> int:
     if not guest_key or not user or not user.is_authenticated:
         return 0
@@ -55,7 +64,7 @@ __all__ = [
     "activate_access",
     "active_access_until",
     "get_plan",
+    "prorated_due_cents",
     "transfer_guest_workspace",
     "user_has_active_access",
 ]
-

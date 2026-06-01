@@ -21,37 +21,40 @@
           <p class="topbar-note">{% ui "preview_note" %}</p>
         {% endif %}
       </div>
-      <div class="limits account-bar">
-        {% include "studio/_language_switcher.html" %}
-        <img class="account-avatar" src="{{ avatar_url }}" alt="">
-        {% if is_guest %}
-          <span>{% ui "guest_session" %}</span>
-          <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
-          <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
-        {% else %}
-          <span>{{ request.user.email }}</span>
-          {% if has_access %}
-            <button class="subscription-meter" type="button" data-subscription-open aria-expanded="false" aria-controls="subscription-drawer">
-              <span class="subscription-meter-top">
-                <b>{% ui "access" %}</b>
-                {% if active_until %}<small>{% ui "until" %} {{ active_until|date:"d.m" }}</small>{% endif %}
-              </span>
-              <span class="subscription-track" aria-hidden="true">
-                <span style="width: {{ subscription_meter.percent }}%"></span>
-              </span>
-            </button>
+      <div class="account-panel" data-account-panel>
+        <button class="account-panel-toggle" type="button" data-account-panel-toggle data-icon="panel-left-open" aria-expanded="false" aria-label="Open account panel"></button>
+        <div class="limits account-bar account-panel-content">
+          {% include "studio/_language_switcher.html" %}
+          <img class="account-avatar" src="{{ avatar_url }}" alt="">
+          {% if is_guest %}
+            <span>{% ui "guest_session" %}</span>
+            <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
+            <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
           {% else %}
-            <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "activate" %}</a>
+            <span>{{ request.user.email }}</span>
+            {% if has_access %}
+              <button class="subscription-meter" type="button" data-subscription-open aria-expanded="false" aria-controls="subscription-drawer">
+                <span class="subscription-meter-top">
+                  <b>{% ui "access" %}</b>
+                  {% if active_until %}<small>{% ui "until" %} {{ active_until|date:"d.m" }}</small>{% endif %}
+                </span>
+                <span class="subscription-track" aria-hidden="true">
+                  <span style="width: {{ subscription_meter.percent }}%"></span>
+                </span>
+              </button>
+            {% else %}
+              <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "activate" %}</a>
+            {% endif %}
+            <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
+            <form class="topbar-form" method="post" action="{% url 'studio:logout' %}">
+              {% csrf_token %}
+              <button type="submit">{% ui "logout" %}</button>
+            </form>
           {% endif %}
-          <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
-          <form class="topbar-form" method="post" action="{% url 'studio:logout' %}">
-            {% csrf_token %}
-            <button type="submit">{% ui "logout" %}</button>
-          </form>
-        {% endif %}
-        <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
-        <span>Image {{ max_image_mb }} MB</span>
-        <span>Video {{ max_video_mb }} MB</span>
+          <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
+          <span>Image {{ max_image_mb }} MB</span>
+          <span>Video {{ max_video_mb }} MB</span>
+        </div>
       </div>
     </header>
 
@@ -60,23 +63,24 @@
         <div class="subscription-drawer-backdrop" data-subscription-close></div>
         <section class="subscription-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="subscription-title">
           <header>
-            <span>Billing</span>
+            <span>{% ui "billing" %}</span>
             <button class="designer-icon-button" type="button" data-subscription-close data-icon="x" aria-label="Close"></button>
           </header>
           <div class="subscription-current">
-            <small>Текущий план</small>
+            <small>{% ui "billing_current_plan" %}</small>
             <h2 id="subscription-title">{{ subscription_panel.current_plan.name }}</h2>
             <p>{{ subscription_panel.current_plan.headline }}</p>
             <div class="subscription-current-grid">
-              <span><b>{{ subscription_panel.current_plan.price_label }}</b><small>Стоимость</small></span>
-              <span><b>{{ subscription_panel.current_plan.storage_text }}</b><small>Хранилище</small></span>
-              <span><b>{{ subscription_panel.days_left }}</b><small>Дней осталось</small></span>
-              <span><b>{{ subscription_panel.remaining_value_display }}</b><small>Примерный остаток</small></span>
+              <span><b>{{ subscription_panel.current_plan.price_label }}</b><small>{% ui "billing_price" %}</small></span>
+              <span><b>{{ subscription_panel.current_plan.storage_text }}</b><small>{% ui "billing_storage" %}</small></span>
+              <span><b>{{ subscription_panel.days_left }}</b><small>{% ui "billing_days_left" %}</small></span>
+              <span><b>{{ subscription_panel.days_used }}</b><small>{% ui "billing_days_used" %}</small></span>
+              <span><b>{{ subscription_panel.remaining_value_display }}</b><small>{% ui "billing_credit" %}</small></span>
             </div>
             <div class="subscription-storage">
-              <span><b>Объём</b><em>{{ subscription_panel.storage_used_text }}</em></span>
+              <span><b>{% ui "billing_volume" %}</b><em>{{ subscription_panel.storage_used_text }}</em></span>
               <i><b style="width: {{ subscription_panel.storage_percent }}%"></b></i>
-              <small>Доступно ещё {{ subscription_panel.storage_available_text }}</small>
+              <small>{% ui "billing_available_more" %} {{ subscription_panel.storage_available_text }}</small>
             </div>
           </div>
           <div class="subscription-plan-list">
@@ -93,15 +97,22 @@
                     <li>{{ feature }}</li>
                   {% endfor %}
                 </ul>
+                <div class="subscription-proration">
+                  <span><small>{% ui "billing_base_price" %}</small><b>{{ plan.price_display }}</b></span>
+                  {% if not plan.is_current %}
+                    <span><small>{% ui "billing_remaining_credit" %}</small><b>-{{ plan.credit_display }}</b></span>
+                  {% endif %}
+                  <span class="is-due"><small>{% ui "billing_now_due" %}</small><b>{{ plan.due_display }}</b></span>
+                </div>
                 <footer>
                   <b>{{ plan.price_display }}</b>
-                  <small>сейчас примерно {{ plan.due_display }}</small>
-                  <a href="{{ plan.checkout_url }}">{% if plan.is_current %}Продлить{% else %}Сменить план{% endif %}</a>
+                  <small>{% ui "billing_now_due" %}: {{ plan.due_display }}</small>
+                  <a href="{{ plan.checkout_url }}">{% if plan.is_current %}{% ui "billing_extend" %}{% else %}{% ui "billing_change_plan" %}{% endif %}</a>
                 </footer>
               </article>
             {% endfor %}
           </div>
-          <p class="subscription-note">Перерасчёт показан как ориентир: стоимость нового плана минус примерная ценность оставшихся дней текущего доступа. Финальная сумма подтверждается на checkout.</p>
+          <p class="subscription-note">{% ui "billing_proration_note" %}</p>
         </section>
       </aside>
     {% endif %}

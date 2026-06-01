@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 14px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border:1px solid #dbe6f3;border-radius:20px;overflow:hidden;background:#ffffff;box-shadow:0 24px 60px rgba(15,23,42,.10);">
+            <tr>
+              <td style="padding:24px 26px 18px;">
+                <p style="margin:0 0 8px;color:#2563eb;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">CherryX Creator Studio</p>
+                <h1 style="margin:0 0 10px;font-size:28px;line-height:1.12;color:#0f172a;">{{ owner_display }} invited you</h1>
+                <p style="margin:0;color:#64748b;font-size:15px;line-height:1.55;">Open <b>{{ resource_title }}</b> with {{ role }} access.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 26px 20px;">
+                <div style="border:1px solid #e2e8f0;border-radius:16px;padding:14px;background:#f8fafc;">
+                  {% if preview_url %}
+                    <div style="height:180px;border-radius:12px;background:url('{{ preview_url }}') center/cover no-repeat,#eaf1fb;"></div>
+                  {% else %}
+                    <div style="height:180px;border-radius:12px;background:linear-gradient(135deg,#dbeafe,#f8fafc);"></div>
+                  {% endif %}
+                  <p style="margin:14px 0 2px;color:#2563eb;font-size:12px;font-weight:800;">{{ resource_label }}</p>
+                  <strong style="display:block;font-size:18px;color:#0f172a;">{{ resource_title }}</strong>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 26px 26px;">
+                <a href="{{ invite_url }}" style="display:inline-block;border-radius:999px;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 18px;font-weight:800;">Open project</a>
+                <p style="margin:18px 0 0;color:#64748b;font-size:12px;line-height:1.5;">If the button does not work, copy this link:<br>{{ invite_url }}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -14,43 +14,45 @@
           <a class="back-link eyebrow" href="{% url 'studio:landing' %}">CherryX Creator Studio</a>
           {% include "studio/_language_switcher.html" %}
         </div>
-        <h1>{% if mode == "register" %}Build your creator workspace{% else %}Welcome back{% endif %}</h1>
-        <p>{% if mode == "register" %}{% ui "account_copy" %}{% else %}Sign in to manage video, design, covers, subtitles, and saved projects from one private workspace.{% endif %}</p>
+        <h1>{% if mode == "register" %}{% ui "auth_title_register" %}{% else %}{% ui "auth_title_login" %}{% endif %}</h1>
+        <p>{% if mode == "register" %}{% ui "account_copy" %}{% else %}{% ui "auth_copy_login" %}{% endif %}</p>
         <div class="brand-pills">
-          <span data-icon="box">Product</span>
-          <span data-icon="pen-tool">Design</span>
-          <span data-icon="code-2">Engineering</span>
-          <span data-icon="rocket">Launch</span>
+          <span data-icon="box" data-auth-tip="{% ui "auth_tip_product" %}" role="button" tabindex="0">{% ui "auth_pill_product" %}</span>
+          <span data-icon="pen-tool" data-auth-tip="{% ui "auth_tip_design" %}" role="button" tabindex="0">{% ui "auth_pill_design" %}</span>
+          <span data-icon="code-2" data-auth-tip="{% ui "auth_tip_engineering" %}" role="button" tabindex="0">{% ui "auth_pill_engineering" %}</span>
+          <span data-icon="rocket" data-auth-tip="{% ui "auth_tip_launch" %}" role="button" tabindex="0">{% ui "auth_pill_launch" %}</span>
         </div>
         <div class="auth-proof">
-          <article data-icon="shield-check">
-            <strong>Secure</strong>
-            <span>Account workspace</span>
+          <article data-icon="shield-check" data-auth-tip="{% ui "auth_tip_secure" %}" role="button" tabindex="0">
+            <strong>{% ui "auth_proof_secure" %}</strong>
+            <span>{% ui "auth_proof_secure_sub" %}</span>
           </article>
-          <article data-icon="zap">
-            <strong>Fast</strong>
-            <span>Background jobs</span>
+          <article data-icon="zap" data-auth-tip="{% ui "auth_tip_fast" %}" role="button" tabindex="0">
+            <strong>{% ui "auth_proof_fast" %}</strong>
+            <span>{% ui "auth_proof_fast_sub" %}</span>
           </article>
-          <article data-icon="clapperboard">
-            <strong>Creative</strong>
-            <span>Video + design tools</span>
+          <article data-icon="clapperboard" data-auth-tip="{% ui "auth_tip_creative" %}" role="button" tabindex="0">
+            <strong>{% ui "auth_proof_creative" %}</strong>
+            <span>{% ui "auth_proof_creative_sub" %}</span>
           </article>
         </div>
+        <div class="auth-tip-popover" data-auth-popover aria-live="polite"></div>
       </section>
 
       <section class="auth-card">
         <div class="auth-card-head">
-          <span>{% if mode == "register" %}New account{% else %}Private workspace{% endif %}</span>
-          <h2>{% if mode == "register" %}{% ui "create_account" %}{% else %}Sign in{% endif %}</h2>
-          <p>{% if mode == "register" %}{% ui "email_password" %}{% else %}Use your email and password to continue.{% endif %}</p>
+          <span>{% if mode == "register" %}{% ui "auth_new_account" %}{% else %}{% ui "auth_private_workspace" %}{% endif %}</span>
+          <h2>{% if mode == "register" %}{% ui "create_account" %}{% else %}{% ui "login" %}{% endif %}</h2>
+          <p>{% if mode == "register" %}{% ui "email_password" %}{% else %}{% ui "auth_use_email_password" %}{% endif %}</p>
         </div>
 
         <form method="post" class="auth-form">
           {% csrf_token %}
+          {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
           {% if form.non_field_errors %}
             <div class="form-errors" role="alert">
               {% if mode == "login" %}
-                Email or password is incorrect. Please check and try again.
+                {% ui "auth_login_error" %}
               {% else %}
                 {{ form.non_field_errors|striptags }}
               {% endif %}
@@ -62,7 +64,7 @@
               <div class="auth-input-wrap">
                 {{ field }}
                 {% if field.field.widget.input_type == 'password' %}
-                  <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="Show password"></button>
+                  <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="{% ui "auth_show_password" %}" data-show-label="{% ui "auth_show_password" %}" data-hide-label="{% ui "auth_hide_password" %}"></button>
                 {% endif %}
               </div>
               {% if field.errors %}
@@ -71,15 +73,15 @@
             </div>
           {% endfor %}
           <button class="primary-action" type="submit">
-            {% if mode == "register" %}{% ui "create_account" %}{% else %}Sign in{% endif %}
+            {% if mode == "register" %}{% ui "create_account" %}{% else %}{% ui "login" %}{% endif %}
           </button>
         </form>
 
         <p class="auth-switch">
           {% if mode == "register" %}
-            {% ui "want_try_first" %} <a href="{% url 'studio:index' %}">{% ui "start_no_registration" %}</a>
+            {% ui "want_try_first" %} <a href="{% if next_url %}{% url 'studio:login' %}?next={{ next_url|urlencode }}{% else %}{% url 'studio:index' %}{% endif %}">{% ui "start_no_registration" %}</a>
           {% else %}
-            {% ui "no_account" %} <a href="{% url 'studio:index' %}">{% ui "start_no_registration" %}</a>
+            {% ui "no_account" %} <a href="{% if next_url %}{% url 'studio:register' %}?next={{ next_url|urlencode }}{% else %}{% url 'studio:index' %}{% endif %}">{% ui "start_no_registration" %}</a>
           {% endif %}
         </p>
       </section>
@@ -108,8 +110,49 @@
             const hidden = input.type === "password";
             input.type = hidden ? "text" : "password";
             button.dataset.icon = hidden ? "eye-off" : "eye";
-            button.setAttribute("aria-label", hidden ? "Hide password" : "Show password");
+            button.setAttribute("aria-label", hidden ? button.dataset.hideLabel : button.dataset.showLabel);
           });
+        });
+
+        const authBrand = document.querySelector(".auth-brand");
+        const popover = document.querySelector("[data-auth-popover]");
+        const tipItems = document.querySelectorAll("[data-auth-tip]");
+        const closeTip = () => {
+          tipItems.forEach((item) => item.classList.remove("is-active"));
+          popover?.classList.remove("is-visible");
+        };
+        const openTip = (item) => {
+          if (!authBrand || !popover) return;
+          const brandBox = authBrand.getBoundingClientRect();
+          const itemBox = item.getBoundingClientRect();
+          const x = itemBox.left - brandBox.left + itemBox.width / 2;
+          const y = itemBox.bottom - brandBox.top + 12;
+          const safeX = brandBox.width > 236 ? Math.min(Math.max(x, 118), brandBox.width - 118) : brandBox.width / 2;
+          tipItems.forEach((entry) => entry.classList.toggle("is-active", entry === item));
+          popover.textContent = item.dataset.authTip || "";
+          popover.style.left = `${safeX}px`;
+          popover.style.top = `${y}px`;
+          popover.classList.add("is-visible");
+        };
+        tipItems.forEach((item) => {
+          item.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (item.classList.contains("is-active")) {
+              closeTip();
+            } else {
+              openTip(item);
+            }
+          });
+          item.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openTip(item);
+            }
+          });
+        });
+        document.addEventListener("click", closeTip);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeTip();
         });
       })();
     </script>

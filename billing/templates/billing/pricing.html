@@ -7,7 +7,7 @@
     <title>{% ui "pricing" %} - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
   </head>
-  <body class="landing-page">
+  <body class="landing-page pricing-page">
     <header class="landing-nav">
       <div>
         <p class="eyebrow">CherryX-Digital</p>
@@ -26,14 +26,16 @@
 
     <main class="pricing-shell">
       <section class="pricing-hero">
-        <p class="eyebrow">Pay after the result</p>
-        <h1>Create the file first. Pay when it is ready.</h1>
-        <p>{% ui "landing_copy" %}</p>
+        <div>
+          <p class="eyebrow">{% ui "pricing_eyebrow" %}</p>
+          <h1>{% ui "pricing_title" %}</h1>
+        </div>
+        <p>{% ui "pricing_copy" %}</p>
       </section>
 
       <section class="pricing-grid" aria-label="Pricing">
         {% for plan in plans %}
-          <article class="price-card {% if plan.code == 'pro' %}is-featured{% endif %}">
+          <article class="price-card {% if plan.code == 'pro' %}is-featured{% endif %} plan-{{ plan.code }}">
             <div class="price-card-head">
               <span>{{ plan.badge }}</span>
               <strong>{{ plan.name }}</strong>
@@ -44,7 +46,7 @@
             </div>
             <div class="storage-limit">
               <strong>{{ plan.storage_text }}</strong>
-              <span>storage</span>
+              <span>{% ui "pricing_storage" %}</span>
             </div>
             <h2>{{ plan.headline }}</h2>
             <p>{{ plan.description }}</p>
@@ -53,29 +55,62 @@
                 <li>{{ feature }}</li>
               {% endfor %}
             </ul>
-            <a class="primary-link price-action" href="{% url 'billing:checkout' %}?plan={{ plan.code }}">Choose plan</a>
+            <a class="primary-link price-action" href="{% url 'billing:checkout' %}?plan={{ plan.code }}">
+              {% if plan.code == "free" %}{% ui "pricing_start_free" %}{% else %}{% ui "pricing_choose" %}{% endif %}
+            </a>
           </article>
         {% endfor %}
       </section>
 
       <section class="trust-band">
-        <article>
-          <strong>Product</strong>
-          <span>{% ui "pay_to_deliver_copy" %}</span>
+        <article data-icon="layers">
+          <strong>{% ui "pricing_all_tools" %}</strong>
+          <span>{% ui "pricing_all_tools_copy" %}</span>
         </article>
-        <article>
-          <strong>Design</strong>
-          <span>{% ui "see_value_copy" %}</span>
-        </article>
-        <article>
-          <strong>Engineering</strong>
-          <span>Django, background tasks, history and payment integration.</span>
-        </article>
-        <article>
-          <strong>Launch</strong>
-          <span>Ready foundation for Stripe, LiqPay or WayForPay.</span>
+        <article data-icon="sparkles">
+          <strong>{% ui "pricing_pay_later" %}</strong>
+          <span>{% ui "pricing_pay_later_copy" %}</span>
         </article>
       </section>
+
+      <footer class="landing-dock pricing-dock" aria-label="CherryX tools">
+        <a href="{% url 'studio:video_editor' %}" data-icon="video">
+          <span>Editor</span>
+        </a>
+        <a href="{% url 'studio:index' %}?tool=cover" data-icon="image">
+          <span>Covers</span>
+        </a>
+        <a href="{% url 'studio:index' %}?tool=subtitles" data-icon="captions">
+          <span>Subtitles</span>
+        </a>
+        <a href="{% url 'studio:index' %}?tool=package" data-icon="layers">
+          <span>Package</span>
+        </a>
+        <a href="{% url 'studio:designer' %}" data-icon="palette">
+          <span>Design</span>
+        </a>
+        <a href="{% url 'studio:index' %}?tool=resume" data-icon="credit-card">
+          <span>Resume</span>
+        </a>
+      </footer>
     </main>
+    <script>
+      (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -39,6 +39,7 @@ setupCustomSelects();
 setupResumeWizards();
 setupLanguageSwitchers();
 setupSubscriptionDrawer();
+setupAccountPanel();
 setupDesignerModes();
 restoreActiveTab();
 
@@ -92,7 +93,11 @@ function setupLanguageSwitchers() {
   document.querySelectorAll(".language-switcher").forEach((switcher) => {
     const button = switcher.querySelector(".language-current");
     if (!button) return;
-    button.addEventListener("click", () => {
+    switcher.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       const open = switcher.classList.toggle("is-open");
       button.setAttribute("aria-expanded", open ? "true" : "false");
     });
@@ -119,6 +124,23 @@ function setupSubscriptionDrawer() {
   closeButtons.forEach((button) => button.addEventListener("click", () => setOpen(false)));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !drawer.hidden) setOpen(false);
+  });
+}
+
+function setupAccountPanel() {
+  const panel = document.querySelector("[data-account-panel]");
+  const button = document.querySelector("[data-account-panel-toggle]");
+  if (!panel || !button) return;
+  const setOpen = (open) => {
+    panel.classList.toggle("is-open", open);
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setOpen(!panel.classList.contains("is-open"));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setOpen(false);
   });
 }
 
@@ -1275,6 +1297,10 @@ function setupDesignerPanel(panel) {
 }
 
 function setupDesignerPanelV2(panel) {
+  const projectDataNode = document.getElementById("current-design-project");
+  const projectConfigNode = document.getElementById("design-project-config");
+  const currentDesignProject = projectDataNode ? JSON.parse(projectDataNode.textContent || "null") : null;
+  const projectConfig = projectConfigNode ? JSON.parse(projectConfigNode.textContent || "{}") : {};
   const shell = panel.querySelector("[data-design-shell]");
   const plane = panel.querySelector("[data-design-plane]");
   const vectorLayer = panel.querySelector("[data-design-vector-layer]");
@@ -1295,8 +1321,22 @@ function setupDesignerPanelV2(panel) {
   const selectionCount = panel.querySelector("[data-design-selection-count]");
   const layerCount = panel.querySelector("[data-design-layer-count]");
   const clearButton = panel.querySelector("[data-design-action='clear']");
+  const projectTitle = panel.querySelector("[data-design-project-title]");
+  const pageTitle = document.querySelector("[data-design-page-title]");
+  const saveStatus = panel.querySelector("[data-design-save-status]");
+  const saveRetry = panel.querySelector("[data-design-save-retry]");
+  const storageBadge = panel.querySelector("[data-design-storage-badge]");
+  const importDraftButton = panel.querySelector("[data-design-import-draft]");
   if (!shell || !plane || !vectorLayer) return;
 
+  let projectId = currentDesignProject && currentDesignProject.id ? String(currentDesignProject.id) : "";
+  let projectStorageText = currentDesignProject?.storage_text || "0 B";
+  let saveTimer = 0;
+  let saving = false;
+  let saveFailed = false;
+  let dirty = false;
+  let didInitialRender = false;
+  const readOnly = Boolean(currentDesignProject && currentDesignProject.can_edit === false);
   let tool = "select";
   let selectedId = "";
   let selectedIds = new Set();
@@ -1319,9 +1359,11 @@ function setupDesignerPanelV2(panel) {
   let cropDragState = null;
   let cropScaleState = null;
   let targetFrameId = "";
-  let state = loadDesignStateV2();
+  let state = normalizeDesignStateV2(currentDesignProject?.state || loadDesignStateV2());
   let history = [designSnapshot(state)];
   let historyIndex = 0;
+  if (currentDesignProject?.title) state.title = currentDesignProject.title;
+  if (importDraftButton) importDraftButton.hidden = Boolean(projectId) || !hasLocalDesignDraft();
 
   const snap = (value) => Math.round(value / DESIGN_GRID) * DESIGN_GRID;
   const objects = () => state.objects || [];
@@ -1354,10 +1396,152 @@ function setupDesignerPanelV2(panel) {
     try {
       state.version = 2;
       state.zoom = zoom;
+      state.title = state.title || projectTitle?.textContent?.trim() || currentDesignProject?.title || "New design";
       localStorage.setItem(DESIGN_STORAGE_KEY_V2, JSON.stringify(state));
     } catch {
       return;
     }
+  };
+
+  const csrfToken = () => {
+    const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  };
+
+  const jsonRequest = async (url, options = {}) => {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Accept": "application/json",
+        ...(options.body && !(options.body instanceof FormData) ? {"Content-Type": "application/json"} : {}),
+        ...(options.method && options.method !== "GET" ? {"X-CSRFToken": csrfToken()} : {}),
+        ...(options.headers || {}),
+      },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  };
+
+  const setSaveStatus = (text, failed = false) => {
+    if (saveStatus) {
+      saveStatus.textContent = text;
+      saveStatus.classList.toggle("is-error", failed);
+    }
+    if (saveRetry) saveRetry.hidden = !failed;
+  };
+
+  const syncProjectChrome = () => {
+    const title = state.title || currentDesignProject?.title || "New design";
+    if (projectTitle && !projectTitle.querySelector("input")) projectTitle.textContent = title;
+    if (pageTitle) pageTitle.textContent = title;
+    if (storageBadge) storageBadge.textContent = projectStorageText || "0 B";
+  };
+
+  const savedTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const ensureDesignProject = async () => {
+    if (projectId) return projectId;
+    const data = await jsonRequest(`${projectConfig.apiUrl}create/`, {
+      method: "POST",
+      body: JSON.stringify({ title: state.title || "New design", state }),
+    });
+    projectId = String(data.project.id);
+    projectStorageText = data.project.storage_text || projectStorageText;
+    window.history.replaceState({}, "", `${window.location.pathname}?project=${projectId}`);
+    syncProjectChrome();
+    if (importDraftButton) importDraftButton.hidden = true;
+    return projectId;
+  };
+
+  const uploadDesignAsset = async (file) => {
+    if (readOnly) throw new Error("View only");
+    await ensureDesignProject();
+    const form = new FormData();
+    form.append("file", file);
+    const data = await jsonRequest(`${projectConfig.apiUrl}${projectId}/assets/`, { method: "POST", body: form });
+    projectStorageText = data.project?.storage_text || projectStorageText;
+    syncProjectChrome();
+    return data.asset;
+  };
+
+  const dataUrlToFile = async (dataUrl, name = "image.png") => {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    return new File([blob], name, { type: blob.type || "image/png" });
+  };
+
+  const migrateEmbeddedImages = async () => {
+    for (const object of objects()) {
+      if (object.type !== "image" || object.assetId || !String(object.src || "").startsWith("data:image/")) continue;
+      if (String(object.src).startsWith("data:image/svg")) continue;
+      try {
+        const asset = await uploadDesignAsset(await dataUrlToFile(object.src, `${object.name || "image"}.png`));
+        object.assetId = asset.id;
+        object.src = asset.preview_url;
+        object.name = object.name || asset.name || "Image";
+      } catch {
+        // Local data URLs stay as fallback if migration fails.
+      }
+    }
+  };
+
+  const generateDesignPreview = async () => {
+    const frame = objects().find((item) => item.type === "frame") || objects()[0];
+    if (!frame) return "";
+    try {
+      const svg = buildExportSvgV2(frame, state);
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      const loaded = new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+      });
+      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      await loaded;
+      const canvas = document.createElement("canvas");
+      const ratio = Math.min(1, 720 / Math.max(1, frame.w), 480 / Math.max(1, frame.h));
+      canvas.width = Math.max(240, Math.round(frame.w * ratio));
+      canvas.height = Math.max(160, Math.round(frame.h * ratio));
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.78);
+    } catch {
+      return "";
+    }
+  };
+
+  const saveProject = async () => {
+    if (!projectConfig.apiUrl || readOnly) return;
+    try {
+      saving = true;
+      clearTimeout(saveTimer);
+      setSaveStatus("Saving...");
+      await ensureDesignProject();
+      await migrateEmbeddedImages();
+      const preview = await generateDesignPreview();
+      const data = await jsonRequest(`${projectConfig.apiUrl}${projectId}/save/`, {
+        method: "POST",
+        body: JSON.stringify({ title: state.title || "New design", state, preview }),
+      });
+      projectStorageText = data.project?.storage_text || projectStorageText;
+      dirty = false;
+      saveFailed = false;
+      syncProjectChrome();
+      setSaveStatus(`Saved ${savedTime()}`);
+    } catch {
+      saveFailed = true;
+      setSaveStatus("Save failed", true);
+    } finally {
+      saving = false;
+    }
+  };
+
+  const scheduleProjectSave = () => {
+    if (!didInitialRender || !projectConfig.apiUrl || readOnly) return;
+    dirty = true;
+    saveFailed = false;
+    setSaveStatus("Saving...");
+    clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(saveProject, 600);
   };
 
   const pushHistory = () => {
@@ -1371,6 +1555,7 @@ function setupDesignerPanelV2(panel) {
     if (history.length > DESIGN_HISTORY_LIMIT) history.shift();
     historyIndex = history.length - 1;
     persist();
+    scheduleProjectSave();
   };
 
   const commit = () => {
@@ -2751,7 +2936,8 @@ function setupDesignerPanelV2(panel) {
     if (object.type === "text") focusTextLayer(object.id);
   };
 
-  const addImageFile = (file, point = null) => {
+  const addImageFile = async (file, point = null) => {
+    if (readOnly) return;
     if (!file) return;
     if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) {
       const reader = new FileReader();
@@ -2760,12 +2946,17 @@ function setupDesignerPanelV2(panel) {
       return;
     }
     if (!String(file.type || "").startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => addImageSource(String(reader.result || ""), point);
-    reader.readAsDataURL(file);
+    try {
+      const asset = await uploadDesignAsset(file);
+      addImageSource(asset.preview_url, point, { assetId: asset.id, name: asset.name || file.name || "Image" });
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => addImageSource(String(reader.result || ""), point, { name: file.name || "Image" });
+      reader.readAsDataURL(file);
+    }
   };
 
-  const addImageSource = (src, point = null) => {
+  const addImageSource = (src, point = null, extra = {}) => {
     const image = new Image();
     image.onload = () => {
       const maxWidth = 620;
@@ -2779,6 +2970,7 @@ function setupDesignerPanelV2(panel) {
         naturalH: image.naturalHeight,
         imageFit: "fill",
         name: "Image",
+        ...extra,
       }, point ? { x: point.x, y: point.y } : null);
     };
     image.src = src;
@@ -2840,21 +3032,31 @@ function setupDesignerPanelV2(panel) {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const file = input.files && input.files[0];
       if (!file || !String(file.type || "").startsWith("image/")) return;
-      const reader = new FileReader();
-      reader.onload = () => {
+      const applySource = (src, asset = null) => {
         const image = new Image();
         image.onload = () => {
-          object.src = String(reader.result || "");
+          object.src = src;
+          if (asset) {
+            object.assetId = asset.id;
+            object.name = asset.name || object.name;
+          }
           object.naturalW = image.naturalWidth;
           object.naturalH = image.naturalHeight;
           resetImageCrop(object);
         };
-        image.src = String(reader.result || "");
+        image.src = src;
       };
-      reader.readAsDataURL(file);
+      try {
+        const asset = await uploadDesignAsset(file);
+        applySource(asset.preview_url, asset);
+      } catch {
+        const reader = new FileReader();
+        reader.onload = () => applySource(String(reader.result || ""));
+        reader.readAsDataURL(file);
+      }
     }, { once: true });
     input.click();
   };
@@ -3663,6 +3865,7 @@ function setupDesignerPanelV2(panel) {
   shell.addEventListener("scroll", updatePlaneSize);
 
   document.addEventListener("keydown", (event) => {
+    if (readOnly) return;
     const key = event.key.toLowerCase();
     const code = event.code || "";
     const formTarget = event.target instanceof Element ? event.target.closest("input, textarea, select") : null;
@@ -3858,13 +4061,87 @@ function setupDesignerPanelV2(panel) {
     });
   }
 
+  const startProjectTitleEdit = () => {
+    if (readOnly) return;
+    if (!projectTitle || projectTitle.querySelector("input")) return;
+    const original = projectTitle.textContent.trim() || "New design";
+    const input = document.createElement("input");
+    input.className = "designer-project-title-input";
+    input.value = original;
+    input.maxLength = 180;
+    projectTitle.textContent = "";
+    projectTitle.append(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const next = input.value.trim() || original;
+      projectTitle.textContent = save ? next : original;
+      state.title = save ? next : original;
+      syncProjectChrome();
+      if (save && next !== original) {
+        scheduleProjectSave();
+        try {
+          await ensureDesignProject();
+          const data = await jsonRequest(`${projectConfig.apiUrl}${projectId}/rename/`, { method: "POST", body: JSON.stringify({ title: next }) });
+          state.title = data.project?.title || next;
+          syncProjectChrome();
+        } catch {
+          setSaveStatus("Save failed", true);
+        }
+      }
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+  };
+
+  projectTitle?.addEventListener("dblclick", startProjectTitleEdit);
+  saveRetry?.addEventListener("click", saveProject);
+  importDraftButton?.addEventListener("click", () => {
+    state = loadDesignStateV2();
+    state.title = state.title || "Imported design";
+    history = [designSnapshot(state)];
+    historyIndex = 0;
+    selectedId = "";
+    selectedIds = new Set();
+    render();
+    scheduleProjectSave();
+    importDraftButton.hidden = true;
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!dirty && !saving && !saveFailed) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
   zoom = clamp(Number(state.zoom) || 1, 0.03, 5);
+  if (readOnly) {
+    panel.classList.add("is-view-only");
+    panel.querySelectorAll("button, input, select, textarea").forEach((control) => {
+      if (control.closest(".designer-zoom-controls") || control.matches("[data-share-open]")) return;
+      control.disabled = true;
+    });
+  }
   updatePlaneSize();
   applyZoom(zoom, null, false);
   window.addEventListener("resize", () => {
     updatePlaneSize();
   });
   render();
+  syncProjectChrome();
+  setSaveStatus(readOnly ? "View only" : (projectId ? `Saved ${savedTime()}` : "Local draft"));
+  didInitialRender = true;
   if (!state.didFit) {
     state.didFit = true;
     fitZoom();
@@ -3884,6 +4161,17 @@ function loadDesignStateV2() {
   return normalizeDesignStateV2({});
 }
 
+function hasLocalDesignDraft() {
+  try {
+    const raw = localStorage.getItem(DESIGN_STORAGE_KEY_V2) || localStorage.getItem(DESIGN_STORAGE_KEY) || "";
+    if (!raw) return false;
+    const state = normalizeDesignStateV2(JSON.parse(raw));
+    return Boolean((state.objects && state.objects.length) || (state.vectors && state.vectors.length));
+  } catch {
+    return false;
+  }
+}
+
 function normalizeDesignStateV2(input = {}) {
   const legacyStrokes = Array.isArray(input.strokes) ? input.strokes : [];
   const rawVectors = Array.isArray(input.vectors) ? input.vectors : legacyStrokes.map((stroke) => ({
@@ -3896,6 +4184,7 @@ function normalizeDesignStateV2(input = {}) {
   }));
   const state = {
     version: 2,
+    title: input.title || "New design",
     objects: Array.isArray(input.objects) ? input.objects.map(normalizeDesignObject) : [],
     vectors: rawVectors.map(normalizeDesignVector),
     zoom: Number(input.zoom) || 1,

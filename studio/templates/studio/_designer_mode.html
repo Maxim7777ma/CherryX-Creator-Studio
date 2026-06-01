@@ -2,9 +2,22 @@
 <section class="designer-mode-panel{% if designer_fullscreen %} is-open is-fullscreen{% endif %}" data-designer-mode>
   <div class="designer-head">
     <div>
-      <h2>{% ui "designer_mode" %}</h2>
+      <span class="designer-project-kicker">Design project</span>
+      <h2 class="designer-project-title" data-design-project-title title="Double-click to rename">New design</h2>
+      <div class="designer-save-row">
+        <small data-design-save-status>Local draft</small>
+        <button type="button" data-design-save-retry hidden>Retry</button>
+        <b data-design-storage-badge>0 B</b>
+      </div>
     </div>
     <div class="designer-head-actions">
+      <a class="designer-ghost" href="{% url 'studio:design_project_list' %}">Projects</a>
+      {% if current_design_project.can_share %}
+        <button class="designer-ghost" type="button" data-share-open>Share</button>
+      {% elif current_design_project and not current_design_project.is_owner %}
+        <span class="designer-shared-badge">Shared &middot; {{ current_design_project.access_role }}</span>
+      {% endif %}
+      <button class="designer-ghost" type="button" data-design-import-draft hidden>Import local draft</button>
       <button class="designer-ghost" type="button" data-design-action="clear">{% ui "clear" %}</button>
       {% if designer_fullscreen %}
         <a class="designer-icon-button" href="{% url 'studio:index' %}" title="{% ui "workspace" %}" aria-label="{% ui "workspace" %}" data-icon="workspace"></a>

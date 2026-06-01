@@ -7,24 +7,28 @@
     <title>{% ui "designer_mode" %} &middot; CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
     <script defer src="{% static 'studio/app.js' %}"></script>
+    <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
   <body class="designer-page theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="designer-page-topbar">
-      <a class="designer-switch designer-workspace-switch is-active" href="{% url 'studio:index' %}" data-workspace-launch aria-pressed="true">
+      <a class="designer-switch designer-workspace-switch is-active" href="{{ design_projects_url }}" aria-pressed="true">
         <span class="designer-switch-track" aria-hidden="true"><span></span></span>
         <span>
-          <b>{% ui "workspace" %}</b>
+          <b>Projects</b>
         </span>
       </a>
       <div>
         <p class="eyebrow">CherryX-Digital &middot; Design Mode</p>
-        <h1>{% ui "designer_mode" %}</h1>
+        <h1 data-design-page-title>{{ current_design_project.title|default:"New design" }}</h1>
       </div>
       {% include "studio/_language_switcher.html" %}
     </header>
     <main class="designer-page-main">
       {% include "studio/_designer_mode.html" %}
     </main>
+    {% include "studio/_share_modal.html" with share_resource_type="design_project" share_resource_id=current_design_project.id %}
+    {{ current_design_project|json_script:"current-design-project" }}
+    <script id="design-project-config" type="application/json">{"apiUrl":"{{ design_projects_api_url }}","projectsUrl":"{{ design_projects_url }}","designerUrl":"{{ designer_url }}"}</script>
     {{ app_messages|json_script:"app-messages" }}
   </body>
 </html>

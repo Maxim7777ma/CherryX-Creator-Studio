@@ -4,33 +4,47 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Checkout - CherryX Creator Studio</title>
+    <title>{% ui "checkout" %} - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
   </head>
   <body class="auth-page">
     <main class="checkout-shell">
-      <section class="checkout-copy">
-        <a class="back-link eyebrow" href="{% url 'studio:index' %}">Back to Studio</a>
-        <h1>Choose a plan and pick up your ready files.</h1>
-        <p>{% ui "pay_to_deliver_copy" %}</p>
-        {% include "studio/_language_switcher.html" %}
+      <section class="checkout-copy checkout-brand">
+        <div class="checkout-topline">
+          <a class="back-link eyebrow" href="{% url 'studio:index' %}">{% ui "checkout_back" %}</a>
+          {% include "studio/_language_switcher.html" %}
+        </div>
+        <h1>{% ui "checkout_title" %}</h1>
+        <p>{% ui "checkout_copy" %}</p>
 
         <div class="checkout-summary" id="checkout-summary">
-          <span id="summary-badge">{{ selected_plan.badge }}</span>
+          <span>{% ui "checkout_plan_details" %}</span>
           <strong id="summary-title">{{ selected_plan.name }} - {{ selected_plan.price_label }}</strong>
           <p id="summary-copy">{{ selected_plan.headline }}</p>
+          <em id="summary-badge">{{ selected_plan.badge }}</em>
+        </div>
+
+        <div class="checkout-benefits">
+          <article data-icon="shield-check">
+            <strong>{% ui "checkout_benefit_private" %}</strong>
+            <span>{% ui "checkout_benefit_private_copy" %}</span>
+          </article>
+          <article data-icon="zap">
+            <strong>{% ui "checkout_benefit_instant" %}</strong>
+            <span>{% ui "checkout_benefit_instant_copy" %}</span>
+          </article>
         </div>
 
         <div class="checkout-help">
-          <span>Not sure which plan fits?</span>
-          <a href="{% url 'billing:pricing' %}">Open plan details</a>
+          <span>{% ui "checkout_help_text" %}</span>
+          <a href="{% url 'billing:pricing' %}">{% ui "checkout_open_pricing" %}</a>
         </div>
       </section>
 
       <section class="auth-card checkout-card">
         <div class="section-title">
-          <h2>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}Payment and account{% endif %}</h2>
-          <span>Demo checkout</span>
+          <h2>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}{% ui "checkout_payment_account" %}{% endif %}</h2>
+          <span>{% ui "checkout_demo" %}</span>
         </div>
 
         <form method="post" class="auth-form" id="checkout-form">
@@ -40,17 +54,21 @@
           {% endif %}
 
           <input type="hidden" name="{{ form.plan.name }}" id="id_plan" value="{{ selected_plan.code }}">
+          <input type="hidden" name="due" id="id_due" value="{{ checkout_price.due_cents }}">
           {{ form.next }}
 
-          <fieldset class="plan-picker" aria-label="Plan selection">
+          <fieldset class="plan-picker" aria-label="{% ui "checkout_plan_selection" %}">
             {% for plan in plans %}
               <button
-                class="plan-button {% if plan.code == selected_plan.code %}is-selected{% endif %}"
+                class="plan-button plan-{{ plan.code }} {% if plan.code == selected_plan.code %}is-selected{% endif %}"
                 type="button"
                 data-plan="{{ plan.code }}"
                 data-name="{{ plan.name }}"
                 data-badge="{{ plan.badge }}"
                 data-price="{{ plan.price_display }}"
+                data-due-cents="{{ plan.due_cents|default:plan.price_cents }}"
+                data-due="{{ plan.due_display|default:plan.price_display }}"
+                data-credit="{{ plan.credit_display|default:'0$' }}"
                 data-price-label="{{ plan.price_label }}"
                 data-headline="{{ plan.headline }}"
                 aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
@@ -64,9 +82,14 @@
 
           {% for field in form %}
             {% if field.name != "plan" and field.name != "next" %}
-              <label class="field">
+              <label class="field{% if field.field.widget.input_type == 'password' %} has-password-toggle{% endif %}">
                 <span>{{ field.label }}</span>
-                {{ field }}
+                <span class="checkout-input-wrap">
+                  {{ field }}
+                  {% if field.field.widget.input_type == 'password' %}
+                    <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="{% ui "auth_show_password" %}" data-show-label="{% ui "auth_show_password" %}" data-hide-label="{% ui "auth_hide_password" %}"></button>
+                  {% endif %}
+                </span>
                 {% if field.errors %}
                   <small class="field-error">{{ field.errors|striptags }}</small>
                 {% endif %}
@@ -75,24 +98,51 @@
           {% endfor %}
 
           <div class="payment-box">
-            <span>Total</span>
-            <strong id="payment-total">{{ selected_plan.price_display }}</strong>
-            <small>The amount updates instantly when you choose a plan. Demo payment confirmation is enabled.</small>
+            <span>{% ui "checkout_total" %}</span>
+            <strong id="payment-total">{{ checkout_price.due_display }}</strong>
+            <small>{% ui "checkout_payment_note" %}</small>
           </div>
 
-          <button class="primary-action" type="submit">Pay and unlock downloads</button>
+          <button class="primary-action checkout-action" type="submit">{% ui "checkout_cta" %}</button>
         </form>
 
         <p class="auth-switch">
-          Already have an account? <a href="{% url 'studio:login' %}">{% ui "login" %}</a>
+          {% ui "checkout_have_account" %} <a href="{% url 'studio:login' %}">{% ui "login" %}</a>
         </p>
       </section>
     </main>
 
     <script>
       (() => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          button.addEventListener("click", () => {
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) {
+              switcher.classList.remove("is-open");
+              button.setAttribute("aria-expanded", "false");
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+          const input = button.closest(".checkout-input-wrap")?.querySelector("input");
+          if (!input) return;
+          button.addEventListener("click", () => {
+            const hidden = input.type === "password";
+            input.type = hidden ? "text" : "password";
+            button.dataset.icon = hidden ? "eye-off" : "eye";
+            button.setAttribute("aria-label", hidden ? button.dataset.hideLabel : button.dataset.showLabel);
+          });
+        });
+
         const buttons = document.querySelectorAll(".plan-button");
         const planInput = document.getElementById("id_plan");
+        const dueInput = document.getElementById("id_due");
         const total = document.getElementById("payment-total");
         const badge = document.getElementById("summary-badge");
         const title = document.getElementById("summary-title");
@@ -107,7 +157,8 @@
             button.classList.add("is-selected");
             button.setAttribute("aria-pressed", "true");
             planInput.value = button.dataset.plan;
-            total.textContent = button.dataset.price;
+            if (dueInput) dueInput.value = button.dataset.dueCents || "";
+            total.textContent = button.dataset.due || button.dataset.price;
             badge.textContent = button.dataset.badge;
             title.textContent = `${button.dataset.name} - ${button.dataset.priceLabel}`;
             copy.textContent = button.dataset.headline;
