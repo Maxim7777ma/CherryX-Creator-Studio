@@ -19,6 +19,7 @@ import cv2
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 from yt_dlp import YoutubeDL
 
+from . import native_tools
 from .image_tools import clean_base_name
 from .video_tools import ffmpeg_path, format_duration, has_audio_stream, inspect_video
 
@@ -71,6 +72,16 @@ class ShortClip:
 class FaceFocus:
     x: int
     y: int
+    confidence: float
+
+
+@dataclass(frozen=True)
+class FaceTrackPoint:
+    second: float
+    x: int
+    y: int
+    width: int
+    height: int
     confidence: float
 
 
@@ -180,29 +191,64 @@ def calculate_smart_clip_starts(
     sample_limit: int = 360,
     face_detection_enabled: bool = True,
 ) -> list[int]:
-    duration = int(duration_seconds)
-    if duration < 10:
-        return []
-
+    ranked_starts = rank_smart_clip_candidates(
+        source,
+        duration_seconds,
+        max(max_clips * 5, max_clips),
+        clip_seconds,
+        sample_limit,
+        face_detection_enabled,
+    )
+    if not ranked_starts:
+        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
+    min_gap = max(int(clip_seconds * 0.82), min(clip_seconds + 12, 65))
+    selected = _select_diverse_ranked_starts(
+        [(int(item["start"]), float(item["score"])) for item in ranked_starts],
+        max_clips,
+        min_gap,
+        int(duration_seconds),
+        clip_seconds,
+    )
     base_starts = calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
-    if duration <= max_clips * clip_seconds:
-        return base_starts
-
-    sample_limit = max(80, min(900, sample_limit))
-    step = max(3, int(duration / sample_limit))
-    min_gap = max(clip_seconds // 2, min(clip_seconds + 8, 55))
-    scores = _score_video_moments(source, duration, step, face_detection_enabled)
-    ranked_starts = _rank_clip_windows(scores, duration, clip_seconds, step, lead_seconds=max(2, clip_seconds // 5))
-    selected = _select_diverse_ranked_starts(ranked_starts, max_clips, min_gap, duration, clip_seconds)
-
     if len(selected) < max_clips:
         for start in base_starts:
             if all(abs(start - existing) >= clip_seconds // 2 for existing in selected):
                 selected.append(start)
             if len(selected) >= max_clips:
                 break
-
     return sorted(selected[:max_clips])
+
+
+def rank_smart_clip_candidates(
+    source: Path,
+    duration_seconds: float,
+    max_candidates: int,
+    clip_seconds: int,
+    sample_limit: int = 360,
+    face_detection_enabled: bool = True,
+) -> list[dict[str, object]]:
+    duration = int(duration_seconds)
+    if duration < 10:
+        return []
+
+    base_starts = calculate_clip_starts(duration_seconds, max_candidates, clip_seconds)
+    if duration <= max_candidates * clip_seconds:
+        return [{"start": start, "score": round(1000.0 - index, 3), "source": "sequential"} for index, start in enumerate(base_starts)]
+
+    sample_limit = max(120, min(1200, sample_limit))
+    step = max(2, int(duration / sample_limit))
+    scores = _score_video_moments(source, duration, step, face_detection_enabled)
+    ranked_starts = _rank_clip_windows(scores, duration, clip_seconds, step, lead_seconds=max(2, clip_seconds // 5))
+    candidates = _clip_candidate_dicts(ranked_starts, scores, duration, clip_seconds, step)
+
+    seen = {int(item["start"]) for item in candidates}
+    for index, start in enumerate(base_starts):
+        if start in seen:
+            continue
+        candidates.append({"start": start, "score": round(max(1.0, 35.0 - index), 3), "source": "fallback"})
+        seen.add(start)
+
+    return candidates[: max(1, max_candidates)]
 
 
 def make_shorts(
@@ -502,24 +548,27 @@ def create_business_cover(
     duration_seconds: float | None = None,
     timeout_seconds: int = 120,
     face_detection_enabled: bool = True,
+    variant_index: int = 1,
+    variant_seed: int | None = None,
+    avoid_seconds: list[int] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     info = inspect_video(source)
     duration = int(duration_seconds or info.duration_seconds or 0)
-    starts = calculate_backstage_clip_starts(
+    candidates = rank_smart_clip_candidates(
         source,
         duration,
-        max_clips=1,
-        clip_seconds=4,
-        sample_limit=180,
-        min_gap_seconds=10,
+        max_candidates=18,
+        clip_seconds=5,
+        sample_limit=420,
         face_detection_enabled=face_detection_enabled,
     )
-    start_seconds = starts[0] if starts else clamp(duration // 3, 0, max(0, duration - 1))
+    start_seconds = _select_cover_start(source, duration, candidates, face_detection_enabled, avoid_seconds or [])
     face = detect_face_focus(source, start_seconds, 4) if face_detection_enabled else None
 
     base = clean_base_name(title, "video")
-    output = output_dir / f"{base}_business_cover.png"
+    suffix = "" if variant_index <= 1 else f"_v{variant_index}"
+    output = output_dir / f"{base}{suffix}_business_cover.png"
     frame_path = output.with_suffix(".frame.jpg")
     args = [
         ffmpeg_path(),
@@ -540,13 +589,268 @@ def create_business_cover(
     target_size = (1280, 720)
     focus = (face.x, face.y) if face else None
     canvas, focus_point = _resize_cover_background(frame, target_size, focus)
-    canvas = canvas.filter(ImageFilter.UnsharpMask(radius=1.4, percent=130, threshold=4))
+    canvas = _cinematic_cover_grade(canvas)
+    editable_background = canvas.copy()
     topic_assets = _load_cover_topic_assets(title, output_dir / "_topic_assets")
     impact_asset = _load_cover_impact_asset(output_dir / "_impact_assets")
-    _draw_business_cover(canvas, title, focus_point, topic_assets, impact_asset)
+    _draw_business_cover(canvas, title, focus_point, topic_assets, impact_asset, variant_seed, variant_index)
     canvas.save(output, format="PNG", optimize=True)
+    background_path = output.with_suffix(".background.jpg")
+    editable_background.save(background_path, format="JPEG", quality=92, optimize=True)
+    _write_cover_design_metadata(output, background_path, title, focus_point, variant_index, variant_seed, start_seconds)
     frame_path.unlink(missing_ok=True)
     return output
+
+
+def _select_cover_start(
+    source: Path,
+    duration_seconds: int,
+    candidates: list[dict[str, object]],
+    face_detection_enabled: bool,
+    avoid_seconds: list[int] | None = None,
+) -> int:
+    avoid = {int(value) for value in (avoid_seconds or [])}
+    min_gap = max(6, min(28, int(duration_seconds * 0.045)))
+
+    def too_close(second: int) -> bool:
+        return any(abs(second - used) < min_gap for used in avoid)
+
+    native_start = native_tools.pick_cover_second(source, duration_seconds, candidates)
+    if native_start is not None and not too_close(native_start):
+        return native_start
+
+    fallback = clamp(duration_seconds // 3, 0, max(0, duration_seconds - 1))
+    starts: list[int] = []
+    for item in candidates[:10]:
+        try:
+            start = int(float(item.get("peak_second") or item.get("start")))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        start = clamp(start, 0, max(0, duration_seconds - 1))
+        if start not in starts and not too_close(start):
+            starts.append(start)
+    if fallback not in starts:
+        starts.append(fallback)
+    if not starts:
+        return fallback
+
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return starts[0]
+    frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
+    profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+    detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+    best: tuple[float, int] | None = None
+    try:
+        for index, start in enumerate(starts):
+            for offset in (0.0, 0.75, 1.5):
+                second = clamp(int(round(start + offset)), 0, max(0, duration_seconds - 1))
+                capture.set(cv2.CAP_PROP_POS_MSEC, second * 1000)
+                ok, frame = capture.read()
+                if not ok:
+                    continue
+                score = _cover_frame_score(frame, detectors if face_detection_enabled else [])
+                score += max(0.0, 9.0 - index)
+                if best is None or score > best[0]:
+                    best = (score, second)
+    finally:
+        capture.release()
+    return best[1] if best else starts[0]
+
+
+def _cover_frame_score(frame: np.ndarray, detectors: list[cv2.CascadeClassifier]) -> float:
+    small = cv2.resize(frame, (320, 180))
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    brightness = float(gray.mean())
+    contrast = float(gray.std())
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    saturation = float(hsv[:, :, 1].mean())
+    exposure = max(0.0, 1.0 - abs(brightness - 122.0) / 122.0) * 18.0
+    face_score = 0.0
+    if detectors:
+        faces = _detect_frame_faces(frame, detectors)
+        if faces:
+            frame_area = max(1, frame.shape[0] * frame.shape[1])
+            largest = max((w * h for _x, _y, w, h in faces), default=0)
+            face_score = min(44.0, 12.0 * len(faces) + largest / frame_area * 190.0)
+    return (
+        min(24.0, contrast / 3.8)
+        + min(20.0, saturation / 8.5)
+        + min(18.0, sharpness / 140.0)
+        + exposure
+        + face_score
+    )
+
+
+def create_premium_cover_from_image(source: Path, output: Path, title: str) -> Path:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.open(source).convert("RGB")
+    focus = _detect_image_face_focus(image)
+    canvas, focus_point = _resize_cover_background(image, (1280, 720), focus)
+    canvas = _cinematic_cover_grade(canvas)
+    _draw_business_cover(canvas, title, focus_point, [], None)
+    canvas.save(output, format="PNG", optimize=True)
+    return output
+
+
+def _write_cover_design_metadata(
+    output: Path,
+    background_path: Path,
+    title: str,
+    focus_point: tuple[int, int] | None,
+    variant_index: int,
+    variant_seed: int | None,
+    start_seconds: int,
+) -> None:
+    cover_copy = _cover_copy(title)
+    headline = _cover_title_text(cover_copy.headline)
+    description = _cover_description_text(cover_copy.description)
+    seed = int(variant_seed if variant_seed is not None else abs(hash((title, variant_index, start_seconds))) % 1_000_000)
+    profile = _cover_variant_profile(headline, focus_point, variant_index, seed)
+    metadata = {
+        "version": 2,
+        "kind": "cover_design",
+        "title": title,
+        "canvas": {"width": 1280, "height": 720},
+        "background_path": str(background_path),
+        "source_output": str(output),
+        "variant_index": int(variant_index),
+        "variant_seed": seed,
+        "start_seconds": int(start_seconds),
+        "text_left": bool(profile["text_left"]),
+        "focus_point": {"x": focus_point[0], "y": focus_point[1]} if focus_point else None,
+        "style": {
+            "layout": profile["layout"],
+            "mood": profile["mood"],
+            "badge": profile["badge"],
+            "text_left": bool(profile["text_left"]),
+        },
+        "copy": {
+            "eyebrow": profile["eyebrow"],
+            "headline": headline,
+            "description": description,
+        },
+        "palette": {
+            "accent": _hex_color(profile["accent"]),
+            "accent2": _hex_color(profile["accent2"]),
+            "dark": profile["dark"],
+            "paper": profile["paper"],
+        },
+        "layout": {
+            "panel_x": profile["panel_x"],
+            "headline_y": profile["headline_y"],
+            "max_text_width": profile["max_text_width"],
+            "badge_x": profile["badge_x"],
+            "badge_y": profile["badge_y"],
+            "hook_x": profile["hook_x"],
+            "hook_y": profile["hook_y"],
+        },
+    }
+    try:
+        output.with_suffix(".design.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _hex_color(color: tuple[int, int, int, int] | tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(int(color[0]) & 255, int(color[1]) & 255, int(color[2]) & 255)
+
+
+def _cover_variant_profile(title: str, focus_point: tuple[int, int] | None, variant_index: int, variant_seed: int | None = None) -> dict[str, object]:
+    seed = int(variant_seed if variant_seed is not None else abs(hash((title, variant_index))) % 1_000_000)
+    rng = random.Random(seed + variant_index * 7919)
+    layouts = ("split", "poster", "broadcast", "impact")
+    moods = ("premium", "neon", "urgent", "clean")
+    layout = layouts[(variant_index - 1) % len(layouts)]
+    mood = moods[(seed + variant_index) % len(moods)]
+    text_left = not focus_point or focus_point[0] > 1280 * 0.54
+    if layout in {"poster", "impact"} and variant_index % 2 == 0:
+        text_left = not text_left
+    if layout == "broadcast":
+        text_left = variant_index % 2 == 1
+
+    accent = _premium_cover_accent(f"{title}:{seed}:{mood}")
+    accent2 = _premium_cover_secondary_accent(f"{title}:{seed}:{layout}")
+    if mood == "neon":
+        accent = rng.choice([(48, 226, 255, 255), (134, 239, 172, 255), (244, 114, 182, 255)])
+        accent2 = rng.choice([(255, 218, 58, 255), (167, 139, 250, 255), (251, 113, 133, 255)])
+    elif mood == "urgent":
+        accent = (255, 66, 92, 255)
+        accent2 = (255, 226, 96, 255)
+    elif mood == "clean":
+        accent = (255, 255, 255, 255)
+        accent2 = _premium_cover_secondary_accent(f"{title}:{seed}")
+
+    if layout == "poster":
+        max_text_width = 760
+        panel_x = 54 if text_left else 468
+        headline_y = 118
+    elif layout == "broadcast":
+        max_text_width = 610
+        panel_x = 54 if text_left else 628
+        headline_y = 126
+    elif layout == "impact":
+        max_text_width = 690
+        panel_x = 62 if text_left else 542
+        headline_y = 102
+    else:
+        max_text_width = 650 if text_left else 620
+        panel_x = 58 if text_left else 626
+        headline_y = 135
+
+    badge_x = panel_x
+    badge_y = 46 if layout != "impact" else 38
+    hook_text = _premium_cover_hook(title, mood)
+    hook_x = 56 if text_left else 1280 - min(560, len(hook_text) * 18 + 96)
+    hook_y = 625 if layout != "poster" else 610
+    return {
+        "layout": layout,
+        "mood": mood,
+        "text_left": text_left,
+        "panel_x": panel_x,
+        "headline_y": headline_y,
+        "max_text_width": max_text_width,
+        "badge_x": badge_x,
+        "badge_y": badge_y,
+        "hook_x": hook_x,
+        "hook_y": hook_y,
+        "badge": hook_text,
+        "eyebrow": _premium_cover_eyebrow(title),
+        "accent": accent,
+        "accent2": accent2,
+        "dark": "#05070c" if mood != "clean" else "#0f172a",
+        "paper": "#f8fafc" if mood == "clean" else "#ffffff",
+    }
+
+
+def _detect_image_face_focus(image: Image.Image) -> tuple[int, int] | None:
+    try:
+        frame = np.array(image.convert("RGB"))
+        frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
+        profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+        detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+        faces = _detect_frame_faces(frame, detectors)
+        if not faces:
+            return None
+        x, y, w, h = max(faces, key=lambda item: item[2] * item[3])
+        return int(x + w / 2), int(y + h / 2)
+    except Exception:
+        return None
+
+
+def _cinematic_cover_grade(image: Image.Image) -> Image.Image:
+    rgb = image.convert("RGB")
+    arr = np.asarray(rgb).astype(np.float32)
+    arr = (arr - 128.0) * 1.10 + 128.0
+    arr[:, :, 0] *= 1.03
+    arr[:, :, 1] *= 1.01
+    arr[:, :, 2] *= 0.96
+    arr = np.clip(arr, 0, 255).astype("uint8")
+    graded = Image.fromarray(arr, "RGB")
+    graded = ImageOps.autocontrast(graded, cutoff=1)
+    graded = graded.filter(ImageFilter.UnsharpMask(radius=1.5, percent=145, threshold=4))
+    return graded
 
 
 def add_subtitles_to_video(
@@ -1405,6 +1709,8 @@ def _draw_business_cover(
     focus_point: tuple[int, int] | None,
     topic_assets: list[Image.Image] | None = None,
     impact_asset: Image.Image | None = None,
+    variant_seed: int | None = None,
+    variant_index: int = 1,
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
     width, height = canvas.size
@@ -1599,6 +1905,257 @@ def _draw_cover_focus_marker(
     canvas.paste(sticker, (x0, y0), sticker)
 
 
+def _draw_business_cover(
+    canvas: Image.Image,
+    title: str,
+    focus_point: tuple[int, int] | None,
+    topic_assets: list[Image.Image] | None = None,
+    impact_asset: Image.Image | None = None,
+    variant_seed: int | None = None,
+    variant_index: int = 1,
+) -> None:
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    width, height = canvas.size
+    seed_title = f"{title}:{variant_seed}:{variant_index}"
+    profile = _cover_variant_profile(title, focus_point, variant_index, variant_seed)
+    accent = profile["accent"]
+    accent2 = profile["accent2"]
+    layout = str(profile["layout"])
+    mood = str(profile["mood"])
+    warm = (255, 226, 96, 255)
+
+    cinematic = canvas.filter(ImageFilter.GaussianBlur(radius=18))
+    canvas.paste(Image.blend(canvas, cinematic, 0.08))
+    vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    vignette_draw = ImageDraw.Draw(vignette, "RGBA")
+    for step in range(42):
+        alpha = min(148, int(7 + step * 3.4))
+        inset_x = step * 12
+        inset_y = step * 7
+        vignette_draw.rounded_rectangle(
+            (inset_x, inset_y, width - inset_x, height - inset_y),
+            radius=18,
+            outline=(0, 0, 0, alpha),
+            width=18,
+        )
+    canvas.paste(Image.alpha_composite(canvas.convert("RGBA"), vignette).convert(canvas.mode))
+
+    text_left = bool(profile["text_left"])
+    panel_x = int(profile["panel_x"])
+    max_text_width = int(profile["max_text_width"])
+    cover_copy = _cover_copy(title)
+    title_text = _cover_title_text(cover_copy.headline)
+    description_text = _cover_description_text(cover_copy.description)
+
+    fade_alpha = 238 if mood == "clean" else 250
+    _draw_cover_fade(draw, width, height, text_left, (0, 0, 0, fade_alpha))
+    draw.rectangle((0, 0, width, height), fill=(0, 0, 0, 22 if mood == "clean" else 34))
+    _draw_cover_light_sweep(canvas, text_left, accent2)
+    _draw_cover_variant_frame(draw, width, height, text_left, accent, accent2, layout)
+    if layout in {"split", "broadcast"} and variant_index % 2:
+        draw.line((0, height - 30, width, height - 30), fill=(*accent2[:3], 90), width=6)
+        draw.line((0, height - 16, width, height - 16), fill=(*accent[:3], 190), width=4)
+    elif layout in {"split", "broadcast"}:
+        draw.line((0, 28, width, 28), fill=(*accent2[:3], 110), width=6)
+        draw.line((0, 44, width, 44), fill=(*accent[:3], 175), width=4)
+    elif layout == "impact":
+        _draw_cover_impact_burst(draw, width, height, text_left, accent, accent2)
+
+    label_font = _load_cover_font(28)
+    eyebrow = str(profile["eyebrow"])
+    eyebrow_w = min(max_text_width, _text_width(label_font, eyebrow) + 42)
+    badge_y = int(profile["badge_y"])
+    draw.rounded_rectangle((panel_x, badge_y, panel_x + eyebrow_w, badge_y + 46), radius=8, fill=(*accent[:3], 245))
+    draw.text((panel_x + 20, badge_y + 8), eyebrow, fill=(8, 10, 14, 255), font=label_font)
+
+    title_font, lines = _fit_cover_title(title_text, max_text_width, 3)
+    y = int(profile["headline_y"])
+    title_line_height = max(82, int(getattr(title_font, "size", 88)) + 8)
+    title_box_height = len(lines) * title_line_height + 22
+    draw.rounded_rectangle(
+        (panel_x - 22, y - 16, panel_x + max_text_width + 26, y + title_box_height),
+        radius=14,
+        fill=(0, 0, 0, 86),
+    )
+    for index, line in enumerate(lines):
+        fill = (255, 255, 255, 255) if index != 1 else accent
+        _draw_cover_text_shadow(draw, (panel_x, y), line, title_font)
+        draw.text((panel_x, y), line, fill=fill, font=title_font, stroke_width=8, stroke_fill=(0, 0, 0, 255))
+        y += title_line_height
+
+    if description_text:
+        description_font = _load_cover_font(28)
+        description_lines = _wrap_cover_text(description_text.upper(), description_font, max_width=max_text_width, max_lines=2)
+        if description_lines and y < 542:
+            desc_y = y + 14
+            line_height = 36
+            box_height = len(description_lines) * line_height + 22
+            draw.rounded_rectangle(
+                (panel_x - 10, desc_y - 8, panel_x + max_text_width + 18, desc_y + box_height),
+                radius=8,
+                fill=(0, 0, 0, 170),
+                outline=(*accent[:3], 90),
+                width=2,
+            )
+            for line in description_lines:
+                draw.text((panel_x + 4, desc_y), line, fill=(238, 242, 246, 245), font=description_font, stroke_width=3, stroke_fill=(0, 0, 0, 220))
+                desc_y += line_height
+
+    _draw_premium_hook_badge(draw, width, height, text_left, accent, warm, title_text, str(profile["badge"]), int(profile["hook_x"]), int(profile["hook_y"]))
+    if topic_assets and not focus_point:
+        _paste_cover_topic_assets(canvas, topic_assets[:1], text_left, random.SystemRandom())
+
+
+def _draw_cover_light_sweep(canvas: Image.Image, text_left: bool, accent: tuple[int, int, int, int]) -> None:
+    width, height = canvas.size
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay, "RGBA")
+    if text_left:
+        polygon = [(width * 0.52, 0), (width, 0), (width * 0.82, height), (width * 0.38, height)]
+    else:
+        polygon = [(0, 0), (width * 0.46, 0), (width * 0.62, height), (0, height)]
+    draw.polygon([(int(x), int(y)) for x, y in polygon], fill=(*accent[:3], 32))
+    glow = overlay.filter(ImageFilter.GaussianBlur(radius=38))
+    canvas.paste(Image.alpha_composite(canvas.convert("RGBA"), glow).convert("RGB"))
+
+
+def _draw_cover_variant_frame(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    height: int,
+    text_left: bool,
+    accent: tuple[int, int, int, int],
+    accent2: tuple[int, int, int, int],
+    layout: str,
+) -> None:
+    if layout == "poster":
+        draw.rounded_rectangle((18, 18, width - 18, height - 18), radius=4, outline=(*accent[:3], 230), width=7)
+        draw.rectangle((34, 34, width - 34, height - 34), outline=(*accent2[:3], 92), width=2)
+        return
+    if layout == "broadcast":
+        draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=16, outline=(*accent[:3], 205), width=4)
+        x = int(width * (0.57 if text_left else 0.43))
+        draw.line((x, 0, x + (-88 if text_left else 88), height), fill=(*accent2[:3], 90), width=7)
+        return
+    if layout == "impact":
+        draw.rounded_rectangle((10, 10, width - 10, height - 10), radius=22, outline=(*accent[:3], 255), width=8)
+        draw.rounded_rectangle((30, 30, width - 30, height - 30), radius=16, outline=(*accent2[:3], 120), width=3)
+        return
+    draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=16, outline=(*accent[:3], 235), width=5)
+
+
+def _draw_cover_impact_burst(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    height: int,
+    text_left: bool,
+    accent: tuple[int, int, int, int],
+    accent2: tuple[int, int, int, int],
+) -> None:
+    cx = int(width * (0.78 if text_left else 0.22))
+    cy = int(height * 0.33)
+    for index in range(18):
+        angle = (index / 18.0) * pi * 2
+        inner = 92 + (index % 3) * 16
+        outer = 290 + (index % 4) * 22
+        x1 = int(cx + cos(angle) * inner)
+        y1 = int(cy + sin(angle) * inner)
+        x2 = int(cx + cos(angle) * outer)
+        y2 = int(cy + sin(angle) * outer)
+        color = accent if index % 2 else accent2
+        draw.line((x1, y1, x2, y2), fill=(*color[:3], 74), width=5)
+
+
+def _premium_cover_accent(title: str) -> tuple[int, int, int, int]:
+    text = (title or "").lower()
+    if any(word in text for word in ("крипт", "crypto", "bitcoin", "битко")):
+        return (255, 184, 45, 255)
+    if any(word in text for word in ("подкаст", "story", "истор", "интерв")):
+        return (66, 245, 142, 255)
+    if any(word in text for word in ("драма", "шок", "лома", "разоблач", "секрет")):
+        return (255, 66, 92, 255)
+    return (255, 218, 58, 255)
+
+
+def _premium_cover_secondary_accent(title: str) -> tuple[int, int, int, int]:
+    accent = _premium_cover_accent(title)
+    if accent[:3] == (255, 66, 92):
+        return (255, 226, 96, 255)
+    if accent[:3] == (66, 245, 142):
+        return (76, 210, 255, 255)
+    return (48, 226, 255, 255)
+
+
+def _premium_cover_eyebrow(title: str) -> str:
+    text = (title or "").lower()
+    if any(word in text for word in ("подкаст", "podcast", "интерв")):
+        return "PODCAST"
+    if any(word in text for word in ("истор", "story")):
+        return "REAL STORY"
+    if any(word in text for word in ("секрет", "разбор", "ошиб", "лома")):
+        return "MUST WATCH"
+    return "TOP MOMENT"
+
+
+def _premium_cover_hook(title: str, mood: str = "premium") -> str:
+    text = (title or "").lower()
+    cyrillic = re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", title or "")
+    if any(word in text for word in ("secret", "секрет", "ошиб", "mistake", "разбор")):
+        return "НЕ ПОВТОРЯЙ ЭТО" if cyrillic else "DON'T MISS THIS"
+    if any(word in text for word in ("money", "crypto", "bitcoin", "деньги", "бизнес")):
+        return "ГДЕ ДЕНЬГИ?" if cyrillic else "MONEY ANGLE"
+    if mood == "urgent":
+        return "СМОТРИ СЕЙЧАС" if cyrillic else "WATCH NOW"
+    if mood == "clean":
+        return "ГЛАВНАЯ МЫСЛЬ" if cyrillic else "KEY TAKEAWAY"
+    return "СМОТРИ ДО КОНЦА" if cyrillic else "WATCH TO THE END"
+
+
+def _draw_cover_text_shadow(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font: ImageFont.ImageFont) -> None:
+    x, y = xy
+    for offset, alpha in ((10, 130), (6, 180), (3, 230)):
+        draw.text((x + offset, y + offset), text, fill=(0, 0, 0, alpha), font=font, stroke_width=8, stroke_fill=(0, 0, 0, alpha))
+
+
+def _draw_premium_hook_badge(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    height: int,
+    text_left: bool,
+    accent: tuple[int, int, int, int],
+    warm: tuple[int, int, int, int],
+    title: str,
+    text: str | None = None,
+    x: int | None = None,
+    y: int | None = None,
+) -> None:
+    font = _load_cover_font(30)
+    text = "СМОТРИ ДО КОНЦА" if re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", title or "") else "WATCH TO THE END"
+    text = text or "WATCH TO THE END"
+    text_w = _text_width(font, text)
+    x = int(x if x is not None else (56 if text_left else width - text_w - 106))
+    y = int(y if y is not None else height - 96)
+    draw.rounded_rectangle((x, y, x + text_w + 50, y + 56), radius=8, fill=(0, 0, 0, 205), outline=(*accent[:3], 220), width=2)
+    draw.rectangle((x, y, x + 12, y + 56), fill=warm)
+    draw.text((x + 28, y + 12), text, fill=(255, 255, 255, 255), font=font)
+
+
+def _draw_subtle_face_focus(draw: ImageDraw.ImageDraw, point: tuple[int, int], accent: tuple[int, int, int, int]) -> None:
+    x, y = point
+    radius = 82
+    segment = 36
+    for corner, horizontal, vertical in [
+        ((x - radius, y - radius), (x - radius + segment, y - radius), (x - radius, y - radius + segment)),
+        ((x + radius, y - radius), (x + radius - segment, y - radius), (x + radius, y - radius + segment)),
+        ((x - radius, y + radius), (x - radius + segment, y + radius), (x - radius, y + radius - segment)),
+        ((x + radius, y + radius), (x + radius - segment, y + radius), (x + radius, y + radius - segment)),
+    ]:
+        draw.line((corner, horizontal), fill=(0, 0, 0, 165), width=10)
+        draw.line((corner, vertical), fill=(0, 0, 0, 165), width=10)
+        draw.line((corner, horizontal), fill=(*accent[:3], 205), width=5)
+        draw.line((corner, vertical), fill=(*accent[:3], 205), width=5)
+
+
 def _load_cover_font(size: int) -> ImageFont.ImageFont:
     for name in ("arialbd.ttf", "segoeuib.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf"):
         try:
@@ -1652,13 +2209,13 @@ def _cover_description_text(description: str) -> str:
 
 def _fit_cover_title(text: str, max_width: int, max_lines: int) -> tuple[ImageFont.ImageFont, list[str]]:
     fallback_lines: list[str] = []
-    fallback_font = _load_cover_font(64)
-    for size in (88, 82, 76, 70, 64):
+    fallback_font = _load_cover_font(68)
+    for size in (98, 92, 86, 80, 74, 68):
         font = _load_cover_font(size)
         lines = _wrap_cover_text(text, font, max_width=max_width, max_lines=max_lines)
         fallback_font, fallback_lines = font, lines
         total_height = len(lines) * (size + 7)
-        if len(lines) <= max_lines and total_height <= 300 and all(_text_width(font, line) <= max_width for line in lines):
+        if len(lines) <= max_lines and total_height <= 322 and all(_text_width(font, line) <= max_width for line in lines):
             return font, lines
     return fallback_font, fallback_lines or [text[:18]]
 
@@ -1977,28 +2534,27 @@ def build_vertical_filter(
     if not width or not height:
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
-    face = None
+    face_track: list[FaceTrackPoint] = []
     if focus_mode == "face" and face_detection_enabled:
-        face = detect_face_focus(source, start_seconds, clip_seconds)
+        face_track = detect_face_track(source, start_seconds, clip_seconds)
 
-    if not face:
+    if not face_track:
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
-    face_x, face_y = face.x, face.y
     target_ratio = 9 / 16
     source_ratio = width / height
     if source_ratio > target_ratio:
         crop_h = height
         crop_w = int(height * target_ratio)
-        crop_x = clamp(int(face_x - crop_w / 2), 0, width - crop_w)
-        crop_y = 0
+        crop_x_expr = _ffmpeg_dynamic_crop_expr(_face_safe_crop_positions(face_track, crop_w, width, axis="x"), width - crop_w)
+        return f"crop={crop_w}:{crop_h}:x='{crop_x_expr}':y=0,scale=1080:1920:flags=lanczos,setsar=1"
     else:
         crop_w = width
         crop_h = int(width / target_ratio)
-        crop_x = 0
-        crop_y = clamp(int(face_y - crop_h / 2), 0, height - crop_h)
+        crop_y_expr = _ffmpeg_dynamic_crop_expr(_face_safe_crop_positions(face_track, crop_h, height, axis="y"), height - crop_h)
+        return f"crop={crop_w}:{crop_h}:x=0:y='{crop_y_expr}',scale=1080:1920:flags=lanczos,setsar=1"
 
-    return f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale=1080:1920:flags=lanczos,setsar=1"
+    return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
 
 def detect_face_center(source: Path, start_seconds: int, clip_seconds: int = 10) -> tuple[int, int] | None:
@@ -2009,34 +2565,59 @@ def detect_face_center(source: Path, start_seconds: int, clip_seconds: int = 10)
 
 
 def detect_face_focus(source: Path, start_seconds: int, clip_seconds: int = 10) -> FaceFocus | None:
+    track = detect_face_track(source, start_seconds, clip_seconds)
+    if not track:
+        return None
+    weighted_x = sum(point.x * point.confidence for point in track)
+    weighted_y = sum(point.y * point.confidence for point in track)
+    total_weight = sum(point.confidence for point in track)
+    if total_weight <= 0:
+        return None
+    confidence = min(1.0, len(track) / max(1, len(_focus_sample_offsets(max(1, clip_seconds)))) + total_weight / max(1, len(track)) * 0.18)
+    if confidence < 0.28:
+        return None
+    return FaceFocus(int(weighted_x / total_weight), int(weighted_y / total_weight), confidence)
+
+
+def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10) -> list[FaceTrackPoint]:
+    native_points = native_tools.face_track_points(source, start_seconds, clip_seconds)
+    if native_points:
+        points: list[FaceTrackPoint] = []
+        for item in native_points:
+            try:
+                points.append(
+                    FaceTrackPoint(
+                        second=float(item.get("second", 0)),
+                        x=int(item["x"]),
+                        y=int(item["y"]),
+                        width=int(item.get("width", 1)),
+                        height=int(item.get("height", 1)),
+                        confidence=float(item.get("confidence", 0.5)),
+                    )
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        if points:
+            return points
+
     frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
     profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
     detectors = [detector for detector in (frontal, profile) if not detector.empty()]
     if not detectors:
-        return None
+        return []
 
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
-        return None
+        return []
     try:
         offsets = _focus_sample_offsets(max(1, clip_seconds))
-        candidates: list[tuple[float, float, float]] = []
+        candidates: list[FaceTrackPoint] = []
         for offset in offsets:
             capture.set(cv2.CAP_PROP_POS_MSEC, max(0, start_seconds + offset) * 1000)
             ok, frame = capture.read()
             if not ok:
                 continue
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.equalizeHist(gray)
-            faces: list[tuple[int, int, int, int]] = []
-            for detector in detectors:
-                faces.extend(detector.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)))
-                flipped = cv2.flip(gray, 1)
-                frame_width = gray.shape[1]
-                for fx, fy, fw, fh in detector.detectMultiScale(
-                    flipped, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)
-                ):
-                    faces.append((frame_width - fx - fw, fy, fw, fh))
+            faces = _detect_frame_faces(frame, detectors)
             if not faces:
                 continue
             x, y, w, h = max(faces, key=lambda item: item[2] * item[3])
@@ -2044,22 +2625,129 @@ def detect_face_focus(source: Path, start_seconds: int, clip_seconds: int = 10) 
             frame_area = max(1, frame.shape[0] * frame.shape[1])
             if face_area / frame_area < 0.002:
                 continue
-            candidates.append((x + w / 2, y + h / 2, float(face_area)))
+            candidates.append(
+                FaceTrackPoint(
+                    second=float(offset),
+                    x=int(x + w / 2),
+                    y=int(y + h / 2),
+                    width=int(w),
+                    height=int(h),
+                    confidence=min(1.0, max(0.08, face_area / frame_area * 18.0)),
+                )
+            )
         if not candidates:
-            return None
-        candidates = _keep_face_cluster(candidates)
-        if not candidates:
-            return None
-        weighted_x = sum(x * weight for x, _y, weight in candidates)
-        weighted_y = sum(y * weight for _x, y, weight in candidates)
-        total_weight = sum(weight for _x, _y, weight in candidates)
-        confidence = min(1.0, len(candidates) / max(1, len(offsets)) + total_weight / 2_500_000)
-        if confidence < 0.28:
-            return None
-        return FaceFocus(int(weighted_x / total_weight), int(weighted_y / total_weight), confidence)
+            return []
+        return _smooth_face_track(_keep_face_track_cluster(candidates))
     finally:
         capture.release()
-    return None
+    return []
+
+
+def _detect_frame_faces(
+    frame: np.ndarray,
+    detectors: list[cv2.CascadeClassifier],
+) -> list[tuple[int, int, int, int]]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    faces: list[tuple[int, int, int, int]] = []
+    for detector in detectors:
+        faces.extend(tuple(map(int, face)) for face in detector.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)))
+        flipped = cv2.flip(gray, 1)
+        frame_width = gray.shape[1]
+        for fx, fy, fw, fh in detector.detectMultiScale(flipped, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)):
+            faces.append((int(frame_width - fx - fw), int(fy), int(fw), int(fh)))
+    return faces
+
+
+def _keep_face_track_cluster(points: list[FaceTrackPoint]) -> list[FaceTrackPoint]:
+    if len(points) <= 2:
+        return points
+    xs = sorted(point.x for point in points)
+    ys = sorted(point.y for point in points)
+    median_x = xs[len(xs) // 2]
+    median_y = ys[len(ys) // 2]
+    distances = [
+        (abs(point.x - median_x) + abs(point.y - median_y), point)
+        for point in points
+    ]
+    distances.sort(key=lambda item: item[0])
+    keep_count = max(2, int(round(len(points) * 0.82)))
+    return sorted((point for _distance, point in distances[:keep_count]), key=lambda point: point.second)
+
+
+def _smooth_face_track(points: list[FaceTrackPoint]) -> list[FaceTrackPoint]:
+    if len(points) < 3:
+        return points
+    smoothed: list[FaceTrackPoint] = []
+    for index, point in enumerate(points):
+        neighbors = points[max(0, index - 1) : min(len(points), index + 2)]
+        total = sum(item.confidence for item in neighbors) or 1.0
+        smoothed.append(
+            FaceTrackPoint(
+                second=point.second,
+                x=int(sum(item.x * item.confidence for item in neighbors) / total),
+                y=int(sum(item.y * item.confidence for item in neighbors) / total),
+                width=int(sum(item.width * item.confidence for item in neighbors) / total),
+                height=int(sum(item.height * item.confidence for item in neighbors) / total),
+                confidence=point.confidence,
+            )
+        )
+    return smoothed
+
+
+def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, source_size: int, axis: str) -> list[tuple[float, int]]:
+    max_offset = max(0, source_size - crop_size)
+    positions: list[tuple[float, int]] = []
+    for point in points:
+        center = point.x if axis == "x" else point.y
+        face_size = point.width if axis == "x" else point.height
+        face_start = center - face_size / 2
+        face_end = center + face_size / 2
+        if axis == "x":
+            padding = max(18, int(face_size * 0.62), int(crop_size * 0.08))
+            desired = center - crop_size * 0.50
+        else:
+            padding = max(22, int(face_size * 0.72), int(crop_size * 0.10))
+            desired = center - crop_size * 0.42
+        lower = face_end + padding - crop_size
+        upper = face_start - padding
+        if lower <= upper:
+            offset = min(max(desired, lower), upper)
+        else:
+            offset = center - crop_size * (0.50 if axis == "x" else 0.42)
+        positions.append((point.second, clamp(int(round(offset)), 0, max_offset)))
+    if not positions:
+        return []
+    return _limit_crop_motion(positions, max_step=max(24, crop_size // 22))
+
+
+def _limit_crop_motion(positions: list[tuple[float, int]], max_step: int) -> list[tuple[float, int]]:
+    limited: list[tuple[float, int]] = []
+    previous: int | None = None
+    for second, offset in positions:
+        if previous is not None:
+            offset = clamp(offset, previous - max_step, previous + max_step)
+        limited.append((second, offset))
+        previous = offset
+    return limited
+
+
+def _ffmpeg_dynamic_crop_expr(positions: list[tuple[float, int]], max_offset: int) -> str:
+    if not positions:
+        return "0"
+    positions = [(max(0.0, float(second)), clamp(int(offset), 0, max_offset)) for second, offset in positions]
+    if len(positions) == 1:
+        return str(positions[0][1])
+
+    expression = str(positions[-1][1])
+    for (start_t, start_x), (end_t, end_x) in reversed(list(zip(positions, positions[1:]))):
+        if end_t <= start_t:
+            value = str(end_x)
+        else:
+            progress = f"((t-{start_t:.3f})/{(end_t - start_t):.3f})"
+            value = f"({start_x}+({end_x - start_x})*{progress})"
+        expression = f"if(lt(t\\,{end_t:.3f})\\,{value}\\,{expression})"
+    return expression
 
 
 def _keep_face_cluster(candidates: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
@@ -2126,6 +2814,13 @@ def _score_video_moments(
     step_seconds: int,
     face_detection_enabled: bool,
 ) -> list[tuple[int, float]]:
+    native_visual = native_tools.visual_moment_scores(source, duration_seconds, step_seconds)
+    if native_visual:
+        if face_detection_enabled:
+            native_visual = _add_python_face_scores(source, native_visual)
+        audio_scores = _score_audio_moments(source, duration_seconds, step_seconds)
+        return _smooth_scores(_combine_moment_scores(_smooth_scores(native_visual, step_seconds), audio_scores), step_seconds)
+
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
         return []
@@ -2196,6 +2891,37 @@ def _score_video_moments(
     return _smooth_scores(_combine_moment_scores(visual_scores, audio_scores), step_seconds)
 
 
+def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]) -> list[tuple[int, float]]:
+    if not visual_scores:
+        return visual_scores
+    frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
+    profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+    detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+    if not detectors:
+        return visual_scores
+
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return visual_scores
+    boosted: list[tuple[int, float]] = []
+    try:
+        for second, score in visual_scores:
+            capture.set(cv2.CAP_PROP_POS_MSEC, second * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                boosted.append((second, score))
+                continue
+            faces = _detect_frame_faces(frame, detectors)
+            face_score = 0.0
+            if faces:
+                largest = max((w * h for _x, _y, w, h in faces), default=0)
+                face_score = min(58.0, 14.0 * len(faces) + largest / max(1, frame.shape[0] * frame.shape[1]) * 150.0)
+            boosted.append((second, score + face_score))
+    finally:
+        capture.release()
+    return boosted
+
+
 def _combine_moment_scores(
     visual_scores: list[tuple[int, float]],
     audio_scores: list[tuple[int, float]],
@@ -2246,15 +2972,68 @@ def _rank_clip_windows(
         total = sum(window_values)
         peak = max(window_values)
         average = total / len(window_values)
+        ordered_values = sorted(window_values)
+        upper_mid = ordered_values[int((len(ordered_values) - 1) * 0.65)]
+        strong_threshold = max(average * 1.08, peak * 0.48)
+        strong_ratio = sum(1 for score in window_values if score >= strong_threshold) / max(1, len(window_values))
         coverage = len(window_values) / max(1, min(clip_seconds, duration_seconds) / step_seconds)
         center = start + clip_seconds / 2
         center_bonus = 1.0 - min(1.0, abs(max(by_second, key=lambda sec: by_second[sec] if start <= sec < start + clip_seconds else -1) - center) / max(1.0, clip_seconds / 2))
         edge_penalty = _timeline_edge_penalty(start, duration_seconds, clip_seconds)
-        score = (total * 0.9 + peak * 0.5 + average * 0.4 + coverage * 20.0 + center_bonus * 6.0) * edge_penalty
+        isolated_peak_penalty = 0.72 if peak > max(1.0, upper_mid) * 2.8 and strong_ratio < 0.34 else 1.0
+        sustained_bonus = 1.0 + min(0.34, strong_ratio * 0.42)
+        score = (
+            total * 0.78
+            + peak * 0.34
+            + average * 0.75
+            + upper_mid * 0.42
+            + coverage * 24.0
+            + center_bonus * 7.0
+        ) * edge_penalty * isolated_peak_penalty * sustained_bonus
         ranked.append((start, score))
 
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked
+
+
+def _clip_candidate_dicts(
+    ranked_starts: list[tuple[int, float]],
+    scores: list[tuple[int, float]],
+    duration_seconds: int,
+    clip_seconds: int,
+    step_seconds: int,
+) -> list[dict[str, object]]:
+    if not ranked_starts:
+        return []
+    by_second = {int(second): max(0.0, float(score)) for second, score in scores if score > 0}
+    max_score = max((score for _start, score in ranked_starts), default=1.0) or 1.0
+    candidates: list[dict[str, object]] = []
+    for start, raw_score in ranked_starts:
+        window_values = [
+            score
+            for second, score in by_second.items()
+            if start <= second < start + clip_seconds
+        ]
+        if not window_values:
+            continue
+        peak_second = max(
+            (second for second in by_second if start <= second < start + clip_seconds),
+            key=lambda second: by_second[second],
+            default=start,
+        )
+        candidates.append(
+            {
+                "start": int(start),
+                "score": round(float(raw_score) / max_score * 100.0, 3),
+                "peak_second": int(peak_second),
+                "peak_score": round(max(window_values), 3),
+                "avg_score": round(sum(window_values) / len(window_values), 3),
+                "coverage": round(len(window_values) / max(1, min(clip_seconds, duration_seconds) / max(1, step_seconds)), 3),
+                "position": round((start + clip_seconds / 2) / max(1, duration_seconds), 3),
+                "source": "local",
+            }
+        )
+    return candidates
 
 
 def _select_diverse_ranked_starts(
@@ -2462,30 +3241,23 @@ def _read_audio_rms_windows(
     duration_seconds: float,
     window_seconds: float,
 ) -> list[tuple[float, int]]:
+    native_windows = native_tools.audio_rms_windows(source, start_seconds, duration_seconds, window_seconds)
+    if native_windows:
+        return native_windows
+    return _read_audio_rms_windows_python(source, start_seconds, duration_seconds, window_seconds)
+
+
+def _read_audio_rms_windows_python(
+    source: Path,
+    start_seconds: float,
+    duration_seconds: float,
+    window_seconds: float,
+) -> list[tuple[float, int]]:
     sample_rate = 8000
     samples_per_window = max(1, int(sample_rate * window_seconds))
     chunk_size = samples_per_window * 2
-    args = [
-        ffmpeg_path(),
-        "-v",
-        "error",
-        "-ss",
-        f"{start_seconds:.3f}",
-        "-t",
-        f"{duration_seconds:.3f}",
-        "-i",
-        str(source),
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        str(sample_rate),
-        "-f",
-        "s16le",
-        "-",
-    ]
     try:
-        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(native_tools.audio_pcm_args(source, start_seconds, duration_seconds, sample_rate), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except Exception:
         return []
     if not process.stdout:

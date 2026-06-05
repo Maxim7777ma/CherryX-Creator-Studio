@@ -4,15 +4,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Video editor - CherryX Creator Studio</title>
+    <title>{% ui "video_editor_nav" %} - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
     <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar video-editor-topbar">
       <div class="topbar-copy">
-        <p class="eyebrow"><a class="back-link" href="{% url 'studio:video_project_list' %}">Back to projects</a></p>
-        <h1>Video editor</h1>
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:video_project_list' %}">{% ui "back_to_projects" %}</a></p>
+        <h1>{% ui "video_editor_nav" %}</h1>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
@@ -196,9 +196,17 @@
           <button class="editor-export-button" type="button" data-add-caption>CC Caption</button>
           <label class="editor-audio-picker editor-file-picker">
             <span>Subtitles SRT/VTT</span>
-            <input type="file" accept=".srt,.vtt,text/vtt,text/plain" data-subtitle-file>
+            <input type="file" accept=".srt,.vtt,.ass,.json,text/vtt,text/plain,application/json" data-subtitle-file>
             <strong><i data-icon="file-text"></i><em>Import captions</em></strong>
           </label>
+          <div class="editor-duo">
+            <button type="button" data-export-subtitles="srt">SRT</button>
+            <button type="button" data-export-subtitles="vtt">VTT</button>
+          </div>
+          <div class="editor-duo">
+            <button type="button" data-export-subtitles="ass">ASS</button>
+            <button type="button" data-export-subtitles="json">JSON</button>
+          </div>
           <button class="editor-export-button" type="button" data-add-text>T+ Текст</button>
           <button type="button" data-delete-clip>Удалить</button>
           <label>
@@ -811,9 +819,9 @@
             style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 22, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 48},
           });
         }
-        function addCaptionClip(text = "Caption", start = currentTime(), duration = 3) {
+        function addCaptionClip(text = "Caption", start = currentTime(), duration = 3, options = {}) {
           const track = state.tracks.find((item) => item.type === "text") || state.tracks[1];
-          addClip({
+          const clip = {
             id: uid("caption"),
             type: "caption",
             trackId: track.id,
@@ -824,7 +832,13 @@
             scale: 100,
             text,
             style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 24, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 42},
-          });
+          };
+          if (options.history === false) {
+            state.clips.push(normalizeClip(clip));
+            setSelection([clip.id], clip.id);
+          } else {
+            addClip(clip);
+          }
         }
         function parseSubtitleTime(value) {
           const parts = String(value || "").replace(",", ".").split(":").map(Number);
@@ -2373,10 +2387,35 @@
         subtitleInput?.addEventListener("change", async () => {
           const file = subtitleInput.files?.[0];
           if (!file) return;
-          const text = await file.text();
-          parseSubtitleText(text).forEach((cue) => addCaptionClip(cue.text, cue.start, cue.end - cue.start));
+          let cues = [];
+          try {
+            await ensureProject();
+            const body = new FormData();
+            body.append("file", file);
+            const response = await fetch(`${api}${projectId}/subtitles/import/`, {
+              method: "POST",
+              headers: {"X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest"},
+              body,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || "Subtitle import failed");
+            cues = Array.isArray(payload.cues) ? payload.cues : [];
+          } catch (error) {
+            const text = await file.text();
+            cues = parseSubtitleText(text);
+          }
+          pushHistory();
+          cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {history: false}));
+          render();
+          scheduleSave();
           subtitleInput.value = "";
         });
+        root.querySelectorAll("[data-export-subtitles]").forEach((button) => button.addEventListener("click", async () => {
+          await ensureProject();
+          await saveProject();
+          const format = button.dataset.exportSubtitles || "srt";
+          window.location.href = `${api}${projectId}/subtitles/export/?format=${encodeURIComponent(format)}`;
+        }));
         root.querySelectorAll("[data-delete-clip]").forEach((button) => button.addEventListener("click", confirmDeleteSelectedClip));
         title.addEventListener("dblclick", startTitleEdit);
         saveRetry?.addEventListener("click", saveProject);

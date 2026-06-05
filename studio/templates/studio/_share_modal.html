@@ -6,6 +6,14 @@
       <button type="button" data-share-close aria-label="Close"></button>
     </header>
     <h2 id="workspace-share-title">Share project</h2>
+    <div class="workspace-share-preview" data-share-preview>
+      <div class="workspace-share-thumb" data-share-preview-thumb></div>
+      <div>
+        <strong data-share-resource-title>Project invite</strong>
+        <span data-share-resource-label>Private project link</span>
+        <small>Invite links are valid for 14 days. Owners can change roles or revoke access any time.</small>
+      </div>
+    </div>
     <form data-share-form>
       <input type="email" name="email" placeholder="teammate@example.com" autocomplete="email" required>
       <input type="hidden" name="role" value="viewer">
@@ -22,6 +30,10 @@
       </div>
     </form>
     <div class="workspace-share-status" data-share-status></div>
+    <div class="workspace-share-toolbar">
+      <strong>Invited people</strong>
+      <button type="button" data-share-copy-latest hidden>Copy latest link</button>
+    </div>
     <div class="workspace-share-list" data-share-list></div>
   </section>
 </div>

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
 from pathlib import Path
 import secrets
 import subprocess
+import threading
 from tempfile import TemporaryDirectory
 import time
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -17,8 +20,311 @@ from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
 
+from src import openai_ai
+from src import web_actions as actions
+from src.youtube_tools import SubtitleCue
 from . import views
-from .models import DesignerAsset, DesignerProject, JobRecord, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .models import DesignerAsset, DesignerProject, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+
+
+class SiteSmokeTests(TransactionTestCase):
+    def test_core_site_pages_render(self) -> None:
+        routes = [
+            reverse("studio:landing"),
+            reverse("studio:index"),
+            reverse("studio:dashboard_detail", args=["files"]),
+            reverse("studio:design_project_list"),
+            reverse("studio:video_project_list"),
+            reverse("studio:designer"),
+            reverse("studio:video_editor"),
+        ]
+
+        for route in routes:
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+
+    def test_workspace_design_switch_opens_project_list(self) -> None:
+        response = self.client.get(reverse("studio:index"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/app/design-projects/"')
+        self.assertContains(response, "data-designer-launch")
+
+    def test_files_stats_ajax_partial_contains_controls(self) -> None:
+        response = self.client.get(
+            reverse("studio:dashboard_detail", args=["files"]),
+            {"type": "image", "q": "cover"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("html", payload)
+        self.assertIn("stats-type-picker", payload["html"])
+        self.assertIn("stats-files-table-head", payload["html"])
+
+
+class QueryOptimizationTests(TransactionTestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user("perf@example.com", email="perf@example.com", password="pass12345")
+        self.client.force_login(self.user)
+
+    def test_video_project_list_payload_uses_prefetched_assets(self) -> None:
+        for index in range(50):
+            project = VideoEditorProject.objects.create(
+                owner=self.user,
+                title=f"Video {index}",
+                state_json={"clips": [{"id": f"clip-{index}", "duration": 5}], "tracks": []},
+                asset_count=1,
+                clip_count=1,
+                duration_seconds=5,
+            )
+            VideoEditorAsset.objects.create(project=project, kind="image", file_path=f"/tmp/{index}.jpg", media_type="image/jpeg", size=10, original_name=f"{index}.jpg")
+
+        with self.assertNumQueries(2):
+            queryset = _video_project_queryset_for_test(self.user.id).prefetch_related("assets")
+            rows = views._attach_access_roles(list(queryset[:50]), WorkspaceShare.RESOURCE_VIDEO, self.user.id, "")
+            payloads = [views._video_project_payload(project, include_state=False, owner_id=self.user.id) for project in rows]
+
+        self.assertEqual(len(payloads), 50)
+        self.assertTrue(all(item["asset_count"] == 1 for item in payloads))
+
+    def test_dashboard_output_url_builder_batches_job_records(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dicts = []
+            for index in range(25):
+                path = root / f"cover-{index}.png"
+                Image.new("RGB", (16, 16), "#2563eb").save(path)
+                record = JobRecord.objects.create(
+                    owner=self.user,
+                    job_id=f"job{index:04d}",
+                    kind="cover",
+                    title=f"Cover {index}",
+                    status="completed",
+                    progress=100,
+                    params_json=json.dumps({"design_projects": {str(path.resolve()): 1000 + index}}),
+                )
+                JobOutputRecord.objects.create(job=record, label="PNG-cover", path=str(path), media_type="image/png", size=path.stat().st_size)
+            records = JobRecord.objects.filter(owner=self.user).prefetch_related("outputs").order_by("id")
+            job_dicts = [actions._serialize_job_record(record) for record in records]
+
+            with self.assertNumQueries(2):
+                prepared = views._attach_output_urls_many(job_dicts)
+
+        self.assertEqual(len(prepared), 25)
+        self.assertTrue(all(job["outputs"][0]["can_edit_design"] for job in prepared))
+
+    def test_account_stats_uses_aggregates(self) -> None:
+        records = [
+            JobRecord.objects.create(owner=self.user, job_id=f"stats{index}", kind="cover", title="Stats", status="completed", progress=100)
+            for index in range(3)
+        ]
+        for index, record in enumerate(records, start=1):
+            JobOutputRecord.objects.create(job=record, label="Output", path=f"/tmp/stats-{index}.png", media_type="image/png", size=index * 100)
+
+        with self.assertNumQueries(2):
+            stats = actions.get_account_stats(self.user.id, "")
+
+        self.assertEqual(stats["total_jobs"], 3)
+        self.assertEqual(stats["output_count"], 3)
+        self.assertEqual(stats["total_output_size"], 600)
+
+    def test_share_roles_are_attached_in_one_batch_for_mixed_resources(self) -> None:
+        owner = get_user_model().objects.create_user("owner-perf@example.com", email="owner-perf@example.com", password="pass12345")
+        design = DesignerProject.objects.create(owner=owner, title="Design")
+        video = VideoEditorProject.objects.create(owner=owner, title="Video")
+        music = MusicEditorProject.objects.create(owner=owner, title="Music")
+        expires_at = timezone.now() + timezone.timedelta(days=7)
+        for resource_type, resource in (
+            (WorkspaceShare.RESOURCE_DESIGN, design),
+            (WorkspaceShare.RESOURCE_VIDEO, video),
+            (WorkspaceShare.RESOURCE_MUSIC, music),
+        ):
+            WorkspaceShare.objects.create(
+                owner=owner,
+                invited_user=self.user,
+                resource_type=resource_type,
+                resource_id=resource.id,
+                email=self.user.email,
+                role=WorkspaceShare.ROLE_EDITOR,
+                token=secrets.token_urlsafe(12),
+                status=WorkspaceShare.STATUS_ACCEPTED,
+                expires_at=expires_at,
+            )
+
+        with self.assertNumQueries(1):
+            views._attach_access_roles([design], WorkspaceShare.RESOURCE_DESIGN, self.user.id, "")
+        with self.assertNumQueries(1):
+            views._attach_access_roles([video], WorkspaceShare.RESOURCE_VIDEO, self.user.id, "")
+        with self.assertNumQueries(1):
+            views._attach_access_roles([music], WorkspaceShare.RESOURCE_MUSIC, self.user.id, "")
+
+        self.assertEqual(design._access_role, WorkspaceShare.ROLE_EDITOR)
+        self.assertEqual(video._access_role, WorkspaceShare.ROLE_EDITOR)
+        self.assertEqual(music._access_role, WorkspaceShare.ROLE_EDITOR)
+
+
+class JobSchedulerTests(TransactionTestCase):
+    def setUp(self) -> None:
+        self.user = get_user_model().objects.create_user("queue@example.com", email="queue@example.com", password="pass12345")
+        self.original_settings = actions.settings
+        self.original_executor = actions._executor
+        actions.settings = replace(actions.settings, job_max_workers=20, account_concurrent_jobs=10)
+        actions._executor = ThreadPoolExecutor(max_workers=20)
+        with actions._lock:
+            actions._jobs.clear()
+            actions._pending_jobs.clear()
+            actions._running_job_ids.clear()
+            actions._running_by_account.clear()
+        self.addCleanup(self.cleanup_scheduler)
+
+    def cleanup_scheduler(self) -> None:
+        with actions._lock:
+            actions._pending_jobs.clear()
+            actions._running_job_ids.clear()
+            actions._running_by_account.clear()
+            actions._jobs.clear()
+        actions._executor.shutdown(wait=True, cancel_futures=True)
+        actions._executor = self.original_executor
+        actions.settings = self.original_settings
+
+    def test_scheduler_limits_one_account_to_ten_running_jobs(self) -> None:
+        release = threading.Event()
+        started: list[str] = []
+        started_lock = threading.Lock()
+        ten_started = threading.Event()
+
+        def worker(job: actions.WebJob) -> None:
+            with started_lock:
+                started.append(job.id)
+                if len(started) == 10:
+                    ten_started.set()
+            release.wait(timeout=5)
+
+        for index in range(12):
+            actions._submit_job("test", f"Job {index}", worker, {"action": "test"}, self.user.id, "")
+
+        self.assertTrue(ten_started.wait(timeout=5))
+        with actions._lock:
+            running = [job for job in actions._jobs.values() if job.status == "running"]
+            queued = [job for job in actions._jobs.values() if job.status == "queued"]
+        self.assertEqual(len(running), 10)
+        self.assertEqual(len(queued), 2)
+
+        release.set()
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            with actions._lock:
+                completed = [job for job in actions._jobs.values() if job.status == "completed"]
+            if len(completed) == 12:
+                break
+            time.sleep(0.05)
+        self.assertEqual(len(completed), 12)
+
+
+def _video_project_queryset_for_test(owner_id: int):
+    return VideoEditorProject.objects.filter(owner_id=owner_id)
+
+
+class WebOpenAIUpgradeTests(TransactionTestCase):
+    def test_ai_disabled_clip_planner_falls_back_to_local_starts(self) -> None:
+        job = actions.WebJob(id="aitest01", kind="youtube", title="AI test", params={})
+
+        with mock.patch.object(actions.openai_ai, "is_openai_ready", return_value=False):
+            starts = actions._ai_improve_clip_starts(job, "Demo", 120, [10, 40, 80], 3)
+
+        self.assertEqual(starts, [10, 40, 80])
+        self.assertEqual(job.params["ai"]["clip_planner"]["status"], "fallback")
+
+    def test_ai_clip_planner_uses_valid_returned_starts(self) -> None:
+        job = actions.WebJob(id="aitest02", kind="youtube", title="AI test", params={})
+
+        with (
+            mock.patch.object(actions.openai_ai, "is_openai_ready", return_value=True),
+            mock.patch.object(actions.openai_ai, "plan_clip_moments", return_value={"starts": [80, 999, 10], "model": "test-model"}),
+        ):
+            starts = actions._ai_improve_clip_starts(job, "Demo", 120, [10, 40, 80], 2)
+
+        self.assertEqual(starts, [10, 80])
+        self.assertEqual(job.params["ai"]["clip_planner"]["status"], "used")
+
+    def test_ai_cover_failure_keeps_local_cover_only(self) -> None:
+        job = actions.WebJob(id="aitest03", kind="cover", title="Cover", params={})
+        with TemporaryDirectory() as tmp:
+            reference = Path(tmp) / "cover.png"
+            Image.new("RGB", (1280, 720), "#2563eb").save(reference)
+
+            with (
+                mock.patch.object(actions.openai_ai, "is_openai_ready", return_value=True),
+                mock.patch.object(actions.openai_ai, "generate_cover_prompt", side_effect=RuntimeError("API unavailable")),
+            ):
+                output = actions._maybe_add_ai_cover(job, reference, Path(tmp) / "ai", "Cover")
+
+        self.assertIsNone(output)
+        self.assertEqual(job.outputs, [])
+        self.assertEqual(job.params["ai"]["cover"]["status"], "fallback")
+
+    def test_openai_word_transcription_maps_to_subtitle_cues(self) -> None:
+        cues = openai_ai._transcription_to_cues(
+            {
+                "words": [
+                    {"word": "Hello", "start": 0.0, "end": 0.4},
+                    {"word": "world", "start": 0.45, "end": 0.8},
+                ]
+            }
+        )
+
+        self.assertEqual(cues, [SubtitleCue(start=0.0, end=0.8, text="Hello world")])
+
+
+class EditableCoverDesignTests(TransactionTestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.original_settings = views.settings
+        views.settings = replace(views.settings, storage_dir=Path(self.temp_dir.name))
+        self.addCleanup(lambda: setattr(views, "settings", self.original_settings))
+        session = self.client.session
+        session["editable_cover_test"] = "1"
+        session.save()
+        self.guest_key = session.session_key
+
+    def make_job_output(self, *, kind: str = "cover", label: str = "PNG-cover", media_type: str = "image/png", name: str = "cover_business_cover.png") -> tuple[JobRecord, Path]:
+        path = Path(self.temp_dir.name) / name
+        if media_type.startswith("image/"):
+            Image.new("RGB", (1280, 720), "#163c66").save(path)
+        else:
+            path.write_text("not an image", encoding="utf-8")
+        record = JobRecord.objects.create(job_id=secrets.token_hex(6), kind=kind, title="Smoke Cover", status="completed", progress=100, guest_key=self.guest_key, params_json="{}")
+        JobOutputRecord.objects.create(job=record, label=label, path=str(path), media_type=media_type, size=path.stat().st_size)
+        return record, path
+
+    def test_cover_output_creates_editable_design_once(self) -> None:
+        record, _path = self.make_job_output()
+        url = reverse("studio:edit_output_design", args=[record.job_id, 0])
+
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        project_id = response.json()["project"]["id"]
+        project = DesignerProject.objects.get(id=project_id)
+        self.assertEqual(project.assets.count(), 1)
+        self.assertSetEqual({item.get("type") for item in project.state_json["objects"]}, {"frame", "image", "shape", "text"})
+
+        repeat = self.client.post(url)
+        self.assertEqual(repeat.status_code, 200)
+        self.assertEqual(repeat.json()["project"]["id"], project_id)
+        self.assertEqual(DesignerProject.objects.count(), 1)
+
+    def test_non_image_output_is_not_editable_design(self) -> None:
+        record, _path = self.make_job_output(kind="subtitles", label="ASS subtitles", media_type="text/plain", name="captions.ass")
+        job = views._attach_output_urls(actions.get_job(record.job_id, None, self.guest_key))
+
+        self.assertFalse(job["outputs"][0].get("can_edit_design"))
+        response = self.client.post(reverse("studio:edit_output_design", args=[record.job_id, 0]))
+        self.assertEqual(response.status_code, 404)
 
 
 class VideoProjectDeleteTests(TransactionTestCase):
@@ -233,6 +539,47 @@ class DesignerProjectTests(TransactionTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["project"]["title"], "Launch cover")
+
+    def test_design_project_payload_focuses_latest_visual_layer(self) -> None:
+        project = DesignerProject.objects.create(
+            owner=self.user,
+            title="Focused preview",
+            state_json={
+                "objects": [
+                    {"id": "first", "x": 100, "y": 100, "w": 300, "h": 180},
+                    {"id": "latest", "x": 7600, "y": 4900, "w": 600, "h": 420},
+                ],
+                "strokes": [
+                    {"id": "older-stroke", "points": [{"x": 120, "y": 100}, {"x": 180, "y": 140}]}
+                ],
+                "vectors": [],
+            },
+        )
+
+        payload = views._design_project_payload(project, include_state=False, owner_id=self.user.id)
+
+        self.assertEqual(payload["preview_focus"], {"x": 88, "y": 80})
+
+    def test_design_project_list_renders_zoomed_preview_focus(self) -> None:
+        project = DesignerProject.objects.create(
+            owner=self.user,
+            title="Preview card",
+            state_json={"objects": [{"id": "layer", "x": 4200, "y": 2800, "w": 900, "h": 600}], "vectors": []},
+        )
+        media_dir = views._design_project_media_dir(project)
+        media_dir.mkdir(parents=True, exist_ok=True)
+        preview_path = media_dir / "preview.jpg"
+        preview_path.write_bytes(b"preview")
+        project.preview_path = str(preview_path)
+        project.save(update_fields=["preview_path"])
+
+        response = self.client.get(reverse("studio:design_project_list"))
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("design-project-preview-frame", html)
+        self.assertIn("design-project-preview-image", html)
+        self.assertIn("--preview-x: 52%; --preview-y: 48%;", html)
 
     def test_foreign_design_project_is_not_accessible(self) -> None:
         other_project = self.make_project(owner=self.other_user)

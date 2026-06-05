@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from collections import defaultdict, deque
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import asyncio
 import json
@@ -13,6 +14,7 @@ import uuid
 import zipfile
 
 from .bot_utils import publication_description, publication_hashtags, unique_archive_name
+from . import native_tools, openai_ai
 from .config import get_settings
 from .image_tools import SUPPORTED_IMAGE_FORMATS, clean_base_name, convert_image, human_size
 from .video_tools import VIDEO_FORMATS, convert_video, format_duration, inspect_video
@@ -20,6 +22,7 @@ from .youtube_tools import (
     calculate_smart_clip_starts,
     create_backstage_montage,
     create_business_cover,
+    create_premium_cover_from_image,
     create_subtitle_assets,
     describe_clips,
     download_youtube_video,
@@ -29,6 +32,7 @@ from .youtube_tools import (
     get_youtube_metadata,
     make_short_clip,
     planned_clip_count,
+    rank_smart_clip_candidates,
     render_subtitle_assets,
     transcribe_subtitle_cues,
     video_source_label,
@@ -77,6 +81,12 @@ SUBTITLE_LANGUAGE_CHOICES = [
     ("ru", "Русский"),
     ("uk", "Українська"),
     ("en", "English"),
+    ("fr", "French"),
+    ("de", "German"),
+    ("es", "Spanish"),
+    ("ka", "Georgian"),
+    ("hy", "Armenian"),
+    ("it", "Italian"),
 ]
 RESUME_TEMPLATE_CHOICES = [
     ("1", "Classic"),
@@ -160,8 +170,65 @@ class YouTubeProfile:
 
 
 _jobs: dict[str, WebJob] = {}
+_pending_jobs: deque[tuple[WebJob, object]] = deque()
+_running_job_ids: set[str] = set()
+_running_by_account: dict[str, int] = defaultdict(int)
 _lock = threading.RLock()
-_executor = ThreadPoolExecutor(max_workers=max(2, settings.youtube_workers + settings.cover_workers + 1))
+_executor = ThreadPoolExecutor(max_workers=max(1, settings.job_max_workers))
+
+
+def is_openai_ready() -> bool:
+    return openai_ai.is_openai_ready()
+
+
+def native_status() -> dict[str, object]:
+    helpers = {
+        "audio_rms": native_tools.helper_available("audio_rms"),
+        "media_analyzer": native_tools.helper_available("media_analyzer"),
+        "cover_pick": native_tools.helper_available("cover_pick"),
+        "face_track": native_tools.helper_available("face_track"),
+    }
+    enabled = any(helpers.values())
+    return {
+        "enabled": enabled,
+        "label": "on" if enabled else "off",
+        "message": "Native acceleration is available" if enabled else "Native acceleration unavailable, using Python/FFmpeg fallback",
+        "helpers": helpers,
+        "capabilities": native_tools.capabilities(),
+    }
+
+
+def queue_status(owner_id: int | None = None, guest_key: str = "") -> dict[str, object]:
+    with _lock:
+        jobs = list(_jobs.values())
+        pending_total = len(_pending_jobs)
+        running_total = len(_running_job_ids)
+        if owner_id is not None or guest_key:
+            account_jobs = [job for job in jobs if _access_matches(job.owner_id, job.guest_key, owner_id, guest_key)]
+            pending_account = sum(1 for job in account_jobs if job.status == "queued")
+            running_account = sum(1 for job in account_jobs if job.status == "running")
+        else:
+            pending_account = pending_total
+            running_account = running_total
+    return {
+        "max_workers": max(1, int(getattr(settings, "job_max_workers", 1) or 1)),
+        "account_concurrent_jobs": max(1, int(getattr(settings, "account_concurrent_jobs", 10) or 10)),
+        "pending_jobs": pending_total,
+        "running_jobs": running_total,
+        "account_pending_jobs": pending_account,
+        "account_running_jobs": running_account,
+    }
+
+
+def _normalize_requested_clip_count(value: int | str | None, default_count: int) -> int:
+    try:
+        requested = int(value or 0)
+    except (TypeError, ValueError):
+        requested = 0
+    if requested <= 0:
+        requested = 10
+    upper = max(1, settings.youtube_max_shorts)
+    return max(1, min(upper, requested or default_count))
 
 
 def start_conversion_job(
@@ -215,14 +282,17 @@ def start_conversion_job(
     )
 
 
-def start_youtube_job(url: str, mode: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+def start_youtube_job(url: str, mode: str, owner_id: int | None = None, guest_key: str = "", ai_improve: bool = False, clip_count: int | None = None) -> dict:
     clean_url = _normalize_video_url(url)
     if mode == "download":
         return start_video_download_job(clean_url, owner_id, guest_key)
     if mode == "cover":
-        return start_youtube_cover_job(clean_url, owner_id, guest_key)
+        return start_youtube_cover_job(clean_url, owner_id, guest_key, ai_cover=ai_improve)
 
     profile = youtube_render_profile(mode)
+    requested_clip_count = _normalize_requested_clip_count(clip_count, profile.max_shorts)
+    if requested_clip_count != profile.max_shorts:
+        profile = replace(profile, max_shorts=requested_clip_count)
     source_label = video_source_label(clean_url)
 
     def worker(job: WebJob) -> None:
@@ -279,6 +349,14 @@ def start_youtube_job(url: str, mode: str, owner_id: int | None = None, guest_ke
             return
 
         _update_job(job, 34, "Ищу сильные моменты для Shorts")
+        clip_candidates = rank_smart_clip_candidates(
+            download.path,
+            download.duration_seconds,
+            max(profile.max_shorts * 8, 24),
+            profile.short_seconds,
+            profile.sample_limit,
+            settings.face_detection_enabled,
+        )
         starts = calculate_smart_clip_starts(
             download.path,
             download.duration_seconds,
@@ -289,6 +367,9 @@ def start_youtube_job(url: str, mode: str, owner_id: int | None = None, guest_ke
         )
         if not starts:
             raise ValueError("Не получилось подобрать фрагменты для Shorts")
+
+        if ai_improve:
+            starts = _ai_improve_clip_starts(job, download.title, download.duration_seconds, clip_candidates or starts, profile.max_shorts)
 
         source_info = inspect_video(download.path)
         clips = []
@@ -331,7 +412,14 @@ def start_youtube_job(url: str, mode: str, owner_id: int | None = None, guest_ke
             _update_job(job, 92, "Shorts готовы, обложку сделать не удалось")
         _update_job(job, 96, f"Готово: {describe_clips(clips)}")
 
-    return _submit_job("youtube", youtube_render_profile(mode).label, worker, {"action": "youtube", "url": clean_url, "mode": mode}, owner_id, guest_key)
+    return _submit_job(
+        "youtube",
+        youtube_render_profile(mode).label,
+        worker,
+        {"action": "youtube", "url": clean_url, "mode": mode, "ai_improve": bool(ai_improve), "clip_count": requested_clip_count},
+        owner_id,
+        guest_key,
+    )
 
 
 def start_video_download_job(url: str, owner_id: int | None = None, guest_key: str = "") -> dict:
@@ -358,7 +446,7 @@ def start_video_download_job(url: str, owner_id: int | None = None, guest_key: s
     return _submit_job("download", "Скачать MP4", worker, {"action": "video_download", "url": clean_url}, owner_id, guest_key)
 
 
-def start_youtube_cover_job(url: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+def start_youtube_cover_job(url: str, owner_id: int | None = None, guest_key: str = "", ai_cover: bool = False) -> dict:
     clean_url = _normalize_video_url(url)
 
     def worker(job: WebJob) -> None:
@@ -376,12 +464,14 @@ def start_youtube_cover_job(url: str, owner_id: int | None = None, guest_key: st
             settings.face_detection_enabled,
         )
         _add_output(job, cover, "PNG-обложка")
+        if ai_cover:
+            _maybe_add_ai_cover(job, cover, output_dir / "ai_cover", download.title)
         _update_job(job, 94, f"Готово: {download.title}")
 
-    return _submit_job("youtube_cover", "YouTube PNG-обложка", worker, {"action": "youtube_cover", "url": clean_url}, owner_id, guest_key)
+    return _submit_job("youtube_cover", "YouTube PNG-обложка", worker, {"action": "youtube_cover", "url": clean_url, "ai_cover": bool(ai_cover)}, owner_id, guest_key)
 
 
-def start_cover_job(source: Path, original_name: str, title: str, variants: int, owner_id: int | None = None, guest_key: str = "") -> dict:
+def start_cover_job(source: Path, original_name: str, title: str, variants: int, owner_id: int | None = None, guest_key: str = "", ai_cover: bool = False) -> dict:
     variant_count = max(1, min(6, int(variants or 1)))
     clean_title = clean_base_name(title or original_name, "cover")
 
@@ -390,6 +480,7 @@ def start_cover_job(source: Path, original_name: str, title: str, variants: int,
         _update_job(job, 12, "Читаю видео")
         info = inspect_video(source)
         covers: list[Path] = []
+        used_cover_seconds: list[int] = []
         for index in range(1, variant_count + 1):
             progress = 18 + int((index - 1) / variant_count * 58)
             _update_job(job, progress, f"Генерирую обложку {index}/{variant_count}")
@@ -400,9 +491,21 @@ def start_cover_job(source: Path, original_name: str, title: str, variants: int,
                 info.duration_seconds,
                 settings.video_timeout_seconds,
                 settings.face_detection_enabled,
+                variant_index=index,
+                variant_seed=abs(hash((job.id, clean_title, index))) % 1_000_000,
+                avoid_seconds=used_cover_seconds,
             )
+            try:
+                meta_path = cover.with_suffix(".design.json")
+                if meta_path.exists():
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    used_cover_seconds.append(int(meta.get("start_seconds") or 0))
+            except Exception:
+                pass
             covers.append(cover)
             _add_output(job, cover, f"Обложка {index}")
+        if ai_cover and covers:
+            _maybe_add_ai_cover(job, covers[0], output_dir / "ai_cover", clean_title)
         if len(covers) > 1:
             _update_job(job, 86, "Собираю ZIP с вариантами")
             zip_path = output_dir / "cover_variants.zip"
@@ -420,13 +523,14 @@ def start_cover_job(source: Path, original_name: str, title: str, variants: int,
             "original_name": original_name,
             "title": title,
             "variants": variant_count,
+            "ai_cover": bool(ai_cover),
         },
         owner_id,
         guest_key,
     )
 
 
-def start_subtitle_job(source: Path, original_name: str, title: str, style: str, language: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+def start_subtitle_job(source: Path, original_name: str, title: str, style: str, language: str, owner_id: int | None = None, guest_key: str = "", ai_transcription: bool = False) -> dict:
     subtitle_style = _normalize_choice(style, SUBTITLE_STYLE_CHOICES, "pop")
     subtitle_language = _normalize_language(language)
     clean_title = clean_base_name(title or original_name, "subtitled")
@@ -434,7 +538,7 @@ def start_subtitle_job(source: Path, original_name: str, title: str, style: str,
     def worker(job: WebJob) -> None:
         output_dir = WEB_OUTPUT_ROOT / job.id / "subtitles"
         _update_job(job, 15, "Распознаю речь")
-        cues = transcribe_subtitle_cues(source, settings.subtitle_model, subtitle_language)
+        cues = _transcribe_with_optional_ai(job, source, subtitle_language, ai_transcription)
         if not cues:
             raise ValueError("Речь для субтитров не найдена")
         _update_job(job, 58, f"Фраз найдено: {len(cues)}. Верстаю субтитры")
@@ -456,13 +560,14 @@ def start_subtitle_job(source: Path, original_name: str, title: str, style: str,
             "title": title,
             "style": subtitle_style,
             "language": language,
+            "ai_transcription": bool(ai_transcription),
         },
         owner_id,
         guest_key,
     )
 
 
-def start_package_job(source: Path, original_name: str, title: str, style: str, language: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+def start_package_job(source: Path, original_name: str, title: str, style: str, language: str, owner_id: int | None = None, guest_key: str = "", ai_transcription: bool = False, ai_cover: bool = False) -> dict:
     subtitle_style = _normalize_choice(style, SUBTITLE_STYLE_CHOICES, "pop")
     subtitle_language = _normalize_language(language)
     clean_title = clean_base_name(title or original_name, "publication")
@@ -485,11 +590,15 @@ def start_package_job(source: Path, original_name: str, title: str, style: str, 
         )
         package_files.append(cover)
         _add_output(job, cover, "PNG-обложка")
+        if ai_cover:
+            ai_cover_path = _maybe_add_ai_cover(job, cover, output_dir / "ai_cover", clean_title)
+            if ai_cover_path:
+                package_files.append(ai_cover_path)
 
         subtitle_note = "Субтитры не добавлены: речь не найдена или распознавание недоступно."
         try:
             _update_job(job, 50, "Пробую добавить субтитры")
-            cues = transcribe_subtitle_cues(source, settings.subtitle_model, subtitle_language)
+            cues = _transcribe_with_optional_ai(job, source, subtitle_language, ai_transcription)
             if cues:
                 assets = create_subtitle_assets(source, output_dir / "subtitles", f"{clean_title}_package", cues, subtitle_style)
                 rendered = render_subtitle_assets(source, assets, settings.subtitle_timeout_seconds)
@@ -540,6 +649,8 @@ def start_package_job(source: Path, original_name: str, title: str, style: str, 
             "title": title,
             "style": subtitle_style,
             "language": language,
+            "ai_transcription": bool(ai_transcription),
+            "ai_cover": bool(ai_cover),
         },
         owner_id,
         guest_key,
@@ -573,6 +684,118 @@ def start_resume_job(data: dict[str, str], template: str, owner_id: int | None =
     )
 
 
+def _candidate_starts(candidates: list[dict[str, object]] | list[int]) -> list[int]:
+    starts: list[int] = []
+    for item in candidates:
+        raw = item.get("start") if isinstance(item, dict) else item
+        try:
+            start = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if start not in starts:
+            starts.append(start)
+    return starts
+
+
+def _ai_improve_clip_starts(job: WebJob, title: str, duration_seconds: float, local_candidates: list[dict[str, object]] | list[int], max_clips: int) -> list[int]:
+    local_starts = _candidate_starts(local_candidates)
+    if not openai_ai.is_openai_ready():
+        _record_ai_meta(job, "clip_planner", {"status": "fallback", "reason": "OpenAI is not configured"})
+        return sorted(local_starts[:max_clips])
+    try:
+        candidates = local_candidates
+        if not candidates or not isinstance(candidates[0], dict):
+            candidates = [{"start": int(start), "score": len(local_starts) - index} for index, start in enumerate(local_starts)]
+        result = openai_ai.plan_clip_moments(title, duration_seconds, candidates, "")
+        allowed = set(local_starts)
+        selected: list[int] = []
+        for raw_start in result.get("starts", []):
+            try:
+                start = int(raw_start)
+            except (TypeError, ValueError):
+                continue
+            if start in allowed and start not in selected:
+                selected.append(start)
+        if not selected:
+            _record_ai_meta(job, "clip_planner", {"status": "fallback", "reason": "OpenAI returned no usable starts", "model": result.get("model")})
+            return sorted(local_starts[:max_clips])
+        for start in local_starts:
+            if len(selected) >= max_clips:
+                break
+            if start not in selected:
+                selected.append(start)
+        _record_ai_meta(
+            job,
+            "clip_planner",
+            {
+                "status": "used",
+                "model": result.get("model"),
+                "local_starts": local_starts,
+                "selected_starts": selected[:max_clips],
+                "reason": result.get("reason", ""),
+            },
+        )
+        return sorted(selected[:max_clips])
+    except Exception as exc:
+        _record_ai_meta(job, "clip_planner", {"status": "fallback", "reason": str(exc)[:500]})
+        return sorted(local_starts[:max_clips])
+
+
+def _maybe_add_ai_cover(job: WebJob, reference_cover: Path, output_dir: Path, title: str, transcript_summary: str = "") -> Path | None:
+    if not openai_ai.is_openai_ready():
+        _record_ai_meta(job, "cover", {"status": "fallback", "reason": "OpenAI is not configured"})
+        return None
+    try:
+        _update_job(job, min(98, max(job.progress, 82)), "Генерирую AI-обложку")
+        copy = openai_ai.generate_cover_copy(title, transcript_summary)
+        final_title = "\n".join(part for part in (copy.get("headline"), copy.get("description")) if part)
+        frame_notes = (
+            f"Use this local cover as the visual reference: {reference_cover.name}. "
+            f"Final overlay copy will be: headline={copy.get('headline')!r}, description={copy.get('description')!r}, eyebrow={copy.get('eyebrow')!r}. "
+            "Leave negative space for that copy."
+        )
+        prompt = openai_ai.generate_cover_prompt(title, transcript_summary, frame_notes)
+        raw_output = output_dir / f"{clean_base_name(title, 'cover')}_ai_raw.png"
+        final_output = output_dir / f"{clean_base_name(title, 'cover')}_ai_cover.png"
+        openai_ai.generate_cover_image(reference_cover, title, prompt, raw_output)
+        create_premium_cover_from_image(raw_output, final_output, final_title or title)
+        _add_output(job, final_output, "AI PNG-cover")
+        _record_ai_meta(job, "cover", {"status": "used", "model": settings.openai_text_model, "copy": copy, "prompt": prompt[:700], "path": str(final_output)})
+        return final_output
+    except Exception as exc:
+        _record_ai_meta(job, "cover", {"status": "fallback", "reason": str(exc)[:500]})
+        return None
+
+
+def _transcribe_with_optional_ai(job: WebJob, source: Path, language: str | None, ai_transcription: bool):
+    if ai_transcription:
+        if openai_ai.is_openai_ready():
+            try:
+                cues = openai_ai.transcribe_video_audio(source, language)
+                if cues:
+                    _record_ai_meta(job, "transcription", {"status": "used", "model": settings.openai_transcribe_model, "cue_count": len(cues)})
+                    return cues
+                _record_ai_meta(job, "transcription", {"status": "fallback", "reason": "OpenAI returned no cues"})
+            except Exception as exc:
+                _record_ai_meta(job, "transcription", {"status": "fallback", "reason": str(exc)[:500]})
+        else:
+            _record_ai_meta(job, "transcription", {"status": "fallback", "reason": "OpenAI is not configured"})
+    cues = transcribe_subtitle_cues(source, settings.subtitle_model, language)
+    if ai_transcription:
+        _record_ai_meta(job, "transcription_fallback", {"status": "used", "model": f"faster-whisper:{settings.subtitle_model}", "cue_count": len(cues)})
+    return cues
+
+
+def _record_ai_meta(job: WebJob, key: str, value: dict[str, object]) -> None:
+    with _lock:
+        current = job.params.get("ai")
+        ai_meta = dict(current) if isinstance(current, dict) else {}
+        ai_meta[key] = _json_safe(value)
+        job.params["ai"] = ai_meta
+        job.updated_at = time.time()
+    _save_job_record(job)
+
+
 def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") -> dict:
     params = _load_job_params(job_id, owner_id, guest_key)
     if not params:
@@ -592,11 +815,18 @@ def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
             guest_key=guest_key,
         )
     if action == "youtube":
-        return start_youtube_job(str(params.get("url") or ""), str(params.get("mode") or "regular"), owner_id, guest_key)
+        return start_youtube_job(
+            str(params.get("url") or ""),
+            str(params.get("mode") or "regular"),
+            owner_id,
+            guest_key,
+            bool(params.get("ai_improve")),
+            int(params.get("clip_count") or 10),
+        )
     if action == "video_download":
         return start_video_download_job(str(params.get("url") or ""), owner_id, guest_key)
     if action == "youtube_cover":
-        return start_youtube_cover_job(str(params.get("url") or ""), owner_id, guest_key)
+        return start_youtube_cover_job(str(params.get("url") or ""), owner_id, guest_key, bool(params.get("ai_cover")))
     if action == "cover":
         source = _existing_source(params.get("source"))
         return start_cover_job(
@@ -606,6 +836,7 @@ def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
             variants=int(params.get("variants") or 1),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_cover=bool(params.get("ai_cover")),
         )
     if action == "subtitles":
         source = _existing_source(params.get("source"))
@@ -617,6 +848,7 @@ def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
             language=str(params.get("language") or "auto"),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_transcription=bool(params.get("ai_transcription")),
         )
     if action == "package":
         source = _existing_source(params.get("source"))
@@ -628,6 +860,8 @@ def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
             language=str(params.get("language") or "auto"),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_transcription=bool(params.get("ai_transcription")),
+            ai_cover=bool(params.get("ai_cover")),
         )
     if action == "resume":
         data = params.get("data")
@@ -691,17 +925,32 @@ def get_account_stats(owner_id: int | None = None, guest_key: str = "") -> dict[
         total_size = sum(output.size for output in outputs)
         return _stats_payload(jobs, len(outputs), total_size)
 
-    JobRecord, _, _ = models
+    JobRecord, JobOutputRecord, _ = models
     try:
         _close_django_connections()
-        records = list(_owned_records(JobRecord, owner_id, guest_key).prefetch_related("outputs"))
-        output_count = 0
-        total_size = 0
-        for record in records:
-            for output in record.outputs.all():
-                output_count += 1
-                total_size += int(output.size or 0)
-        return _stats_payload(records, output_count, total_size)
+        from django.db.models import Count, Q, Sum
+
+        queryset = _owned_records(JobRecord, owner_id, guest_key).order_by()
+        job_stats = queryset.aggregate(
+            total_jobs=Count("id"),
+            active_jobs=Count("id", filter=Q(status__in=["queued", "running"])),
+            completed_jobs=Count("id", filter=Q(status="completed")),
+            failed_jobs=Count("id", filter=Q(status="failed")),
+        )
+        output_stats = JobOutputRecord.objects.filter(job__in=queryset).aggregate(
+            output_count=Count("id"),
+            total_output_size=Sum("size"),
+        )
+        total_size = int(output_stats.get("total_output_size") or 0)
+        return {
+            "total_jobs": int(job_stats.get("total_jobs") or 0),
+            "active_jobs": int(job_stats.get("active_jobs") or 0),
+            "completed_jobs": int(job_stats.get("completed_jobs") or 0),
+            "failed_jobs": int(job_stats.get("failed_jobs") or 0),
+            "output_count": int(output_stats.get("output_count") or 0),
+            "total_output_size": total_size,
+            "total_output_size_text": human_size(total_size),
+        }
     except Exception:
         return _stats_payload([], 0, 0)
 
@@ -943,10 +1192,39 @@ def _submit_job(
     )
     with _lock:
         _jobs[job.id] = job
+        _pending_jobs.append((job, worker))
         snapshot = _serialize_job(job)
     _create_job_record(job)
-    _executor.submit(_run_job, job, worker)
+    _schedule_jobs()
     return snapshot
+
+
+def _schedule_jobs() -> None:
+    submissions: list[tuple[WebJob, object]] = []
+    with _lock:
+        max_workers = max(1, int(getattr(settings, "job_max_workers", 1) or 1))
+        per_account = max(1, int(getattr(settings, "account_concurrent_jobs", 10) or 10))
+        blocked_rotations = 0
+        while _pending_jobs and len(_running_job_ids) < max_workers and blocked_rotations < len(_pending_jobs):
+            job, worker = _pending_jobs.popleft()
+            if job.status != "queued":
+                blocked_rotations = 0
+                continue
+            account_key = _job_account_key(job)
+            if _running_by_account.get(account_key, 0) >= per_account:
+                _pending_jobs.append((job, worker))
+                blocked_rotations += 1
+                continue
+            _running_job_ids.add(job.id)
+            _running_by_account[account_key] = _running_by_account.get(account_key, 0) + 1
+            submissions.append((job, worker))
+            blocked_rotations = 0
+    for job, worker in submissions:
+        try:
+            _executor.submit(_run_job, job, worker)
+        except Exception as exc:
+            _release_job_slot(job)
+            _update_error(job, exc)
 
 
 def _run_job(job: WebJob, worker) -> None:
@@ -958,7 +1236,26 @@ def _run_job(job: WebJob, worker) -> None:
     except Exception as exc:
         _update_error(job, exc)
     finally:
+        _release_job_slot(job)
         _close_django_connections()
+        _schedule_jobs()
+
+
+def _release_job_slot(job: WebJob) -> None:
+    with _lock:
+        _running_job_ids.discard(job.id)
+        account_key = _job_account_key(job)
+        current = max(0, _running_by_account.get(account_key, 0) - 1)
+        if current:
+            _running_by_account[account_key] = current
+        else:
+            _running_by_account.pop(account_key, None)
+
+
+def _job_account_key(job: WebJob) -> str:
+    if job.owner_id is not None:
+        return f"user:{job.owner_id}"
+    return f"guest:{job.guest_key or 'anonymous'}"
 
 
 def _update_job(job: WebJob, progress: int, message: str) -> None:
@@ -1002,6 +1299,7 @@ def _serialize_job(job: WebJob | None) -> dict:
     if not job:
         return {}
     eta_seconds, eta_text = _estimate_job_eta(job.created_at, job.progress, job.status)
+    output_count, total_output_size, primary_output_type = _job_output_summary(job.outputs)
     return {
         "id": job.id,
         "kind": job.kind,
@@ -1017,6 +1315,9 @@ def _serialize_job(job: WebJob | None) -> dict:
         "repeatable": bool(job.params),
         "owner_id": job.owner_id,
         "guest_key": job.guest_key,
+        "output_count": output_count,
+        "total_output_size": total_output_size,
+        "primary_output_type": primary_output_type,
         "outputs": [
             {
                 "index": index,
@@ -1110,6 +1411,7 @@ def _create_job_record(job: WebJob) -> None:
     JobRecord, _, _ = models
     try:
         _close_django_connections()
+        output_count, total_output_size, primary_output_type = _job_output_summary(job.outputs)
         JobRecord.objects.get_or_create(
             job_id=job.id,
             defaults={
@@ -1122,6 +1424,9 @@ def _create_job_record(job: WebJob) -> None:
                 "params_json": _params_to_json(job.params),
                 "owner_id": job.owner_id,
                 "guest_key": job.guest_key,
+                "output_count": output_count,
+                "total_output_size": total_output_size,
+                "primary_output_type": primary_output_type,
             },
         )
         _record_job_event(job, job.message)
@@ -1138,6 +1443,7 @@ def _save_job_record(job: WebJob) -> None:
         from django.utils import timezone
 
         _close_django_connections()
+        output_count, total_output_size, primary_output_type = _job_output_summary(job.outputs)
         JobRecord.objects.update_or_create(
             job_id=job.id,
             defaults={
@@ -1150,6 +1456,9 @@ def _save_job_record(job: WebJob) -> None:
                 "params_json": _params_to_json(job.params),
                 "owner_id": job.owner_id,
                 "guest_key": job.guest_key,
+                "output_count": output_count,
+                "total_output_size": total_output_size,
+                "primary_output_type": primary_output_type,
                 "updated_at": timezone.now(),
             },
         )
@@ -1185,6 +1494,7 @@ def _create_output_record(job: WebJob, output: JobOutput) -> None:
             existing.media_type = output.media_type
             existing.size = output.size
             existing.save(update_fields=["media_type", "size"])
+            _refresh_job_record_outputs(job_record)
             return
         JobOutputRecord.objects.create(
             job=job_record,
@@ -1193,7 +1503,31 @@ def _create_output_record(job: WebJob, output: JobOutput) -> None:
             media_type=output.media_type,
             size=output.size,
         )
+        _refresh_job_record_outputs(job_record)
         _record_job_event(job, f"Файл готов: {output.label}")
+    except Exception:
+        return
+
+
+def _job_output_summary(outputs: list[JobOutput]) -> tuple[int, int, str]:
+    count = len(outputs)
+    total_size = sum(int(output.size or 0) for output in outputs)
+    primary_type = ""
+    if outputs:
+        primary_type = str(outputs[0].media_type or "").split("/", 1)[0][:32]
+    return count, total_size, primary_type
+
+
+def _refresh_job_record_outputs(job_record) -> None:
+    try:
+        from django.db.models import Count, Sum
+
+        stats = job_record.outputs.aggregate(output_count=Count("id"), total_output_size=Sum("size"))
+        first = job_record.outputs.order_by("id").first()
+        job_record.output_count = int(stats.get("output_count") or 0)
+        job_record.total_output_size = int(stats.get("total_output_size") or 0)
+        job_record.primary_output_type = str(getattr(first, "media_type", "") or "").split("/", 1)[0][:32] if first else ""
+        job_record.save(update_fields=["output_count", "total_output_size", "primary_output_type", "updated_at"])
     except Exception:
         return
 
@@ -1310,6 +1644,9 @@ def _serialize_job_record(record) -> dict:
         "repeatable": bool(record.params_json),
         "owner_id": record.owner_id,
         "guest_key": record.guest_key,
+        "output_count": int(getattr(record, "output_count", 0) or len(outputs)),
+        "total_output_size": int(getattr(record, "total_output_size", 0) or sum(int(output.get("size") or 0) for output in outputs)),
+        "primary_output_type": getattr(record, "primary_output_type", "") or "",
         "outputs": outputs,
     }
 
@@ -1473,7 +1810,8 @@ def _normalize_choice(value: str, choices: list[tuple[str, str]], default: str) 
 
 def _normalize_language(value: str) -> str | None:
     value = (value or "auto").strip().lower()
-    return value if value in {"ru", "uk", "en"} else None
+    allowed = {key for key, _label in SUBTITLE_LANGUAGE_CHOICES if key != "auto"}
+    return value if value in allowed else None
 
 
 def _youtube_plan_text(profile: YouTubeProfile, duration_seconds: float) -> str:

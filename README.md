@@ -1,98 +1,108 @@
 # CherryX Creator Studio
 
-CherryX Creator Studio is a web workspace for creators: video tools, covers, subtitles, publication packages, resumes, design canvas, background jobs, and billing-aware storage.
+CherryX Creator Studio is a creator workspace for conversion, YouTube/TikTok clips, covers, subtitles, publication packages, PDF resumes, design projects, video editing, billing-aware storage, and project sharing.
 
-## Возможности
+## What It Includes
 
-- Подписка через Telegram Stars: `100 XTR` на 30 дней.
-- Бесплатные пользователи через `FREE_USER_IDS` в `.env`.
-- Изображения: PNG, JPG, WEBP, PDF, BMP, TIFF, GIF.
-- Видео: MP4, WEBM, GIF через FFmpeg из пакета `imageio-ffmpeg`.
-- YouTube-ссылка -> до 15 вертикальных Shorts-клипов в MP4.
-- Face-focus для интервью и talking-head видео: вертикальный crop старается держать лицо в кадре.
-- Подсказки и команды на русском, украинском и английском.
-- Переименование результата до конвертации.
-- Кнопка “Поделиться”.
-- Django web workspace with account, billing, jobs, designer, and video editor pages.
-- SQLite для пользователей, подписок и истории конвертаций.
-- Лимиты размера и TTL сессий файлов.
+- Django Creator Studio with accounts, billing, jobs, projects, designer, video editor, and sharing.
+- Image formats: PNG, JPG, WEBP, PDF, BMP, TIFF, GIF.
+- Video formats: MP4, WEBM, GIF through FFmpeg from `imageio-ffmpeg`.
+- YouTube links to vertical Shorts-style MP4 clips.
+- Face-focus crop for interview and talking-head video.
+- Interface language support for English, Russian, Ukrainian, French, German, Spanish, Georgian, Armenian, and Italian.
+- SQLite-backed users, subscriptions, projects, shares, jobs, and output history.
 
-## Запуск
+## Run Locally
+
+Install dependencies:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m src.bot
 ```
 
-Или:
-
-```powershell
-.\run_bot.ps1
-```
-
-Mini App / сайт:
+Run the main Django Creator Studio:
 
 ```powershell
 .\run_web.ps1
 ```
 
-Локальный адрес сайта: `http://127.0.0.1:8000`
+Creator Studio URL: `http://127.0.0.1:8000`
 
-## Настройки `.env`
+`run_django.ps1` starts the same Django site:
 
-```env
-BOT_TOKEN=...
-SUBSCRIPTION_STARS=100
-SUBSCRIPTION_DAYS=30
-FREE_USER_IDS=8314765522
-MAX_IMAGE_MB=25
-MAX_VIDEO_MB=80
-VIDEO_TIMEOUT_SECONDS=180
-SESSION_TTL_MINUTES=60
-MINI_APP_URL=
-YOUTUBE_MAX_DURATION_MINUTES=360
-YOUTUBE_MAX_SHORTS=15
-YOUTUBE_SHORT_SECONDS=45
-YOUTUBE_DOWNLOAD_TIMEOUT_SECONDS=3600
-YOUTUBE_WORKERS=1
-SHORTS_FOCUS_MODE=face
-FACE_DETECTION_ENABLED=true
-YOUTUBE_BACKSTAGE_ENABLED=true
-BACKSTAGE_SAMPLE_LIMIT=420
-BACKSTAGE_MIN_GAP_SECONDS=90
+```powershell
+.\run_django.ps1
 ```
 
-Чтобы добавить бесплатного пользователя:
+## Environment
 
-1. Пользователь отправляет боту `/id`.
-2. Его ID добавляется в `FREE_USER_IDS` через запятую.
-3. Бот перезапускается.
+Copy `.env.example` to `.env` and fill in the secrets you need:
 
-Для Telegram Mini App нужен публичный HTTPS URL. Можно использовать ngrok/cloudflared, затем указать адрес в `MINI_APP_URL` и перезапустить бота.
+```powershell
+Copy-Item .env.example .env
+```
 
-## Команды
+Useful settings:
 
-- `/start` - главное меню
-- `/subscribe` - счет Telegram Stars
-- `/status` - статус доступа
-- `/id` - показать Telegram ID
-- `/help` - помощь
+- `DJANGO_SECRET_KEY`: Django secret key for non-local use.
+- `DJANGO_ALLOWED_HOSTS`: comma-separated hosts for Django, for example `127.0.0.1,localhost,my-tunnel.ngrok-free.app`.
+- `MAX_IMAGE_MB`, `MAX_VIDEO_MB`: upload limits.
+- `YOUTUBE_MAX_SHORTS`, `YOUTUBE_SHORT_SECONDS`: Shorts generation limits.
+
+## How To Share Or Demo
+
+For a local demo, run the Django Studio:
+
+```powershell
+.\run_django.ps1
+```
+
+Open `http://127.0.0.1:8000`.
+
+For an external demo, expose the Django port with ngrok or cloudflared:
+
+```powershell
+ngrok http 8000
+```
+
+Then add the tunnel host to `.env`:
+
+```env
+DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,your-tunnel.ngrok-free.app
+```
+
+Restart `run_web.ps1` or `run_django.ps1`.
+
+## Smoke Checks
+
+Run these before sharing the project:
+
+```powershell
+.\.venv\Scripts\python.exe manage.py check
+.\.venv\Scripts\python.exe manage.py test studio.tests.WorkspaceSharingTests
+```
+
+## Native Helpers
+
+Optional C++ helpers speed up CPU-heavy media analysis: audio RMS, visual moment scoring, and cover frame picking. Build them when a C++ compiler is available:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\native\build_native.ps1
+```
+
+The app falls back to Python automatically when native binaries are not built.
+
+Manual smoke paths:
+
+- Django landing: `http://127.0.0.1:8000/`
+- Django workspace: `http://127.0.0.1:8000/app/`
+- Designer: `http://127.0.0.1:8000/app/designer/`
+- Video editor: `http://127.0.0.1:8000/app/video-editor/`
+- Design projects: `http://127.0.0.1:8000/app/design-projects/`
 
 ## YouTube Shorts
 
-Отправь боту ссылку вида `https://youtu.be/...` или `https://www.youtube.com/watch?v=...`.
+Use the Creator Studio YouTube tools with links such as `https://youtu.be/...` or `https://www.youtube.com/watch?v=...`.
 
-Бот:
-
-- сначала покажет этапы обработки и примерные оценки по времени;
-- скачает видео через `yt-dlp`;
-- проверит лимит длительности;
-- сделает до `YOUTUBE_MAX_SHORTS` вертикальных клипов;
-- если ролик короткий, нарежет подряд;
-- если ролик длинный, возьмет равномерные фрагменты по всей длине;
-- если в кадре есть лицо, попробует построить вертикальный crop вокруг него;
-- в режиме “Preview” ищет более живые фрагменты по движению, лицам, паузам и интонационным всплескам;
-- отправит ZIP, а если архив слишком большой, отправит клипы отдельно.
-
-Субтитры пока не вшиваются. Используй только свои ролики или видео, на обработку которых у тебя есть права.
+The project downloads the video with `yt-dlp`, checks duration limits, and creates vertical MP4 clips. Only process videos you own or have permission to use.

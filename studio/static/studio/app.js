@@ -5008,10 +5008,14 @@ function renderOutputs(outputs) {
         ${outputs
           .map(
             (output) => `
-              <a class="output-link" href="${escapeHtml(output.url)}" download>
-                <span>${escapeHtml(output.label || output.name)}</span>
-                <small>${escapeHtml(output.size_text || "")}</small>
-              </a>
+              <div class="output-link-wrap">
+                <a class="output-link" href="${escapeHtml(output.url)}" download>
+                  <span>${escapeHtml(output.label || output.name)}</span>
+                  <small>${escapeHtml(output.size_text || "")}</small>
+                </a>
+                ${output.can_edit_design ? `<button class="output-link" type="button" data-edit-design-url="${escapeHtml(output.edit_design_url)}"><span>Редактировать дизайн</span><small>Design Mode</small></button>` : ""}
+                ${output.can_edit_video ? `<button class="output-link" type="button" data-edit-video-url="${escapeHtml(output.edit_video_url)}"><span>Редактировать видео</span><small>Video Editor</small></button>` : ""}
+              </div>
             `,
           )
           .join("")}
@@ -5019,6 +5023,52 @@ function renderOutputs(outputs) {
     </div>
   `;
 }
+
+document.addEventListener("click", async (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-edit-design-url]") : null;
+  if (!button || button.closest(".detail-page")) return;
+  event.preventDefault();
+  if (button.dataset.loading === "1") return;
+  const original = button.textContent;
+  button.dataset.loading = "1";
+  button.textContent = "Opening...";
+  try {
+    const response = await fetch(button.dataset.editDesignUrl || "", {
+      method: "POST",
+      headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.designer_url) throw new Error(data.error || "Design import failed");
+    window.location.href = data.designer_url;
+  } catch (error) {
+    button.textContent = original || "Редактировать дизайн";
+    button.dataset.loading = "0";
+    alert(error.message || "Design import failed");
+  }
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target instanceof Element ? event.target.closest("[data-edit-video-url]") : null;
+  if (!button || button.closest(".detail-page")) return;
+  event.preventDefault();
+  if (button.dataset.loading === "1") return;
+  const original = button.textContent;
+  button.dataset.loading = "1";
+  button.textContent = "Opening...";
+  try {
+    const response = await fetch(button.dataset.editVideoUrl || "", {
+      method: "POST",
+      headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.video_editor_url) throw new Error(data.error || "Video import failed");
+    window.location.href = data.video_editor_url;
+  } catch (error) {
+    button.textContent = original || "Редактировать видео";
+    button.dataset.loading = "0";
+    alert(error.message || "Video import failed");
+  }
+});
 
 function statusLabel(status) {
   return {

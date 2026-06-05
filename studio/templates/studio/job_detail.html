@@ -96,7 +96,15 @@
                       <h3>{{ output.label }}</h3>
                       <p>{{ output.name }} · {{ output.size_text }}</p>
                     </div>
-                    <a class="output-link compact" href="{{ output.url }}" download>{% if has_access %}{% ui "download" %}{% else %}Checkout{% endif %}</a>
+                    <div class="output-actions">
+                      {% if output.can_edit_design %}
+                        <button class="output-link compact" type="button" data-edit-design-url="{{ output.edit_design_url }}">Редактировать дизайн</button>
+                      {% endif %}
+                      {% if output.can_edit_video %}
+                        <button class="output-link compact" type="button" data-edit-video-url="{{ output.edit_video_url }}">Редактировать видео</button>
+                      {% endif %}
+                      <a class="output-link compact" href="{{ output.url }}" download>{% if has_access %}{% ui "download" %}{% else %}Checkout{% endif %}</a>
+                    </div>
                   </div>
 
                   {% if not output.exists %}
@@ -223,12 +231,67 @@
                   <h3>${label}</h3>
                   <p>${name} · ${size}</p>
                 </div>
-                <a class="output-link compact" href="${html(output.url)}" download>${html(action)}</a>
+                <div class="output-actions">
+                  ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">Редактировать дизайн</button>` : ""}
+                  ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">Редактировать видео</button>` : ""}
+                  <a class="output-link compact" href="${html(output.url)}" download>${html(action)}</a>
+                </div>
               </div>
               ${body}
             </article>
           `;
         };
+
+        const csrfToken = () => {
+          const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+          return match ? decodeURIComponent(match[1]) : "";
+        };
+
+        document.addEventListener("click", async (event) => {
+          const button = event.target instanceof Element ? event.target.closest("[data-edit-design-url]") : null;
+          if (!button) return;
+          event.preventDefault();
+          if (button.dataset.loading === "1") return;
+          const original = button.textContent;
+          button.dataset.loading = "1";
+          button.textContent = "Opening...";
+          try {
+            const response = await fetch(button.dataset.editDesignUrl || "", {
+              method: "POST",
+              headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+            });
+            const data = await response.json();
+            if (!response.ok || !data.designer_url) throw new Error(data.error || "Design import failed");
+            window.location.href = data.designer_url;
+          } catch (error) {
+            button.textContent = original || "Редактировать дизайн";
+            button.dataset.loading = "0";
+            alert(error.message || "Design import failed");
+          }
+        });
+
+        document.addEventListener("click", async (event) => {
+          const button = event.target instanceof Element ? event.target.closest("[data-edit-video-url]") : null;
+          if (!button) return;
+          event.preventDefault();
+          if (button.dataset.loading === "1") return;
+          const original = button.textContent;
+          button.dataset.loading = "1";
+          button.textContent = "Opening...";
+          try {
+            const response = await fetch(button.dataset.editVideoUrl || "", {
+              method: "POST",
+              headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+            });
+            const data = await response.json();
+            if (!response.ok || !data.video_editor_url) throw new Error(data.error || "Video import failed");
+            window.location.href = data.video_editor_url;
+          } catch (error) {
+            button.textContent = original || "Редактировать видео";
+            button.dataset.loading = "0";
+            alert(error.message || "Video import failed");
+          }
+        });
 
         const updateJob = (job) => {
           const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));

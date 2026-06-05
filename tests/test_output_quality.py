@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from src import youtube_tools
+from src import web_actions
 from src.image_tools import JPEG_QUALITY_STEPS, WEBP_QUALITY_STEPS, _target_ratio
 from src.video_tools import VIDEO_AUDIO_FILTER, VIDEO_SCALE_EVEN_FILTER
 
@@ -49,6 +50,11 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertLessEqual(int(youtube_tools.SHORTS_VIDEO_CRF), 21)
         self.assertLessEqual(int(youtube_tools.PREVIEW_VIDEO_CRF), 21)
         self.assertLessEqual(int(youtube_tools.SUBTITLE_VIDEO_CRF), 20)
+
+    def test_requested_shorts_count_defaults_to_ten_and_clamps_to_server_limit(self) -> None:
+        self.assertEqual(web_actions._normalize_requested_clip_count("", 15), 10)
+        self.assertEqual(web_actions._normalize_requested_clip_count("3", 15), 3)
+        self.assertLessEqual(web_actions._normalize_requested_clip_count("999", 15), web_actions.settings.youtube_max_shorts)
 
     def test_clip_window_ranking_prefers_strong_window_not_single_second(self) -> None:
         scores = [
@@ -119,6 +125,15 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         vivid_score = youtube_tools._visual_frame_interest_score(vivid, cv2.cvtColor(vivid, cv2.COLOR_BGR2GRAY))
 
         self.assertGreater(vivid_score, dull_score)
+
+    def test_cover_variant_profiles_are_distinct_and_editable(self) -> None:
+        first = youtube_tools._cover_variant_profile("Big product launch", (920, 310), 1, 123)
+        second = youtube_tools._cover_variant_profile("Big product launch", (920, 310), 2, 123)
+
+        self.assertNotEqual(first["layout"], second["layout"])
+        self.assertIn(first["mood"], {"premium", "neon", "urgent", "clean"})
+        self.assertTrue(first["badge"])
+        self.assertIn("panel_x", first)
 
 
 if __name__ == "__main__":

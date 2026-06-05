@@ -4,14 +4,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Video projects - CherryX Creator Studio</title>
+    <title>{% ui "video_projects_title" %} - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
-        <h1>Video projects</h1>
+        <h1>{% ui "video_projects_title" %}</h1>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
@@ -22,42 +22,42 @@
     <main class="video-projects-shell" data-video-projects data-editor-url="{{ video_editor_url }}" data-api-url="{{ video_projects_api_url }}">
       <section class="video-projects-head">
         <div>
-          <span>Video editing</span>
-          <strong>Projects</strong>
-          <small><b data-project-total>{{ video_projects|length }}</b> in workspace</small>
+          <span>{% ui "video_editing" %}</span>
+          <strong>{% ui "projects" %}</strong>
+          <small><b data-project-total>{{ video_projects|length }}</b> {% ui "in_workspace" %}</small>
         </div>
-        <button type="button" data-create-project>Create project</button>
+        <button type="button" data-create-project>{% ui "create_project" %}</button>
       </section>
 
       <section class="video-project-bulk" data-project-bulk hidden>
         <div>
-          <span data-selected-count>0 selected</span>
-          <strong>Manage selected projects</strong>
+          <span data-selected-count>0 {% ui "selected" %}</span>
+          <strong>{% ui "manage_selected_projects" %}</strong>
         </div>
         <div>
-          <button type="button" data-clear-selection>Clear</button>
-          <button class="is-danger" type="button" data-delete-selected>Delete selected</button>
+          <button type="button" data-clear-selection>{% ui "clear" %}</button>
+          <button class="is-danger" type="button" data-delete-selected>{% ui "delete_selected" %}</button>
         </div>
       </section>
 
       <section class="video-projects-grid" data-project-grid>
         {% for project in video_projects %}
           <article class="video-project-card" data-project-id="{{ project.id }}" data-project-title="{{ project.title }}">
-            <label class="video-project-select" aria-label="Select project">
+            <label class="video-project-select" aria-label="{% ui "select_project" %}">
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
             <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.08), rgba(2,6,23,.72)), url('{{ project.thumbnail }}');{% endif %}">
-              <span>{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
-              <b>{{ project.layer_count }} clips · {{ project.track_count }} tracks</b>
+              <span>{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
+              <b>{{ project.layer_count }} {% ui "clips" %} · {{ project.track_count }} {% ui "video_tracks_count" %}</b>
             </a>
             <div class="video-project-body">
-              <strong class="video-project-title" data-project-title-text title="Double-click to rename">{{ project.title }}</strong>
+              <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
               <span>{% if project.clip_name %}{{ project.clip_name }} · {% endif %}{{ project.storage_text }}</span>
             </div>
             <div class="video-project-actions">
-              <a href="{{ video_editor_url }}?project={{ project.id }}">Open</a>
-              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}">Delete</button>{% endif %}
+              <a href="{{ video_editor_url }}?project={{ project.id }}">{% ui "open" %}</a>
+              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>{% endif %}
             </div>
           </article>
         {% endfor %}
@@ -65,28 +65,29 @@
 
       <article class="video-project-empty" data-project-empty {% if video_projects %}hidden{% endif %}>
         <div>
-          <strong>No projects yet</strong>
-          <span>Create your first edit, upload video, and a project preview will appear here.</span>
+          <strong>{% ui "no_projects_yet" %}</strong>
+          <span>{% ui "video_empty_copy" %}</span>
         </div>
-        <button type="button" data-create-project>Create project</button>
+        <button type="button" data-create-project>{% ui "create_project" %}</button>
       </article>
     </main>
 
     <div class="project-delete-modal" data-delete-modal hidden>
       <div class="project-delete-backdrop" data-modal-cancel></div>
       <section class="project-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="project-delete-title">
-        <span>Delete confirmation</span>
-        <h2 id="project-delete-title" data-modal-title>Delete this project?</h2>
-        <p data-modal-copy>This will remove the project and its uploaded files from the server.</p>
+        <span>{% ui "delete_confirmation" %}</span>
+        <h2 id="project-delete-title" data-modal-title>{% ui "delete_project_question" %}</h2>
+        <p data-modal-copy>{% ui "delete_uploaded_files_copy" %}</p>
         <div class="project-delete-list" data-modal-list></div>
         <footer>
-          <button type="button" data-modal-cancel>Cancel</button>
-          <button class="is-danger" type="button" data-modal-confirm>Delete</button>
+          <button type="button" data-modal-cancel>{% ui "cancel" %}</button>
+          <button class="is-danger" type="button" data-modal-confirm>{% ui "delete" %}</button>
         </footer>
       </section>
     </div>
 
     <script>
+      window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
       (() => {
         document.querySelectorAll(".language-switcher").forEach((switcher) => {
           const button = switcher.querySelector(".language-current");
@@ -107,6 +108,14 @@
 
         const root = document.querySelector("[data-video-projects]");
         if (!root) return;
+        const i18n = window.CX_MUSIC_MESSAGES || {};
+        const t = (key, fallback, vars = {}) => {
+          let value = i18n[key] || fallback || key;
+          Object.entries(vars).forEach(([name, replacement]) => {
+            value = value.replaceAll(`{${name}}`, String(replacement));
+          });
+          return value;
+        };
         const apiUrl = root.dataset.apiUrl;
         const editorUrl = root.dataset.editorUrl;
         const bulkBar = root.querySelector("[data-project-bulk]");
@@ -149,7 +158,7 @@
         const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
         const projectInfo = (card) => ({
           id: Number(card.dataset.projectId),
-          title: card.dataset.projectTitle || card.querySelector("[data-project-title-text]")?.textContent?.trim() || "Untitled project",
+          title: card.dataset.projectTitle || card.querySelector("[data-project-title-text]")?.textContent?.trim() || t("untitled_project", "Untitled project"),
         });
         const updateEmptyState = () => {
           const count = cards().length;
@@ -160,7 +169,7 @@
         const updateBulkBar = () => {
           const count = selectedCards().length;
           if (bulkBar) bulkBar.hidden = count === 0;
-          if (selectedCount) selectedCount.textContent = `${count} selected`;
+          if (selectedCount) selectedCount.textContent = `${count} ${t("selected", "selected")}`;
           cards().forEach((card) => card.classList.toggle("is-selected", Boolean(card.querySelector("[data-project-select]")?.checked)));
         };
         const setSelection = (checked) => {
@@ -180,12 +189,12 @@
           if (!modal || !modalTitle || !modalCopy || !modalList) return;
           pendingDelete = items;
           const count = items.length;
-          modalTitle.textContent = count === 1 ? "Delete this project?" : `Delete ${count} projects?`;
+          modalTitle.textContent = count === 1 ? t("delete_project_question", "Delete this project?") : t("delete_projects_question", `Delete ${count} projects?`, { count });
           modalCopy.textContent = count === 1
-            ? "This will remove the project and its uploaded files from the server."
-            : "Selected projects and their uploaded files will be removed from the server.";
+            ? t("delete_uploaded_files_copy", "This will remove the project and its uploaded files from the server.")
+            : t("delete_uploaded_files_many_copy", "Selected projects and their uploaded files will be removed from the server.");
           modalList.innerHTML = items.slice(0, 5).map((item) => `<span>${escapeHtml(item.title)}</span>`).join("");
-          if (count > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${count - 5} more</small>`);
+          if (count > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${count - 5} ${escapeHtml(t("more", "more"))}</small>`);
           modal.hidden = false;
           document.body.classList.add("project-delete-open");
           modalConfirm?.focus();
@@ -219,7 +228,7 @@
           input.type = "text";
           input.value = original;
           input.maxLength = 180;
-          input.setAttribute("aria-label", "Project name");
+          input.setAttribute("aria-label", t("project_name", "Project name"));
           card.classList.add("is-editing-title");
           titleNode.replaceWith(input);
           input.focus();
@@ -233,7 +242,7 @@
             const restored = document.createElement("strong");
             restored.className = "video-project-title";
             restored.dataset.projectTitleText = "";
-            restored.title = "Double-click to rename";
+            restored.title = t("double_click_rename", "Double-click to rename");
             restored.textContent = original;
             input.replaceWith(restored);
             card.classList.remove("is-editing-title");
@@ -264,10 +273,10 @@
         };
 
         root.querySelectorAll("[data-create-project]").forEach((button) => button.addEventListener("click", async () => {
-          const state = {title: "New project", aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
+          const state = {title: t("new_project", "New project"), aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
           const data = await requestJson(`${apiUrl}create/`, {
             method: "POST",
-            body: JSON.stringify({title: "New project", state}),
+            body: JSON.stringify({title: t("new_project", "New project"), state}),
           });
           window.location.href = `${editorUrl}?project=${data.project.id}`;
         }));
@@ -291,7 +300,7 @@
           if (!pendingDelete?.length || !modalConfirm) return;
           const items = pendingDelete;
           modalConfirm.disabled = true;
-          modalConfirm.textContent = "Deleting...";
+          modalConfirm.textContent = t("deleting", "Deleting...");
           try {
             const data = items.length === 1
               ? await requestJson(`${apiUrl}${items[0].id}/delete/`, {method: "POST", body: "{}"})
@@ -303,7 +312,7 @@
             removeDeletedCards(deletedIds);
           } finally {
             modalConfirm.disabled = false;
-            modalConfirm.textContent = "Delete";
+            modalConfirm.textContent = t("delete", "Delete");
           }
         });
         document.addEventListener("keydown", (event) => {

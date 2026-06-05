@@ -130,6 +130,10 @@
         <strong>{% ui "collect_step" %}</strong>
         <span>{% ui "collect_step_copy" %}</span>
       </article>
+      <article class="native-status-card {% if native_status.enabled %}is-on{% else %}is-off{% endif %}">
+        <strong>Native acceleration: {{ native_status.label }}</strong>
+        <span>{{ native_status.message }}</span>
+      </article>
     </section>
 
     <main class="layout">
@@ -140,9 +144,10 @@
         <button class="tab" type="button" data-tab="subtitles">{% ui "subtitles" %}</button>
         <button class="tab" type="button" data-tab="package">{% ui "package" %}</button>
         <button class="tab" type="button" data-tab="resume">{% ui "resume" %}</button>
-        <a class="tab tab-link" href="{{ video_editor_url }}">Видео редактор</a>
+        <a class="tab tab-link" href="{{ video_editor_url }}">{% ui "video_editor_nav" %}</a>
+        <a class="tab tab-link" href="{{ music_projects_url }}">{% ui "music_editor_nav" %}</a>
         <div class="designer-switch-wrap">
-          <a class="designer-switch" href="{{ designer_url }}" data-designer-launch aria-pressed="false">
+          <a class="designer-switch" href="{{ design_projects_url }}" data-designer-launch aria-pressed="false">
             <span class="designer-switch-track" aria-hidden="true"><span></span></span>
             <span>
               <b>{% ui "design" %}</b>
@@ -288,6 +293,14 @@
                 {% endfor %}
               </div>
             </div>
+            <label class="field ai-option">
+              <input type="checkbox" name="ai_improve" {% if openai_ready %}checked{% endif %}>
+              <span>AI improve cuts</span>
+            </label>
+            <label class="field">
+              <span>Shorts count</span>
+              <input type="number" name="clip_count" value="10" min="1" max="{{ youtube_max_shorts }}" step="1">
+            </label>
             <button class="primary-action" type="submit">{% ui "prepare" %}</button>
           </form>
         </section>
@@ -322,6 +335,10 @@
             <label class="field">
               <span>{% ui "variants" %}</span>
               <input type="number" name="variants" value="1" min="1" max="6">
+            </label>
+            <label class="field ai-option">
+              <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
+              <span>AI cover variant</span>
             </label>
             <button class="primary-action" type="submit">{% ui "make_covers" %}</button>
           </form>
@@ -362,13 +379,25 @@
                 {% endfor %}
               </select>
             </label>
-            <label class="field">
-              <span>{% ui "language" %}</span>
-              <select name="language">
-                {% for value, label in subtitle_languages %}
-                  <option value="{{ value }}">{{ label }}</option>
+            <fieldset class="subtitle-language-picker field-wide">
+              <legend>{% ui "language" %}</legend>
+              <div class="subtitle-language-grid">
+                {% for language in subtitle_languages %}
+                  <label class="subtitle-language-option">
+                    <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
+                    {% if language.flag %}
+                      <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
+                    {% else %}
+                      <span class="subtitle-language-auto">AUTO</span>
+                    {% endif %}
+                    <span>{{ language.label }}</span>
+                  </label>
                 {% endfor %}
-              </select>
+              </div>
+            </fieldset>
+            <label class="field ai-option">
+              <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
+              <span>AI transcription</span>
             </label>
             <button class="primary-action" type="submit">{% ui "add_subtitles" %}</button>
           </form>
@@ -409,13 +438,29 @@
                 {% endfor %}
               </select>
             </label>
-            <label class="field">
-              <span>{% ui "language" %}</span>
-              <select name="language">
-                {% for value, label in subtitle_languages %}
-                  <option value="{{ value }}">{{ label }}</option>
+            <fieldset class="subtitle-language-picker field-wide">
+              <legend>{% ui "language" %}</legend>
+              <div class="subtitle-language-grid">
+                {% for language in subtitle_languages %}
+                  <label class="subtitle-language-option">
+                    <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
+                    {% if language.flag %}
+                      <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
+                    {% else %}
+                      <span class="subtitle-language-auto">AUTO</span>
+                    {% endif %}
+                    <span>{{ language.label }}</span>
+                  </label>
                 {% endfor %}
-              </select>
+              </div>
+            </fieldset>
+            <label class="field ai-option">
+              <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
+              <span>AI transcription</span>
+            </label>
+            <label class="field ai-option">
+              <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
+              <span>AI cover variant</span>
             </label>
             <button class="primary-action" type="submit">{% ui "assemble_package" %}</button>
           </form>

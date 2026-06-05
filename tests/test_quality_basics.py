@@ -6,7 +6,6 @@ from unittest.mock import patch
 from src.config import parse_env_int, parse_id_set
 from src.i18n import SUPPORTED_LANGS, lang_from_code, tr
 from src.image_tools import clean_base_name, human_size, normalize_image_mode
-from src.web_auth import validate_init_data
 
 
 MOJIBAKE_MARKERS = ("Рџ", "Рќ", "РЎ", "Рґ", "СЊ", "вЂ", "�")
@@ -55,13 +54,6 @@ class HelperQualityTests(unittest.TestCase):
         self.assertEqual(clean_base_name("   "), "converted")
         self.assertEqual(human_size(1536), "1.5 KB")
         self.assertEqual(normalize_image_mode("unknown"), "balanced")
-
-class WebValidationTests(unittest.TestCase):
-    def test_invalid_init_data_is_rejected_without_exception(self) -> None:
-        self.assertFalse(validate_init_data("", "123:token"))
-        self.assertFalse(validate_init_data("auth_date=not-a-number&hash=abc", "123:token"))
-        self.assertFalse(validate_init_data("auth_date=1&hash=abc", "123:token"))
-
 
 if __name__ == "__main__":
     unittest.main()

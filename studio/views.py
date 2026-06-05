@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 import json
 import mimetypes
+import re
 import secrets
 import shutil
 import subprocess
@@ -31,17 +32,17 @@ from PIL import Image, ImageOps
 
 from billing.plans import PLANS, get_plan
 from billing.services import active_access_until, prorated_due_cents, transfer_guest_workspace, user_has_active_access
-from src import web_actions as actions
 from src.config import get_settings
 from src.image_tools import clean_base_name, human_size
-from src.video_tools import ffmpeg_path
+from src.job_service import job_service as actions
+from src.video_tools import ffmpeg_path, inspect_video
 from .forms import AccountSettingsForm, EmailLoginForm, RegisterForm
-from .localization import app_messages, clean_language, localized_plan, translate
-from .models import AccountProfile, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, translate
+from .models import AccountProfile, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 
 
 settings = get_settings()
-_video_export_executor = ThreadPoolExecutor(max_workers=2)
+_video_export_executor = ThreadPoolExecutor(max_workers=max(1, settings.video_export_workers))
 _video_export_jobs: dict[str, dict[str, object]] = {}
 _video_export_lock = threading.RLock()
 _video_export_processes: dict[str, subprocess.Popen] = {}
@@ -178,9 +179,10 @@ def account_avatar(request: HttpRequest):
 @require_GET
 def index(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    initial_jobs = [_attach_output_urls(job) for job in actions.get_recent_jobs(5, owner_id, guest_key)]
+    initial_jobs = _attach_output_urls_many(actions.get_recent_jobs(5, owner_id, guest_key))
     account_stats = actions.get_account_stats(owner_id, guest_key)
     account_stats.update(_storage_quota(request, account_stats))
+    native_status = actions.native_status()
     has_access = user_has_active_access(request.user)
     language = getattr(request, "interface_language", "en")
     return render(
@@ -196,9 +198,12 @@ def index(request: HttpRequest):
             "resume_templates": _localized_resume_templates(language),
             "max_image_mb": settings.max_image_mb,
             "max_video_mb": settings.max_video_mb,
+            "youtube_max_shorts": settings.youtube_max_shorts,
             "initial_jobs": initial_jobs,
             "account_stats": account_stats,
             "has_access": has_access,
+            "openai_ready": actions.is_openai_ready(),
+            "native_status": native_status,
             "active_until": active_access_until(request.user),
             "is_guest": not request.user.is_authenticated,
             "display_name": _display_name(request),
@@ -207,7 +212,9 @@ def index(request: HttpRequest):
             "login_url": reverse("studio:login"),
             "settings_url": reverse("studio:account_settings"),
             "designer_url": reverse("studio:designer"),
+            "design_projects_url": reverse("studio:design_project_list"),
             "video_editor_url": reverse("studio:video_project_list"),
+            "music_projects_url": reverse("studio:music_project_list"),
             "avatar_url": _avatar_url(request),
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
@@ -227,7 +234,7 @@ def designer_mode(request: HttpRequest):
     project = None
     project_id = request.GET.get("project", "")
     if project_id.isdigit():
-        project = _design_project_queryset(owner_id, guest_key).filter(id=int(project_id)).first()
+        project = _design_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=int(project_id)).first()
     return render(
         request,
         "studio/designer.html",
@@ -249,7 +256,9 @@ def designer_mode(request: HttpRequest):
 @ensure_csrf_cookie
 def design_project_list(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in _design_project_queryset(owner_id, guest_key)[:120]]
+    queryset = _design_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_DESIGN, owner_id, guest_key)
+    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
     return render(
         request,
         "studio/design_projects.html",
@@ -261,6 +270,7 @@ def design_project_list(request: HttpRequest):
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "app_messages": app_messages(getattr(request, "interface_language", "en")),
+            "music_messages_json": json.dumps(music_messages(getattr(request, "interface_language", "en")), ensure_ascii=False),
         },
     )
 
@@ -268,7 +278,9 @@ def design_project_list(request: HttpRequest):
 @require_GET
 def design_projects(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in _design_project_queryset(owner_id, guest_key)[:80]]
+    queryset = _design_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_DESIGN, owner_id, guest_key)
+    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
     return JsonResponse({"projects": projects})
 
 
@@ -295,15 +307,16 @@ def create_design_project(request: HttpRequest) -> JsonResponse:
             except Exception:
                 pass
         project.preview_path = str(_save_design_project_preview(preview, _design_project_media_dir(project)))
+    _update_design_project_metadata(project, assets=[])
     project.storage_bytes = _design_project_storage_bytes(project)
-    project.save(update_fields=["preview_path", "storage_bytes", "updated_at"])
+    project.save(update_fields=["preview_path", "storage_bytes", "asset_count", "object_count", "updated_at"])
     return JsonResponse({"project": _design_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
 @require_GET
 def design_project_detail(request: HttpRequest, project_id: int) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    project = _design_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+    project = _design_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=project_id).first()
     if not project:
         raise Http404("Design project not found")
     return JsonResponse({"project": _design_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
@@ -332,8 +345,9 @@ def save_design_project(request: HttpRequest, project_id: int) -> JsonResponse:
             except Exception:
                 pass
         project.preview_path = str(_save_design_project_preview(preview, _design_project_media_dir(project)))
+    _update_design_project_metadata(project)
     project.storage_bytes = _design_project_storage_bytes(project)
-    project.save(update_fields=["title", "state_json", "preview_path", "storage_bytes", "updated_at"])
+    project.save(update_fields=["title", "state_json", "preview_path", "storage_bytes", "asset_count", "object_count", "updated_at"])
     return JsonResponse({"project": _design_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
@@ -387,8 +401,9 @@ def duplicate_design_project(request: HttpRequest, project_id: int) -> JsonRespo
                 obj["assetId"] = asset_id_map[asset_id]
                 obj["src"] = reverse("studio:design_project_asset_preview", args=[copy.id, asset_id_map[asset_id]])
     copy.state_json = state
+    _update_design_project_metadata(copy)
     copy.storage_bytes = _design_project_storage_bytes(copy)
-    copy.save(update_fields=["state_json", "preview_path", "storage_bytes", "updated_at"])
+    copy.save(update_fields=["state_json", "preview_path", "storage_bytes", "asset_count", "object_count", "updated_at"])
     return JsonResponse({"project": _design_project_payload(copy, owner_id=owner_id, guest_key=guest_key)})
 
 
@@ -450,8 +465,9 @@ def upload_design_project_asset(request: HttpRequest, project_id: int) -> JsonRe
     asset_dir.mkdir(parents=True, exist_ok=True)
     path, media_type = _save_optimized_editor_image(upload, asset_dir, clean_base_name(upload.name or "image", "image"))
     asset = DesignerAsset.objects.create(project=project, kind="image", file_path=str(path), media_type=media_type, size=path.stat().st_size, original_name=(upload.name or "image")[:240])
+    _update_design_project_metadata(project)
     project.storage_bytes = _design_project_storage_bytes(project)
-    project.save(update_fields=["storage_bytes", "updated_at"])
+    project.save(update_fields=["storage_bytes", "asset_count", "object_count", "updated_at"])
     return JsonResponse({"asset": _design_asset_payload(asset), "project": _design_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
@@ -514,8 +530,11 @@ def workspace_shares(request: HttpRequest) -> JsonResponse:
         resource = _share_resource(resource_type, resource_id)
         if not resource or not _resource_is_owner(resource, request.user.id, ""):
             raise Http404("Project not found")
-        shares = WorkspaceShare.objects.filter(owner=request.user, resource_type=resource_type, resource_id=resource_id).exclude(status=WorkspaceShare.STATUS_REVOKED)
-        return JsonResponse({"shares": [_workspace_share_payload(request, share) for share in shares]})
+        shares = WorkspaceShare.objects.filter(owner=request.user, resource_type=resource_type, resource_id=resource_id).exclude(status=WorkspaceShare.STATUS_REVOKED).select_related("owner", "invited_user")
+        return JsonResponse({
+            "resource": _workspace_share_resource_payload(request, resource_type, resource),
+            "shares": [_workspace_share_payload(request, share) for share in shares],
+        })
 
     data = _json_body(request)
     resource_type = str(data.get("resource_type") or "").strip()
@@ -535,7 +554,7 @@ def workspace_shares(request: HttpRequest) -> JsonResponse:
     if role not in {WorkspaceShare.ROLE_VIEWER, WorkspaceShare.ROLE_EDITOR}:
         role = WorkspaceShare.ROLE_VIEWER
     invited_user = get_user_model().objects.filter(email__iexact=email).first()
-    share, _ = WorkspaceShare.objects.update_or_create(
+    share, created = WorkspaceShare.objects.get_or_create(
         owner=request.user,
         resource_type=resource_type,
         resource_id=resource_id,
@@ -548,15 +567,28 @@ def workspace_shares(request: HttpRequest) -> JsonResponse:
             "expires_at": timezone.now() + timezone.timedelta(days=14),
         },
     )
+    if not created:
+        share.invited_user = invited_user or share.invited_user
+        share.role = role
+        share.token = secrets.token_urlsafe(32)
+        share.expires_at = timezone.now() + timezone.timedelta(days=14)
+        update_fields = ["invited_user", "role", "token", "expires_at", "updated_at"]
+        if share.status != WorkspaceShare.STATUS_ACCEPTED:
+            share.status = WorkspaceShare.STATUS_PENDING
+            update_fields.append("status")
+        share.save(update_fields=update_fields)
     _send_workspace_invite(request, share)
-    return JsonResponse({"share": _workspace_share_payload(request, share)})
+    return JsonResponse({
+        "resource": _workspace_share_resource_payload(request, resource_type, resource),
+        "share": _workspace_share_payload(request, share),
+    })
 
 
 @require_POST
 def workspace_share_role(request: HttpRequest, share_id: int) -> JsonResponse:
     if not request.user.is_authenticated:
         return _error_json(ValueError("Sign in to manage sharing"), 403)
-    share = WorkspaceShare.objects.filter(id=share_id, owner=request.user).first()
+    share = WorkspaceShare.objects.filter(id=share_id, owner=request.user).select_related("owner", "invited_user").first()
     if not share:
         raise Http404("Share not found")
     data = _json_body(request)
@@ -572,7 +604,7 @@ def workspace_share_role(request: HttpRequest, share_id: int) -> JsonResponse:
 def revoke_workspace_share(request: HttpRequest, share_id: int) -> JsonResponse:
     if not request.user.is_authenticated:
         return _error_json(ValueError("Sign in to manage sharing"), 403)
-    share = WorkspaceShare.objects.filter(id=share_id, owner=request.user).first()
+    share = WorkspaceShare.objects.filter(id=share_id, owner=request.user).select_related("owner", "invited_user").first()
     if not share:
         raise Http404("Share not found")
     share.status = WorkspaceShare.STATUS_REVOKED
@@ -588,7 +620,7 @@ def video_editor(request: HttpRequest):
     project = None
     project_id = request.GET.get("project", "")
     if project_id.isdigit():
-        project = _video_project_queryset(owner_id, guest_key).filter(id=int(project_id)).first()
+        project = _video_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=int(project_id)).first()
     return render(
         request,
         "studio/video_editor.html",
@@ -605,9 +637,345 @@ def video_editor(request: HttpRequest):
 
 @require_GET
 @ensure_csrf_cookie
+def music_editor(request: HttpRequest):
+    language = getattr(request, "interface_language", "en")
+    owner_id, guest_key = _workspace_identity(request)
+    project = None
+    project_id = request.GET.get("project", "")
+    if project_id.isdigit():
+        project = _music_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=int(project_id)).first()
+    current_music_project = _music_project_payload(project, owner_id=owner_id, guest_key=guest_key) if project else None
+
+    return render(
+        request,
+        "studio/music_editor.html",
+        {
+            "current_music_project": current_music_project,
+            "current_music_project_json": json.dumps(current_music_project or {}),
+            "music_messages_json": json.dumps(music_messages(language), ensure_ascii=False),
+            "music_projects_api_url": reverse("studio:music_projects"),
+            "accent_color": _accent_color(request),
+            "ui_accent_color": _ui_accent_color(request),
+            "theme_mode": _theme_mode(request),
+            "app_messages": app_messages(language),
+        },
+    )
+
+
+
+@require_GET
+def music_project_list(request: HttpRequest):
+    owner_id, guest_key = _workspace_identity(request)
+    queryset = _music_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_MUSIC, owner_id, guest_key)
+    projects = [_music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
+    return render(
+        request,
+        "studio/music_projects.html",
+        {
+            "music_projects": projects,
+            "music_editor_url": reverse("studio:music_editor"),
+            "music_messages_json": json.dumps(music_messages(getattr(request, "interface_language", "en")), ensure_ascii=False),
+            "music_projects_api_url": reverse("studio:music_projects"),
+            "accent_color": _accent_color(request),
+            "ui_accent_color": _ui_accent_color(request),
+            "theme_mode": _theme_mode(request),
+            "app_messages": app_messages(getattr(request, "interface_language", "en")),
+        },
+    )
+
+
+
+@require_GET
+def music_projects(request: HttpRequest) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    queryset = _music_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_MUSIC, owner_id, guest_key)
+    projects = [
+        _music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key)
+        for project in project_rows
+    ]
+
+    return JsonResponse({"projects": projects})
+
+
+@require_POST
+def create_music_project(request: HttpRequest) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    data = _json_body(request)
+
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    title = _clean_project_title(
+        str(data.get("title") or state.get("title") or "New music project")
+    )
+
+    project = MusicEditorProject.objects.create(
+        owner=request.user if request.user.is_authenticated else None,
+        guest_key="" if owner_id else guest_key,
+        title=title,
+        state_json=state,
+        storage_bytes=_json_size(state),
+    )
+    _update_music_project_metadata(project, assets=[])
+    project.save(update_fields=["asset_count", "clip_count", "duration_seconds", "updated_at"])
+
+    return JsonResponse({
+        "project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key)
+    })
+
+@require_GET
+def music_project_detail(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    project = _music_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=project_id).first()
+    if not project:
+        raise Http404("Music project not found")
+    return JsonResponse({"project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
+
+
+@require_POST
+def save_music_project(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    if not _resource_can_edit(WorkspaceShare.RESOURCE_MUSIC, project, owner_id, guest_key):
+        raise Http404("Music project not found")
+
+    data = _json_body(request)
+
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    title = _clean_project_title(
+        str(data.get("title") or state.get("title") or project.title)
+    )
+
+    project.title = title
+    project.state_json = state
+    _update_music_project_metadata(project)
+    project.storage_bytes = _music_project_storage_bytes(project)
+    project.save(update_fields=["title", "state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "updated_at"])
+
+    return JsonResponse({
+        "project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key)
+    })
+
+
+@require_POST
+def rename_music_project(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_owner_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    data = _json_body(request)
+
+    project.title = _clean_project_title(str(data.get("title") or project.title))
+    project.save(update_fields=["title", "updated_at"])
+
+    return JsonResponse({
+        "project": _music_project_payload(
+            project,
+            include_state=False,
+            owner_id=owner_id,
+            guest_key=guest_key,
+        )
+    })
+
+@require_POST
+def delete_music_project(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_owner_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    _delete_music_project_media(project)
+
+    deleted, _ = project.delete()
+
+    if not deleted:
+        raise Http404("Music project not found")
+
+    stats = actions.get_account_stats(owner_id, guest_key)
+    stats.update(_storage_quota(request, stats))
+
+    return JsonResponse({
+        "ok": True,
+        "deleted_ids": [project_id],
+        "account_stats": stats,
+    })
+
+@require_POST
+def delete_music_projects(request: HttpRequest) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    data = _json_body(request)
+    raw_ids = data.get("ids") if isinstance(data.get("ids"), list) else []
+    project_ids = []
+    for raw_id in raw_ids:
+        try:
+            project_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if project_id > 0 and project_id not in project_ids:
+            project_ids.append(project_id)
+    projects = list(_music_owner_queryset(owner_id, guest_key).filter(id__in=project_ids))
+    deleted_ids = []
+    for project in projects:
+        _delete_music_project_media(project)
+        deleted_ids.append(project.id)
+    if deleted_ids:
+        MusicEditorProject.objects.filter(id__in=deleted_ids).delete()
+    stats = actions.get_account_stats(owner_id, guest_key)
+    stats.update(_storage_quota(request, stats))
+    return JsonResponse({"ok": True, "deleted_ids": deleted_ids, "deleted_count": len(deleted_ids), "account_stats": stats})
+
+
+
+
+@require_POST
+def upload_music_project_asset(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    upload = _require_file(request, "file")
+
+    media_type = (
+        upload.content_type
+        or mimetypes.guess_type(upload.name or "")[0]
+        or "application/octet-stream"
+    )
+
+    if not media_type.startswith("audio/"):
+        return _error_json(ValueError("Only audio assets are supported"), 400)
+
+    if upload.size > settings.max_video_mb * 1024 * 1024:
+        return _error_json(ValueError(f"Audio limit: {settings.max_video_mb} MB"), 400)
+
+    asset_dir = _music_project_media_dir(project)
+    asset_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(upload.name or "").suffix[:16] or mimetypes.guess_extension(media_type) or ".mp3"
+    base = clean_base_name(upload.name or "audio", "audio")
+
+    path = asset_dir / f"{uuid.uuid4().hex[:12]}_{base}{suffix}"
+
+    with path.open("wb") as destination:
+        for chunk in upload.chunks():
+            destination.write(chunk)
+
+    duration = _get_audio_duration(path)
+
+    asset = MusicEditorAsset.objects.create(
+        project=project,
+        kind="audio",
+        file_path=str(path),
+        media_type=media_type,
+        size=path.stat().st_size,
+        original_name=(upload.name or "audio")[:240],
+        duration=duration,
+    )
+
+    _update_music_project_metadata(project)
+    project.storage_bytes = _music_project_storage_bytes(project)
+    project.save(update_fields=["storage_bytes", "asset_count", "clip_count", "duration_seconds", "updated_at"])
+
+    return JsonResponse({
+        "asset": _music_asset_payload(asset),
+        "project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key),
+    })
+
+@require_GET
+def preview_music_project_asset(request: HttpRequest, project_id: int, asset_id: int) -> HttpResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    asset = project.assets.filter(id=asset_id).first()
+
+    if not asset:
+        raise Http404("Music asset not found")
+
+    path = Path(asset.file_path)
+
+    if not path.exists() or not path.is_file():
+        raise Http404("Music asset file not found")
+
+    return _range_file_response(
+        request,
+        path,
+        asset.media_type,
+        asset.original_name or path.name,
+    )
+
+@require_POST
+def delete_music_project_asset(request: HttpRequest, project_id: int, asset_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+
+    project = _music_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+
+    if not project:
+        raise Http404("Music project not found")
+
+    asset = project.assets.filter(id=asset_id).first()
+
+    if not asset:
+        raise Http404("Music asset not found")
+
+    asset_path = Path(asset.file_path)
+
+    try:
+        if asset_path.exists() and asset_path.is_file():
+            asset_path.unlink()
+    except Exception:
+        pass
+
+    asset.delete()
+
+    state = project.state_json or {}
+
+    if isinstance(state, dict):
+        state["assets"] = [
+            item for item in state.get("assets", [])
+            if str(item.get("serverId", "")) != str(asset_id)
+        ]
+
+        state["clips"] = [
+            clip for clip in state.get("clips", [])
+            if str(clip.get("assetId", "")) != str(asset_id)
+        ]
+
+        project.state_json = state
+
+    _update_music_project_metadata(project)
+    project.storage_bytes = _music_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "updated_at"])
+
+    return JsonResponse({
+        "ok": True,
+        "asset_id": asset_id,
+        "project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key),
+    })
+
+@require_GET
+@ensure_csrf_cookie
 def video_project_list(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in _video_project_queryset(owner_id, guest_key)[:120]]
+    queryset = _video_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_VIDEO, owner_id, guest_key)
+    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
     return render(
         request,
         "studio/video_projects.html",
@@ -626,7 +994,9 @@ def video_project_list(request: HttpRequest):
 @require_GET
 def video_projects(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in _video_project_queryset(owner_id, guest_key)[:80]]
+    queryset = _video_project_queryset(owner_id, guest_key).prefetch_related("assets")
+    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_VIDEO, owner_id, guest_key)
+    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
     return JsonResponse({"projects": projects})
 
 
@@ -643,15 +1013,16 @@ def create_video_project(request: HttpRequest) -> JsonResponse:
         state_json=state,
         storage_bytes=_json_size(state),
     )
+    _update_video_project_metadata(project, assets=[])
     project.storage_bytes = _video_project_storage_bytes(project)
-    project.save(update_fields=["storage_bytes", "updated_at"])
+    project.save(update_fields=["storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return JsonResponse({"project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
 @require_GET
 def video_project_detail(request: HttpRequest, project_id: int) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    project = _video_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+    project = _video_project_queryset(owner_id, guest_key).prefetch_related("assets").filter(id=project_id).first()
     if not project:
         raise Http404("Project not found")
     return JsonResponse({"project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
@@ -670,8 +1041,9 @@ def save_video_project(request: HttpRequest, project_id: int) -> JsonResponse:
     title = _clean_project_title(str(data.get("title") or state.get("title") or project.title))
     project.title = title
     project.state_json = state
+    _update_video_project_metadata(project)
     project.storage_bytes = _video_project_storage_bytes(project)
-    project.save(update_fields=["title", "state_json", "storage_bytes", "updated_at"])
+    project.save(update_fields=["title", "state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return JsonResponse({"project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
@@ -828,10 +1200,11 @@ def export_video_project_cover(request: HttpRequest, project_id: int) -> JsonRes
     try:
         _render_video_project_cover(project, output, time_seconds)
         JobOutputRecord.objects.create(job=job_record, label="Cover frame", path=str(output), media_type="image/jpeg", size=output.stat().st_size)
+        _refresh_job_output_summary(job_record)
         job_record.status = "completed"
         job_record.progress = 100
         job_record.message = "Ready"
-        job_record.save(update_fields=["status", "progress", "message", "updated_at"])
+        job_record.save(update_fields=["status", "progress", "message", "output_count", "total_output_size", "primary_output_type", "updated_at"])
         JobEventRecord.objects.create(job=job_record, status="completed", progress=100, message="Ready")
     except Exception as exc:
         job_record.status = "failed"
@@ -841,6 +1214,53 @@ def export_video_project_cover(request: HttpRequest, project_id: int) -> JsonRes
         job_record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
         JobEventRecord.objects.create(job=job_record, status="failed", progress=100, message=str(exc))
     return JsonResponse({"job": _video_export_record_payload(request, project, job_record)})
+
+
+@require_POST
+def import_video_project_subtitles(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    project = _video_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+    if not project:
+        raise Http404("Project not found")
+    if not _resource_can_edit(WorkspaceShare.RESOURCE_VIDEO, project, owner_id, guest_key):
+        raise Http404("Project not found")
+    upload = request.FILES.get("file")
+    if not upload:
+        return JsonResponse({"error": "Subtitle file is required"}, status=400)
+    raw = upload.read()
+    text = _decode_subtitle_bytes(raw)
+    cues = _parse_subtitle_cues(text, upload.name or "")
+    return JsonResponse({"cues": cues, "count": len(cues)})
+
+
+@require_GET
+def export_video_project_subtitles(request: HttpRequest, project_id: int) -> HttpResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    project = _video_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+    if not project:
+        raise Http404("Project not found")
+    if not _resource_can_view(WorkspaceShare.RESOURCE_VIDEO, project, owner_id, guest_key):
+        raise Http404("Project not found")
+    export_format = str(request.GET.get("format") or "srt").strip().lower()
+    if export_format not in {"srt", "vtt", "ass", "json"}:
+        export_format = "srt"
+    cues = _video_project_caption_cues(project.state_json or {})
+    if export_format == "vtt":
+        content = _render_vtt(cues)
+        media_type = "text/vtt; charset=utf-8"
+    elif export_format == "ass":
+        content = _render_ass(cues, project.state_json or {})
+        media_type = "text/x-ssa; charset=utf-8"
+    elif export_format == "json":
+        content = json.dumps({"project_id": project.id, "title": project.title, "cues": cues}, ensure_ascii=False, indent=2)
+        media_type = "application/json; charset=utf-8"
+    else:
+        content = _render_srt(cues)
+        media_type = "application/x-subrip; charset=utf-8"
+    filename = f"{clean_base_name(project.title, 'subtitles')}.{export_format}"
+    response = HttpResponse(content, content_type=media_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @require_POST
@@ -937,8 +1357,9 @@ def upload_video_project_asset(request: HttpRequest, project_id: int) -> JsonRes
         thumbnail_path=thumbnail_path,
         duration=float(request.POST.get("duration") or 0),
     )
+    _update_video_project_metadata(project)
     project.storage_bytes = _video_project_storage_bytes(project)
-    project.save(update_fields=["storage_bytes", "updated_at"])
+    project.save(update_fields=["storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return JsonResponse({"asset": _video_asset_payload(asset), "project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
@@ -1038,15 +1459,16 @@ def delete_video_project_asset(request: HttpRequest, project_id: int, asset_id: 
     if isinstance(state, dict):
         state["clips"] = [clip for clip in state.get("clips", []) if str(clip.get("assetId", "")) != str(asset_id)]
         project.state_json = state
+    _update_video_project_metadata(project)
     project.storage_bytes = _video_project_storage_bytes(project)
-    project.save(update_fields=["state_json", "storage_bytes", "updated_at"])
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return JsonResponse({"ok": True, "project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
 
 @require_GET
 def dashboard_detail(request: HttpRequest, section: str):
     owner_id, guest_key = _workspace_identity(request)
-    jobs = [_attach_output_urls(job) for job in actions.get_recent_jobs(200, owner_id, guest_key)]
+    jobs = _attach_output_urls_many(actions.get_recent_jobs(200, owner_id, guest_key))
     stats = actions.get_account_stats(owner_id, guest_key)
     stats.update(_storage_quota(request, stats))
     normalized = section if section in {"all", "active", "completed", "files", "storage"} else "all"
@@ -1056,30 +1478,101 @@ def dashboard_detail(request: HttpRequest, section: str):
         visible_jobs = [job for job in jobs if job.get("status") == "completed"]
     else:
         visible_jobs = jobs
+
     outputs = [
         dict(output, job_title=job.get("title"), job_id=job.get("id"), detail_url=job.get("detail_url"))
         for job in jobs
         for output in job.get("outputs", [])
     ]
-    return render(
-        request,
-        "studio/dashboard_detail.html",
-        {
-            "section": normalized,
-            "jobs": visible_jobs,
-            "outputs": outputs,
-            "account_stats": stats,
-            "is_guest": not request.user.is_authenticated,
-            "checkout_url": _checkout_url(request),
-            "pricing_url": reverse("billing:pricing"),
-            "login_url": reverse("studio:login"),
-            "settings_url": reverse("studio:account_settings"),
-            "avatar_url": _avatar_url(request),
-            "accent_color": _accent_color(request),
-            "ui_accent_color": _ui_accent_color(request),
-            "theme_mode": _theme_mode(request),
-        },
-    )
+
+    query = str(request.GET.get("q") or "").strip()
+    file_type = str(request.GET.get("type") or "").strip().lower()
+    try:
+        page = int(request.GET.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, page)
+    total_outputs = len(outputs)
+    pages = 1
+    page_range = [1]
+    per_page = 20
+
+    if normalized == "files":
+        def _output_score(output: dict) -> int:
+            text = " ".join(
+                str(output.get(key) or "") for key in ("label", "name", "job_title")
+            ).lower()
+            if not query:
+                return 1
+            if query.lower() in text:
+                return 2
+            return 0
+
+        def _output_type(output: dict) -> str:
+            media_type = str(output.get("media_type") or "").lower()
+            if media_type.startswith("image/"):
+                return "image"
+            if media_type.startswith("video/"):
+                return "video"
+            if media_type == "application/pdf":
+                return "pdf"
+            if media_type.startswith("text/"):
+                return "text"
+            if media_type.startswith("audio/"):
+                return "audio"
+            return "other"
+
+        filtered_outputs = [output for output in outputs if _output_score(output) > 0] if query else outputs
+        if file_type and file_type in {"image", "video", "pdf", "text", "audio", "other"}:
+            filtered_outputs = [output for output in filtered_outputs if _output_type(output) == file_type]
+        total_outputs = len(filtered_outputs)
+        pages = max(1, (total_outputs + per_page - 1) // per_page)
+        if page > pages:
+            page = pages
+        start = (page - 1) * per_page
+        outputs = filtered_outputs[start : start + per_page]
+
+        if pages > 9:
+            if page <= 5:
+                page_range = list(range(1, 7)) + [None, pages]
+            elif page >= pages - 4:
+                page_range = [1, None] + list(range(pages - 5, pages + 1))
+            else:
+                page_range = [1, None] + list(range(page - 2, page + 3)) + [None, pages]
+        else:
+            page_range = list(range(1, pages + 1))
+    else:
+        outputs = outputs
+        page_range = [1] if pages == 1 else list(range(1, pages + 1))
+
+    context = {
+        "section": normalized,
+        "jobs": visible_jobs,
+        "outputs": outputs,
+        "total_outputs": total_outputs,
+        "page": page,
+        "pages": pages,
+        "page_range": page_range,
+        "query": query,
+        "file_type": file_type,
+        "show_file_filters": normalized == "files",
+        "account_stats": stats,
+        "is_guest": not request.user.is_authenticated,
+        "checkout_url": _checkout_url(request),
+        "pricing_url": reverse("billing:pricing"),
+        "login_url": reverse("studio:login"),
+        "settings_url": reverse("studio:account_settings"),
+        "avatar_url": _avatar_url(request),
+        "accent_color": _accent_color(request),
+        "ui_accent_color": _ui_accent_color(request),
+        "theme_mode": _theme_mode(request),
+    }
+
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        html = render_to_string("studio/dashboard_files_section.html", context, request=request)
+        return JsonResponse({"html": html, "total_outputs": total_outputs, "page": page, "pages": pages, "query": query})
+
+    return render(request, "studio/dashboard_detail.html", context)
 
 
 @require_POST
@@ -1114,6 +1607,8 @@ def start_youtube(request: HttpRequest) -> JsonResponse:
             mode=request.POST.get("mode", "regular"),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_improve=_post_bool(request, "ai_improve"),
+            clip_count=int(request.POST.get("clip_count") or 10),
         )
         return _job_json(job)
     except Exception as exc:
@@ -1134,6 +1629,7 @@ def start_cover(request: HttpRequest) -> JsonResponse:
             variants=variants,
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_cover=_post_bool(request, "ai_cover"),
         )
         return _job_json(job)
     except Exception as exc:
@@ -1154,6 +1650,7 @@ def start_subtitles(request: HttpRequest) -> JsonResponse:
             language=request.POST.get("language", "auto"),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_transcription=_post_bool(request, "ai_transcription"),
         )
         return _job_json(job)
     except Exception as exc:
@@ -1174,6 +1671,8 @@ def start_package(request: HttpRequest) -> JsonResponse:
             language=request.POST.get("language", "auto"),
             owner_id=owner_id,
             guest_key=guest_key,
+            ai_transcription=_post_bool(request, "ai_transcription"),
+            ai_cover=_post_bool(request, "ai_cover"),
         )
         return _job_json(job)
     except Exception as exc:
@@ -1231,6 +1730,68 @@ def job_status(request: HttpRequest, job_id: str) -> JsonResponse:
     if not job:
         raise Http404("Job not found")
     return _job_json(job)
+
+
+@require_POST
+def edit_output_design(request: HttpRequest, job_id: str, index: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    job = actions.get_job(job_id, owner_id, guest_key)
+    output = actions.get_output(job_id, index, owner_id, guest_key)
+    if not job or not output:
+        raise Http404("Cover output not found")
+    if not _output_can_edit_design({"label": output.label, "name": output.name, "media_type": output.media_type}, job):
+        raise Http404("Cover output not found")
+    record = _job_record_for_workspace(job_id, owner_id, guest_key)
+    if not record:
+        raise Http404("Job not found")
+
+    output_key = str(output.path.resolve())
+    params = _job_record_params(record)
+    design_map = params.get("design_projects") if isinstance(params.get("design_projects"), dict) else {}
+    existing_id = design_map.get(output_key) if isinstance(design_map, dict) else None
+    if existing_id:
+        existing = _design_project_queryset(owner_id, guest_key).filter(id=existing_id).first()
+        if existing:
+            return JsonResponse(_design_open_payload(existing, owner_id, guest_key))
+
+    project = _create_design_project_from_output(request, record, output, job)
+    design_map = dict(design_map) if isinstance(design_map, dict) else {}
+    design_map[output_key] = project.id
+    params["design_projects"] = design_map
+    record.params_json = json.dumps(params, ensure_ascii=False, default=str)
+    record.save(update_fields=["params_json", "updated_at"])
+    return JsonResponse(_design_open_payload(project, owner_id, guest_key))
+
+
+@require_POST
+def edit_output_video(request: HttpRequest, job_id: str, index: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    job = actions.get_job(job_id, owner_id, guest_key)
+    output = actions.get_output(job_id, index, owner_id, guest_key)
+    if not job or not output:
+        raise Http404("Video output not found")
+    if not _output_can_edit_video({"label": output.label, "name": output.name, "media_type": output.media_type}, job):
+        raise Http404("Video output not found")
+    record = _job_record_for_workspace(job_id, owner_id, guest_key)
+    if not record:
+        raise Http404("Job not found")
+
+    output_key = str(output.path.resolve())
+    params = _job_record_params(record)
+    video_map = params.get("video_projects") if isinstance(params.get("video_projects"), dict) else {}
+    existing_id = video_map.get(output_key) if isinstance(video_map, dict) else None
+    if existing_id:
+        existing = _video_project_queryset(owner_id, guest_key).filter(id=existing_id).first()
+        if existing:
+            return JsonResponse(_video_open_payload(existing, owner_id, guest_key))
+
+    project = _create_video_project_from_output(request, record, output, job)
+    video_map = dict(video_map) if isinstance(video_map, dict) else {}
+    video_map[output_key] = project.id
+    params["video_projects"] = video_map
+    record.params_json = json.dumps(params, ensure_ascii=False, default=str)
+    record.save(update_fields=["params_json", "updated_at"])
+    return JsonResponse(_video_open_payload(project, owner_id, guest_key))
 
 
 @require_POST
@@ -1356,7 +1917,12 @@ def download_all_outputs(request: HttpRequest, job_id: str) -> FileResponse:
 
 @require_GET
 def health(request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"status": "ok"})
+    owner_id, guest_key = _workspace_identity(request)
+    return JsonResponse({
+        "status": "ok",
+        "native_acceleration": actions.native_status(),
+        "queue": actions.queue_status(owner_id, guest_key),
+    })
 
 
 def _workspace_identity(request: HttpRequest) -> tuple[int | None, str]:
@@ -1373,7 +1939,7 @@ def _guest_key(request: HttpRequest) -> str:
 
 SHARE_VIEW_ROLES = {WorkspaceShare.ROLE_VIEWER, WorkspaceShare.ROLE_EDITOR}
 SHARE_EDIT_ROLES = {WorkspaceShare.ROLE_EDITOR}
-SHARE_RESOURCE_TYPES = {WorkspaceShare.RESOURCE_DESIGN, WorkspaceShare.RESOURCE_VIDEO}
+SHARE_RESOURCE_TYPES = {WorkspaceShare.RESOURCE_DESIGN, WorkspaceShare.RESOURCE_VIDEO, WorkspaceShare.RESOURCE_MUSIC}
 
 
 def _active_share_filter() -> Q:
@@ -1417,9 +1983,26 @@ def _design_project_queryset(owner_id: int | None, guest_key: str):
     return queryset.filter(owner__isnull=True, guest_key=guest_key)
 
 
+def _music_owner_queryset(owner_id: int | None, guest_key: str):
+    queryset = MusicEditorProject.objects.all()
+    if owner_id:
+        return queryset.filter(owner_id=owner_id)
+    return queryset.filter(owner__isnull=True, guest_key=guest_key)
+
+
+def _music_project_queryset(owner_id: int | None, guest_key: str):
+    queryset = MusicEditorProject.objects.all()
+    if owner_id:
+        return queryset.filter(Q(owner_id=owner_id) | Q(id__in=_shared_resource_ids(WorkspaceShare.RESOURCE_MUSIC, owner_id))).distinct()
+    return queryset.filter(owner__isnull=True, guest_key=guest_key)
+
+
 def _resource_access_role(resource_type: str, project, owner_id: int | None, guest_key: str = "") -> str:
     if not project:
         return ""
+    cached_role = getattr(project, "_access_role", "")
+    if cached_role:
+        return cached_role
     if owner_id and project.owner_id == owner_id:
         return "owner"
     if not owner_id and project.owner_id is None and project.guest_key == guest_key:
@@ -1434,6 +2017,32 @@ def _resource_access_role(resource_type: str, project, owner_id: int | None, gue
         if share:
             return share.role
     return ""
+
+
+def _attach_access_roles(projects: list, resource_type: str, owner_id: int | None, guest_key: str = "") -> list:
+    if not projects:
+        return projects
+    for project in projects:
+        if owner_id and project.owner_id == owner_id:
+            project._access_role = "owner"
+        elif not owner_id and project.owner_id is None and project.guest_key == guest_key:
+            project._access_role = "owner"
+        else:
+            project._access_role = ""
+    if owner_id:
+        shared_ids = [project.id for project in projects if getattr(project, "_access_role", "") != "owner"]
+        if shared_ids:
+            shares = WorkspaceShare.objects.filter(
+                _active_share_filter(),
+                resource_type=resource_type,
+                resource_id__in=shared_ids,
+                invited_user_id=owner_id,
+            )
+            roles = {share.resource_id: share.role for share in shares}
+            for project in projects:
+                if getattr(project, "_access_role", "") != "owner":
+                    project._access_role = roles.get(project.id, "")
+    return projects
 
 
 def _resource_can_view(resource_type: str, project, owner_id: int | None, guest_key: str = "") -> bool:
@@ -1460,9 +2069,11 @@ def _clean_email(value: str) -> str:
 
 def _share_resource(resource_type: str, resource_id: int):
     if resource_type == WorkspaceShare.RESOURCE_DESIGN:
-        return DesignerProject.objects.filter(id=resource_id).first()
+        return DesignerProject.objects.prefetch_related("assets").filter(id=resource_id).first()
     if resource_type == WorkspaceShare.RESOURCE_VIDEO:
-        return VideoEditorProject.objects.filter(id=resource_id).first()
+        return VideoEditorProject.objects.prefetch_related("assets").filter(id=resource_id).first()
+    if resource_type == WorkspaceShare.RESOURCE_MUSIC:
+        return MusicEditorProject.objects.prefetch_related("assets").filter(id=resource_id).first()
     return None
 
 
@@ -1471,6 +2082,8 @@ def _share_resource_url(resource_type: str, resource_id: int) -> str:
         return f"{reverse('studio:designer')}?{urlencode({'project': resource_id})}"
     if resource_type == WorkspaceShare.RESOURCE_VIDEO:
         return f"{reverse('studio:video_editor')}?{urlencode({'project': resource_id})}"
+    if resource_type == WorkspaceShare.RESOURCE_MUSIC:
+        return f"{reverse('studio:music_editor')}?{urlencode({'project': resource_id})}"
     return reverse("studio:index")
 
 
@@ -1478,6 +2091,7 @@ def _share_resource_label(resource_type: str) -> str:
     return {
         WorkspaceShare.RESOURCE_DESIGN: "Design board",
         WorkspaceShare.RESOURCE_VIDEO: "Video edit",
+        WorkspaceShare.RESOURCE_MUSIC: "Music edit",
     }.get(resource_type, "Project")
 
 
@@ -1486,7 +2100,7 @@ def _share_resource_preview(resource_type: str, resource) -> str:
         return reverse("studio:design_project_preview", args=[resource.id])
     if resource_type == WorkspaceShare.RESOURCE_VIDEO:
         state = resource.state_json or {}
-        first_thumb = next((asset for asset in resource.assets.all() if asset.thumbnail_path), None)
+        first_thumb = next((asset for asset in _prefetched_assets(resource) if asset.thumbnail_path), None)
         if first_thumb:
             return reverse("studio:video_project_asset_thumbnail", args=[resource.id, first_thumb.id])
         if isinstance(state, dict):
@@ -1495,6 +2109,8 @@ def _share_resource_preview(resource_type: str, resource) -> str:
 
 
 def _workspace_share_payload(request: HttpRequest, share: WorkspaceShare) -> dict[str, object]:
+    expires_delta = share.expires_at - timezone.now()
+    days_left = max(0, expires_delta.days + (1 if expires_delta.seconds else 0))
     return {
         "id": share.id,
         "resource_type": share.resource_type,
@@ -1504,7 +2120,22 @@ def _workspace_share_payload(request: HttpRequest, share: WorkspaceShare) -> dic
         "status": share.status,
         "invite_url": request.build_absolute_uri(reverse("studio:workspace_invite", args=[share.token])),
         "expires_at": share.expires_at.isoformat(),
+        "expires_label": f"{days_left} days left" if days_left else "Expires today",
         "created_at": share.created_at.isoformat(),
+        "updated_at": share.updated_at.isoformat(),
+    }
+
+
+def _workspace_share_resource_payload(request: HttpRequest, resource_type: str, resource) -> dict[str, object]:
+    preview_url = _share_resource_preview(resource_type, resource)
+    if preview_url and preview_url.startswith("/"):
+        preview_url = request.build_absolute_uri(preview_url)
+    elif preview_url and not preview_url.startswith(("http://", "https://")):
+        preview_url = ""
+    return {
+        "title": getattr(resource, "title", "Shared project"),
+        "label": _share_resource_label(resource_type),
+        "preview_url": preview_url,
     }
 
 
@@ -1572,23 +2203,27 @@ def _design_project_payload(project: DesignerProject | None, include_state: bool
     if not project:
         return {}
     state = project.state_json or {}
-    objects = state.get("objects") if isinstance(state.get("objects"), list) else []
-    vectors = state.get("vectors") if isinstance(state.get("vectors"), list) else []
+    assets = _prefetched_assets(project)
+    objects = _state_list(state, "objects") if include_state or not getattr(project, "object_count", 0) else []
+    vectors = _state_list(state, "vectors") if include_state else []
     frames = [item for item in objects if isinstance(item, dict) and item.get("type") == "frame"]
+    object_count = len(objects) if objects else int(getattr(project, "object_count", 0) or 0)
     access_role = _resource_access_role(WorkspaceShare.RESOURCE_DESIGN, project, owner_id, guest_key) if owner_id is not None or guest_key else "owner"
     is_owner = access_role == "owner"
     payload: dict[str, object] = {
         "id": project.id,
         "title": project.title,
         "preview_url": reverse("studio:design_project_preview", args=[project.id]) if project.preview_path else "",
-        "object_count": len(objects),
+        "preview_focus": _design_project_preview_focus(state),
+        "object_count": object_count,
         "frame_count": len(frames),
         "vector_count": len(vectors),
+        "asset_count": int(getattr(project, "asset_count", 0) or len(assets)),
         "storage_bytes": project.storage_bytes,
         "storage_text": human_size(project.storage_bytes),
         "created_at": project.created_at.isoformat(),
         "updated_at": project.updated_at.isoformat(),
-        "assets": [_design_asset_payload(asset) for asset in project.assets.all()],
+        "assets": [_design_asset_payload(asset) for asset in assets],
         "access_role": access_role,
         "is_owner": is_owner,
         "can_edit": is_owner or access_role == WorkspaceShare.ROLE_EDITOR,
@@ -1597,6 +2232,53 @@ def _design_project_payload(project: DesignerProject | None, include_state: bool
     if include_state:
         payload["state"] = project.state_json or {}
     return payload
+
+
+def _design_project_preview_focus(state: dict[str, object]) -> dict[str, int]:
+    design_width = 9000
+    design_height = 6400
+    candidates: list[tuple[float, float]] = []
+
+    def as_float(value: object, default: float = 0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def clamp_percent(value: float) -> int:
+        return int(round(max(12, min(88, value))))
+
+    objects = state.get("objects") if isinstance(state.get("objects"), list) else []
+    for item in objects:
+        if not isinstance(item, dict):
+            continue
+        x = as_float(item.get("x"))
+        y = as_float(item.get("y"))
+        w = as_float(item.get("w") or item.get("width"))
+        h = as_float(item.get("h") or item.get("height"))
+        candidates.append((x + w / 2, y + h / 2))
+
+    if not candidates:
+        for key in ("vectors", "strokes"):
+            strokes = state.get(key) if isinstance(state.get(key), list) else []
+            for stroke in strokes:
+                if not isinstance(stroke, dict):
+                    continue
+                points = stroke.get("points") if isinstance(stroke.get("points"), list) else []
+                coords = [(as_float(point.get("x")), as_float(point.get("y"))) for point in points if isinstance(point, dict)]
+                if coords:
+                    xs = [point[0] for point in coords]
+                    ys = [point[1] for point in coords]
+                    candidates.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2))
+
+    if not candidates:
+        return {"x": 50, "y": 50}
+
+    x, y = candidates[-1]
+    return {
+        "x": clamp_percent((x / design_width) * 100),
+        "y": clamp_percent((y / design_height) * 100),
+    }
 
 
 def _design_asset_payload(asset: DesignerAsset) -> dict[str, object]:
@@ -1611,21 +2293,343 @@ def _design_asset_payload(asset: DesignerAsset) -> dict[str, object]:
     }
 
 
+def _design_open_payload(project: DesignerProject, owner_id: int | None, guest_key: str) -> dict[str, object]:
+    return {
+        "project": _design_project_payload(project, owner_id=owner_id, guest_key=guest_key),
+        "designer_url": f"{reverse('studio:designer')}?{urlencode({'project': project.id})}",
+    }
+
+
+def _video_open_payload(project: VideoEditorProject, owner_id: int | None, guest_key: str) -> dict[str, object]:
+    return {
+        "project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key),
+        "video_editor_url": f"{reverse('studio:video_editor')}?{urlencode({'project': project.id})}",
+    }
+
+
+def _job_record_for_workspace(job_id: str, owner_id: int | None, guest_key: str):
+    queryset = JobRecord.objects.filter(job_id=job_id)
+    if owner_id is not None:
+        queryset = queryset.filter(owner_id=owner_id)
+    else:
+        queryset = queryset.filter(owner__isnull=True, guest_key=guest_key)
+    return queryset.first()
+
+
+def _job_record_params(record: JobRecord) -> dict[str, object]:
+    try:
+        data = json.loads(record.params_json or "{}")
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _refresh_job_output_summary(record: JobRecord) -> None:
+    outputs = list(record.outputs.all())
+    record.output_count = len(outputs)
+    record.total_output_size = sum(int(output.size or 0) for output in outputs)
+    record.primary_output_type = str(outputs[0].media_type or "").split("/", 1)[0][:32] if outputs else ""
+    record.save(update_fields=["output_count", "total_output_size", "primary_output_type", "updated_at"])
+
+
+def _create_design_project_from_output(request: HttpRequest, record: JobRecord, output, job: dict) -> DesignerProject:
+    owner_id, guest_key = _workspace_identity(request)
+    output_path = Path(output.path)
+    metadata = _cover_design_metadata(output_path)
+    title = _clean_project_title(f"Cover design: {Path(output_path).stem}")
+    project = DesignerProject.objects.create(
+        owner=request.user if request.user.is_authenticated else None,
+        guest_key="" if owner_id else guest_key,
+        title=title,
+        state_json={},
+    )
+    media_dir = _design_project_media_dir(project)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    background_source = Path(str(metadata.get("background_path") or "")) if metadata else output_path
+    if not background_source.exists() or not background_source.is_file():
+        background_source = output_path
+    asset = _copy_output_to_design_asset(project, background_source, output_path.name)
+    state = _cover_design_state(project, asset, output_path, metadata, record, job)
+    project.state_json = state
+    _update_design_project_metadata(project)
+    project.storage_bytes = _design_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "object_count", "updated_at"])
+    return project
+
+
+def _copy_output_to_design_asset(project: DesignerProject, source: Path, original_name: str) -> DesignerAsset:
+    suffix = source.suffix.lower()[:12] or ".png"
+    target = _design_project_media_dir(project) / f"{uuid.uuid4().hex[:12]}_{clean_base_name(original_name, 'cover')}{suffix}"
+    shutil.copy2(source, target)
+    media_type = mimetypes.guess_type(target.name)[0] or "image/png"
+    return DesignerAsset.objects.create(project=project, kind="image", file_path=str(target), media_type=media_type, size=target.stat().st_size, original_name=original_name[:240])
+
+
+def _create_video_project_from_output(request: HttpRequest, record: JobRecord, output, job: dict) -> VideoEditorProject:
+    owner_id, guest_key = _workspace_identity(request)
+    output_path = Path(output.path)
+    title = _clean_project_title(f"Edit: {Path(output_path).stem}")
+    project = VideoEditorProject.objects.create(
+        owner=request.user if request.user.is_authenticated else None,
+        guest_key="" if owner_id else guest_key,
+        title=title,
+        state_json={},
+    )
+    asset = _copy_output_to_video_asset(project, output_path, output_path.name)
+    duration = asset.duration or _safe_video_duration(Path(asset.file_path))
+    if duration and not asset.duration:
+        asset.duration = duration
+        asset.save(update_fields=["duration"])
+    project.state_json = _video_editor_state_from_asset(project, asset, title, duration, record, job)
+    _update_video_project_metadata(project)
+    project.storage_bytes = _video_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
+    return project
+
+
+def _copy_output_to_video_asset(project: VideoEditorProject, source: Path, original_name: str) -> VideoEditorAsset:
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(original_name or "Video output")
+    target_dir = _video_project_media_dir(project)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    suffix = source.suffix.lower()[:16] or ".mp4"
+    target = target_dir / f"{uuid.uuid4().hex[:12]}_{clean_base_name(original_name, 'short')}{suffix}"
+    shutil.copy2(source, target)
+    media_type = mimetypes.guess_type(target.name)[0] or "video/mp4"
+    return VideoEditorAsset.objects.create(
+        project=project,
+        kind="video",
+        file_path=str(target),
+        media_type=media_type,
+        size=target.stat().st_size,
+        original_name=original_name[:240],
+        duration=_safe_video_duration(target),
+    )
+
+
+def _video_editor_state_from_asset(project: VideoEditorProject, asset: VideoEditorAsset, title: str, duration: float, record: JobRecord, job: dict) -> dict[str, object]:
+    safe_duration = max(0.25, float(duration or asset.duration or 12))
+    return {
+        "title": title,
+        "clipName": asset.original_name or title,
+        "aspect": "9 / 16",
+        "background": "#020617",
+        "backgroundMode": "solid",
+        "backgroundValue": "#020617",
+        "tracks": [
+            {"id": "video-main", "type": "video", "name": "Video", "order": 0},
+            {"id": "text-1", "type": "text", "name": "Text", "order": 1},
+            {"id": "image-1", "type": "image", "name": "Image", "order": 2},
+            {"id": "audio-1", "type": "audio", "name": "Audio", "order": 3},
+        ],
+        "clips": [
+            {
+                "id": f"video-output-{asset.id}",
+                "type": "video",
+                "trackId": "video-main",
+                "assetId": asset.id,
+                "start": 0,
+                "duration": safe_duration,
+                "sourceStart": 0,
+                "sourceEnd": safe_duration,
+                "x": 50,
+                "y": 50,
+                "scale": 100,
+                "style": {"fit": "cover", "speed": 1, "opacity": 100, "transition": "none", "fadeIn": 0, "fadeOut": 0},
+                "text": "",
+            }
+        ],
+        "sourceJob": {"id": record.job_id, "kind": record.kind, "title": job.get("title") or record.title},
+    }
+
+
+def _prefetched_assets(project) -> list:
+    if not project:
+        return []
+    cache = getattr(project, "_prefetched_objects_cache", {}) or {}
+    if "assets" in cache:
+        return list(cache["assets"])
+    return list(project.assets.all())
+
+
+def _state_list(state: dict[str, object], key: str) -> list:
+    value = state.get(key) if isinstance(state, dict) else []
+    return value if isinstance(value, list) else []
+
+
+def _timeline_duration_seconds(state: dict[str, object], fallback: float = 0) -> float:
+    clips = _state_list(state, "clips")
+    duration = max(
+        (
+            float(clip.get("start") or 0) + float(clip.get("duration") or 0)
+            for clip in clips
+            if isinstance(clip, dict)
+        ),
+        default=float(fallback or 0),
+    )
+    return max(0.0, duration)
+
+
+def _update_video_project_metadata(project: VideoEditorProject, *, assets: list[VideoEditorAsset] | None = None) -> None:
+    state = project.state_json or {}
+    current_assets = assets if assets is not None else _prefetched_assets(project)
+    project.asset_count = len(current_assets)
+    project.clip_count = len(_state_list(state, "clips"))
+    project.duration_seconds = _timeline_duration_seconds(state)
+    first_thumb = next((asset.thumbnail_path for asset in current_assets if getattr(asset, "thumbnail_path", "")), "")
+    project.thumbnail_path = first_thumb or (str(state.get("thumbnail") or "") if isinstance(state, dict) else "")
+
+
+def _update_design_project_metadata(project: DesignerProject, *, assets: list[DesignerAsset] | None = None) -> None:
+    state = project.state_json or {}
+    project.asset_count = len(assets) if assets is not None else project.assets.count()
+    project.object_count = len(_state_list(state, "objects"))
+
+
+def _update_music_project_metadata(project: MusicEditorProject, *, assets: list[MusicEditorAsset] | None = None) -> None:
+    state = project.state_json or {}
+    current_assets = assets if assets is not None else _prefetched_assets(project)
+    project.asset_count = len(current_assets)
+    project.clip_count = len(_state_list(state, "clips"))
+    project.duration_seconds = _timeline_duration_seconds(state, sum(float(getattr(asset, "duration", 0) or 0) for asset in current_assets))
+
+
+def _safe_video_duration(path: Path) -> float:
+    try:
+        return float(inspect_video(path).duration_seconds or 0)
+    except Exception:
+        return 0.0
+
+
+def _cover_design_metadata(output_path: Path) -> dict[str, object]:
+    meta_path = output_path.with_suffix(".design.json")
+    if not meta_path.exists():
+        return {}
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _cover_design_state(project: DesignerProject, asset: DesignerAsset, output_path: Path, metadata: dict[str, object], record: JobRecord, job: dict) -> dict[str, object]:
+    copy = metadata.get("copy") if isinstance(metadata.get("copy"), dict) else {}
+    palette = metadata.get("palette") if isinstance(metadata.get("palette"), dict) else {}
+    layout = metadata.get("layout") if isinstance(metadata.get("layout"), dict) else {}
+    style = metadata.get("style") if isinstance(metadata.get("style"), dict) else {}
+    focus = metadata.get("focus_point") if isinstance(metadata.get("focus_point"), dict) else {}
+    headline = str(copy.get("headline") or record.title or job.get("title") or output_path.stem)
+    description = str(copy.get("description") or "")
+    eyebrow = str(copy.get("eyebrow") or "COVER")
+    accent = str(palette.get("accent") or "#facc15")
+    accent2 = str(palette.get("accent2") or "#38bdf8")
+    dark = str(palette.get("dark") or "#05070c")
+    paper = str(palette.get("paper") or "#ffffff")
+    panel_x = int(float(layout.get("panel_x") or 58))
+    headline_y = int(float(layout.get("headline_y") or 135))
+    max_text_width = int(float(layout.get("max_text_width") or 650))
+    badge_x = int(float(layout.get("badge_x") or panel_x))
+    badge_y = int(float(layout.get("badge_y") or 48))
+    hook_x = int(float(layout.get("hook_x") or panel_x))
+    hook_y = int(float(layout.get("hook_y") or 624))
+    hook_text = str(style.get("badge") or "WATCH TO THE END")
+    layout_name = str(style.get("layout") or "split")
+    mood = str(style.get("mood") or "premium")
+    text_left = bool(style.get("text_left", panel_x < 300))
+    objects = [
+        {"id": "frame-cover", "type": "frame", "name": "Cover 1280x720", "x": 0, "y": 0, "w": 1280, "h": 720, "fill": dark, "stroke": accent, "strokeWidth": 2, "cornerRadius": 0, "clipContent": True},
+        {"id": "cover-bg", "type": "image", "name": "Background", "x": 0, "y": 0, "w": 1280, "h": 720, "parentId": "frame-cover", "assetId": asset.id, "src": reverse("studio:design_project_asset_preview", args=[project.id, asset.id]), "naturalW": 1280, "naturalH": 720, "imageFit": "fill", "imageCrop": {"x": 0, "y": 0, "scale": 1}},
+        {"id": "cover-fade", "type": "shape", "shape": "rect", "name": "Contrast overlay", "x": max(0, panel_x - 42), "y": 34, "w": min(720, max_text_width + 74), "h": 632, "parentId": "frame-cover", "fill": "#000000", "stroke": "transparent", "strokeWidth": 0, "cornerRadius": 18, "opacity": 0.46},
+        {"id": "cover-diagonal-accent", "type": "shape", "shape": "rect", "name": f"{layout_name} accent", "x": 728 if text_left else 188, "y": -58, "w": 22, "h": 850, "parentId": "frame-cover", "fill": accent2, "stroke": "transparent", "strokeWidth": 0, "cornerRadius": 12, "opacity": 0.36, "rotation": -10 if text_left else 10},
+        {"id": "cover-eyebrow-bg", "type": "shape", "shape": "rect", "name": "Eyebrow badge", "x": badge_x, "y": badge_y, "w": min(max_text_width, max(210, len(eyebrow) * 22 + 42)), "h": 50, "parentId": "frame-cover", "fill": accent, "stroke": "transparent", "strokeWidth": 0, "cornerRadius": 8},
+        {"id": "cover-eyebrow", "type": "text", "name": "Eyebrow", "text": eyebrow, "x": badge_x + 20, "y": badge_y + 9, "w": max(180, min(max_text_width - 24, len(eyebrow) * 24)), "h": 40, "parentId": "frame-cover", "fill": "transparent", "stroke": dark, "fontSize": 28, "fontWeight": 900, "fontFamily": "Arial, sans-serif", "lineHeight": 1.05},
+        {"id": "cover-headline-panel", "type": "shape", "shape": "rect", "name": "Headline backing", "x": max(0, panel_x - 22), "y": max(0, headline_y - 16), "w": max_text_width + 48, "h": 286, "parentId": "frame-cover", "fill": "#000000", "stroke": accent, "strokeWidth": 1, "cornerRadius": 14, "opacity": 0.38},
+        {"id": "cover-headline", "type": "text", "name": "Headline", "text": headline, "x": panel_x, "y": headline_y, "w": max_text_width, "h": 286, "parentId": "frame-cover", "fill": "transparent", "stroke": paper, "fontSize": 82, "fontWeight": 950, "fontFamily": "Arial, sans-serif", "lineHeight": 1.02, "textStroke": "#000000", "textStrokeWidth": 2},
+        {"id": "cover-accent-line", "type": "shape", "shape": "rect", "name": "Accent line", "x": panel_x, "y": headline_y + 327, "w": max_text_width, "h": 8, "parentId": "frame-cover", "fill": accent2, "stroke": "transparent", "strokeWidth": 0, "cornerRadius": 4},
+        {"id": "cover-description", "type": "text", "name": "Description", "text": description or "Edit subtitle text", "x": panel_x, "y": headline_y + 353, "w": max_text_width, "h": 110, "parentId": "frame-cover", "fill": "transparent", "stroke": "#e2e8f0", "fontSize": 30, "fontWeight": 800, "fontFamily": "Arial, sans-serif", "lineHeight": 1.12},
+        {"id": "cover-hook-bg", "type": "shape", "shape": "rect", "name": "Hook badge", "x": hook_x, "y": hook_y, "w": min(560, max(260, len(hook_text) * 19 + 64)), "h": 56, "parentId": "frame-cover", "fill": "#000000", "stroke": accent, "strokeWidth": 2, "cornerRadius": 8, "opacity": 0.88},
+        {"id": "cover-hook-strip", "type": "shape", "shape": "rect", "name": "Hook strip", "x": hook_x, "y": hook_y, "w": 12, "h": 56, "parentId": "frame-cover", "fill": accent2, "stroke": "transparent", "strokeWidth": 0, "cornerRadius": 4},
+        {"id": "cover-hook", "type": "text", "name": "Hook", "text": hook_text, "x": hook_x + 28, "y": hook_y + 12, "w": min(500, max(220, len(hook_text) * 18)), "h": 40, "parentId": "frame-cover", "fill": "transparent", "stroke": paper, "fontSize": 30, "fontWeight": 900, "fontFamily": "Arial, sans-serif", "lineHeight": 1.05},
+        {"id": "cover-mood-chip", "type": "text", "name": "Mood", "text": f"{mood.upper()} / {layout_name.upper()}", "x": 1016, "y": 48, "w": 210, "h": 34, "parentId": "frame-cover", "fill": "transparent", "stroke": accent2, "fontSize": 22, "fontWeight": 900, "fontFamily": "Arial, sans-serif", "lineHeight": 1.05},
+    ]
+    if focus:
+        fx = int(float(focus.get("x") or 0))
+        fy = int(float(focus.get("y") or 0))
+        if 0 < fx < 1280 and 0 < fy < 720:
+            objects.append({"id": "cover-focus-ring", "type": "shape", "shape": "ellipse", "name": "Focus marker", "x": max(0, fx - 84), "y": max(0, fy - 84), "w": 168, "h": 168, "parentId": "frame-cover", "fill": "transparent", "stroke": accent2, "strokeWidth": 5, "cornerRadius": 0, "opacity": 0.52})
+    return {
+        "version": 2,
+        "title": f"Cover design: {output_path.stem}",
+        "zoom": 1,
+        "didFit": False,
+        "vectors": [],
+        "objects": objects,
+    }
+
+
+def _music_asset_payload(asset: MusicEditorAsset) -> dict[str, object]:
+    return {
+        "id": asset.id,
+        "kind": asset.kind,
+        "name": asset.original_name,
+        "media_type": asset.media_type,
+        "size": asset.size,
+        "size_text": human_size(asset.size),
+        "duration": asset.duration,
+        "preview_url": reverse("studio:music_project_asset_preview", args=[asset.project_id, asset.id]),
+    }
+
+
+def _music_project_payload(project: MusicEditorProject | None, include_state: bool = True, owner_id: int | None = None, guest_key: str = "") -> dict[str, object]:
+    if not project:
+        return {}
+    state = project.state_json or {}
+    assets = _prefetched_assets(project)
+    access_role = _resource_access_role(WorkspaceShare.RESOURCE_MUSIC, project, owner_id, guest_key) if owner_id is not None or guest_key else "owner"
+    is_owner = access_role == "owner"
+    total_duration = float(getattr(project, "duration_seconds", 0) or 0) or sum(asset.duration for asset in assets if asset.duration)
+    payload: dict[str, object] = {
+        "id": project.id,
+        "title": project.title,
+        "track_count": int(getattr(project, "asset_count", 0) or len(assets)),
+        "clip_count": int(getattr(project, "clip_count", 0) or len(_state_list(state, "clips"))),
+        "total_duration": total_duration,
+        "duration_text": f"{int(total_duration // 60)}:{int(total_duration % 60):02d}",
+        "storage_bytes": project.storage_bytes,
+        "storage_text": human_size(project.storage_bytes),
+        "created_at": project.created_at.isoformat(),
+        "updated_at": project.updated_at.isoformat(),
+        "assets": [_music_asset_payload(asset) for asset in assets],
+        "access_role": access_role,
+        "is_owner": is_owner,
+        "can_edit": is_owner or access_role == WorkspaceShare.ROLE_EDITOR,
+        "can_share": is_owner and owner_id is not None,
+    }
+    if include_state:
+        payload["state"] = project.state_json or {}
+    return payload
+
+
 def _video_project_payload(project: VideoEditorProject, include_state: bool = True, owner_id: int | None = None, guest_key: str = "") -> dict[str, object]:
     state = project.state_json or {}
-    layers = state.get("layers") if isinstance(state.get("layers"), list) else []
-    assets = list(project.assets.all()) if project else []
+    layers = _state_list(state, "layers") if include_state else []
+    assets = _prefetched_assets(project)
     first_thumb = next((asset for asset in assets if asset.thumbnail_path), None)
+    clip_count = int(getattr(project, "clip_count", 0) or 0)
+    if include_state or not clip_count:
+        clip_count = len(_state_list(state, "clips") or layers)
     access_role = _resource_access_role(WorkspaceShare.RESOURCE_VIDEO, project, owner_id, guest_key) if owner_id is not None or guest_key else "owner"
     is_owner = access_role == "owner"
     payload: dict[str, object] = {
         "id": project.id,
         "title": project.title,
-        "thumbnail": reverse("studio:video_project_asset_thumbnail", args=[project.id, first_thumb.id]) if first_thumb else (state.get("thumbnail", "") if isinstance(state, dict) else ""),
+        "thumbnail": reverse("studio:video_project_asset_thumbnail", args=[project.id, first_thumb.id]) if first_thumb else (getattr(project, "thumbnail_path", "") or (state.get("thumbnail", "") if isinstance(state, dict) else "")),
         "aspect": state.get("aspect", "9 / 16") if isinstance(state, dict) else "9 / 16",
         "clip_name": state.get("clipName", "") if isinstance(state, dict) else "",
-        "layer_count": len(state.get("clips", []) if isinstance(state.get("clips"), list) else layers),
-        "track_count": len(state.get("tracks", []) if isinstance(state.get("tracks"), list) else []),
+        "layer_count": clip_count,
+        "track_count": len(_state_list(state, "tracks")) if include_state else int(getattr(project, "asset_count", 0) or len(assets)),
+        "asset_count": int(getattr(project, "asset_count", 0) or len(assets)),
+        "duration_seconds": float(getattr(project, "duration_seconds", 0) or _timeline_duration_seconds(state)),
         "storage_bytes": project.storage_bytes,
         "storage_text": human_size(project.storage_bytes),
         "created_at": project.created_at.isoformat(),
@@ -1746,8 +2750,10 @@ def _run_video_project_export(job_id: str, project_id: int, quality: str, output
             _render_empty_video_project(output, width, height, duration)
         if JobRecord.objects.filter(job_id=job_id, status="cancelled").exists():
             return
+        _update_video_project_metadata(project, assets=list(project.assets.all()))
         project.storage_bytes = _video_project_storage_bytes(project)
-        project.save(update_fields=["storage_bytes", "updated_at"])
+        project.last_export_status = "completed"
+        project.save(update_fields=["storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "last_export_status", "updated_at"])
         record = JobRecord.objects.filter(job_id=job_id).first()
         if record and output.exists():
             JobOutputRecord.objects.get_or_create(
@@ -1756,6 +2762,7 @@ def _run_video_project_export(job_id: str, project_id: int, quality: str, output
                 label="MP4 export",
                 defaults={"media_type": "video/mp4", "size": output.stat().st_size},
             )
+            _refresh_job_output_summary(record)
         _set_video_export_job(job_id, status="done", progress=100, message="Ready")
     except Exception as exc:
         _set_video_export_job(job_id, status="failed", progress=100, message="Export failed", error=str(exc))
@@ -1999,6 +3006,187 @@ def _ffmpeg_drawtext_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("\n", " ")[:500]
 
 
+def _decode_subtitle_bytes(raw: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-16", "cp1251", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _parse_subtitle_cues(text: str, filename: str = "") -> list[dict[str, object]]:
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not source:
+        return []
+    if filename.lower().endswith(".ass") or "[events]" in source.lower():
+        cues = _parse_ass_subtitles(source)
+    elif filename.lower().endswith(".json") or source[:1] in {"[", "{"}:
+        cues = _parse_json_subtitles(source)
+    else:
+        cues = _parse_srt_vtt_subtitles(source)
+    return _normalize_subtitle_cues(cues)
+
+
+def _parse_json_subtitles(text: str) -> list[dict[str, object]]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    raw_cues = data.get("cues") if isinstance(data, dict) else data
+    if not isinstance(raw_cues, list):
+        return []
+    cues: list[dict[str, object]] = []
+    for item in raw_cues:
+        if not isinstance(item, dict):
+            continue
+        cues.append({"start": item.get("start"), "end": item.get("end"), "text": item.get("text")})
+    return cues
+
+
+def _parse_ass_subtitles(text: str) -> list[dict[str, object]]:
+    cues: list[dict[str, object]] = []
+    for line in text.splitlines():
+        if not line.lower().startswith("dialogue:"):
+            continue
+        payload = line.split(":", 1)[1].strip()
+        parts = payload.split(",", 9)
+        if len(parts) < 10:
+            continue
+        cues.append({"start": parts[1], "end": parts[2], "text": parts[9].replace("\\N", "\n").strip()})
+    return cues
+
+
+def _parse_srt_vtt_subtitles(text: str) -> list[dict[str, object]]:
+    cleaned = re.sub(r"^\ufeff?WEBVTT[^\n]*\n+", "", text.strip(), flags=re.IGNORECASE)
+    blocks = re.split(r"\n{2,}", cleaned)
+    cues: list[dict[str, object]] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines or lines[0].upper().startswith(("NOTE", "STYLE", "REGION")):
+            continue
+        time_index = next((index for index, line in enumerate(lines) if "-->" in line), -1)
+        if time_index < 0:
+            continue
+        start_raw, end_raw = lines[time_index].split("-->", 1)
+        end_raw = end_raw.strip().split()[0]
+        caption_text = "\n".join(lines[time_index + 1 :]).strip()
+        cues.append({"start": start_raw.strip().split()[0], "end": end_raw, "text": _clean_subtitle_text(caption_text)})
+    return cues
+
+
+def _normalize_subtitle_cues(raw_cues: list[dict[str, object]]) -> list[dict[str, object]]:
+    cues: list[dict[str, object]] = []
+    for item in raw_cues:
+        start = _subtitle_seconds(item.get("start"))
+        end = _subtitle_seconds(item.get("end"))
+        text = _clean_subtitle_text(str(item.get("text") or ""))
+        if end <= start:
+            end = start + 2.0
+        if text:
+            cues.append({"start": round(start, 3), "end": round(end, 3), "text": text[:800]})
+    cues.sort(key=lambda cue: (float(cue["start"]), float(cue["end"])))
+    return cues[:5000]
+
+
+def _video_project_caption_cues(state: dict[str, object]) -> list[dict[str, object]]:
+    raw_clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    cues: list[dict[str, object]] = []
+    for clip in raw_clips:
+        if not isinstance(clip, dict) or clip.get("type") not in {"caption", "text"}:
+            continue
+        start = max(0.0, float(clip.get("start") or 0))
+        duration = max(0.1, float(clip.get("duration") or 0))
+        text = _clean_subtitle_text(str(clip.get("text") or ""))
+        if text:
+            cues.append({"start": round(start, 3), "end": round(start + duration, 3), "text": text[:800]})
+    return _normalize_subtitle_cues(cues)
+
+
+def _subtitle_seconds(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    raw = raw.replace(",", ".")
+    match = re.search(r"(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)", raw)
+    if match:
+        hours = float(match.group(1) or 0)
+        minutes = float(match.group(2) or 0)
+        seconds = float(match.group(3) or 0)
+        return max(0.0, hours * 3600 + minutes * 60 + seconds)
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def _clean_subtitle_text(value: str) -> str:
+    text = re.sub(r"<[^>]+>", "", str(value or ""))
+    text = re.sub(r"\{\\[^}]+\}", "", text)
+    return "\n".join(line.strip() for line in text.splitlines() if line.strip()).strip()
+
+
+def _render_srt(cues: list[dict[str, object]]) -> str:
+    blocks = []
+    for index, cue in enumerate(cues, start=1):
+        blocks.append(f"{index}\n{_format_srt_time(float(cue['start']))} --> {_format_srt_time(float(cue['end']))}\n{cue['text']}")
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def _render_vtt(cues: list[dict[str, object]]) -> str:
+    blocks = ["WEBVTT"]
+    for cue in cues:
+        blocks.append(f"{_format_vtt_time(float(cue['start']))} --> {_format_vtt_time(float(cue['end']))}\n{cue['text']}")
+    return "\n\n".join(blocks) + "\n"
+
+
+def _render_ass(cues: list[dict[str, object]], state: dict[str, object]) -> str:
+    width, height = _video_export_size(state if isinstance(state, dict) else {}, "1080p")
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {width}",
+        f"PlayResY: {height}",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        "Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,1,2,1,2,48,48,72,1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for cue in cues:
+        text = str(cue["text"]).replace("\n", "\\N").replace("{", "(").replace("}", ")")
+        lines.append(f"Dialogue: 0,{_format_ass_time(float(cue['start']))},{_format_ass_time(float(cue['end']))},Default,,0,0,0,,{text}")
+    return "\n".join(lines) + "\n"
+
+
+def _format_srt_time(seconds: float) -> str:
+    hours, minutes, whole, millis = _split_subtitle_time(seconds)
+    return f"{hours:02}:{minutes:02}:{whole:02},{millis:03}"
+
+
+def _format_vtt_time(seconds: float) -> str:
+    hours, minutes, whole, millis = _split_subtitle_time(seconds)
+    return f"{hours:02}:{minutes:02}:{whole:02}.{millis:03}"
+
+
+def _format_ass_time(seconds: float) -> str:
+    hours, minutes, whole, millis = _split_subtitle_time(seconds)
+    centis = min(99, int(round(millis / 10)))
+    return f"{hours}:{minutes:02}:{whole:02}.{centis:02}"
+
+
+def _split_subtitle_time(seconds: float) -> tuple[int, int, int, int]:
+    total_millis = max(0, int(round(float(seconds) * 1000)))
+    hours, remainder = divmod(total_millis, 3600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    whole, millis = divmod(remainder, 1000)
+    return hours, minutes, whole, millis
+
+
 def _json_body(request: HttpRequest) -> dict[str, object]:
     if not request.body:
         return {}
@@ -2007,6 +3195,10 @@ def _json_body(request: HttpRequest) -> dict[str, object]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _post_bool(request: HttpRequest, name: str) -> bool:
+    return str(request.POST.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _json_size(value: object) -> int:
@@ -2096,6 +3288,10 @@ def _design_project_storage_bytes(project: DesignerProject) -> int:
     return _json_size(project.state_json or {}) + _path_size(project.preview_path) + sum(asset.size for asset in project.assets.all())
 
 
+def _music_project_storage_bytes(project: MusicEditorProject) -> int:
+    return _json_size(project.state_json or {}) + sum(asset.size for asset in project.assets.all())
+
+
 def _owned_job_records(owner_id: int | None, guest_key: str = ""):
     queryset = JobRecord.objects.all()
     if owner_id is not None:
@@ -2166,6 +3362,29 @@ def _path_size(path_text: str) -> int:
     return path.stat().st_size if path.exists() and path.is_file() else 0
 
 
+def _get_audio_duration(path: Path) -> float:
+    """Get audio duration in seconds using ffprobe."""
+    try:
+        result = subprocess.run(
+            [
+                str(ffmpeg_path("ffprobe")),
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return float(result.stdout.strip()) if result.stdout.strip() else 0.0
+    except Exception:
+        return 0.0
+
+
 def _video_project_media_dir(project: VideoEditorProject) -> Path:
     owner = f"user_{project.owner_id}" if project.owner_id else f"guest_{project.guest_key or 'anon'}"
     return settings.storage_dir / "django_video_projects" / owner / str(project.id)
@@ -2174,6 +3393,11 @@ def _video_project_media_dir(project: VideoEditorProject) -> Path:
 def _design_project_media_dir(project: DesignerProject) -> Path:
     owner = f"user_{project.owner_id}" if project.owner_id else f"guest_{project.guest_key or 'anon'}"
     return settings.storage_dir / "django_design_projects" / owner / str(project.id)
+
+
+def _music_project_media_dir(project: MusicEditorProject) -> Path:
+    owner = f"user_{project.owner_id}" if project.owner_id else f"guest_{project.guest_key or 'anon'}"
+    return settings.storage_dir / "django_music_projects" / owner / str(project.id)
 
 
 def _save_design_project_preview(data_url: str, target_dir: Path) -> Path:
@@ -2234,6 +3458,22 @@ def _delete_design_project_media(project: DesignerProject) -> None:
         except Exception:
             pass
     directory = _design_project_media_dir(project)
+    try:
+        if directory.resolve().is_relative_to(settings.storage_dir.resolve()) and directory.exists():
+            shutil.rmtree(directory)
+    except Exception:
+        pass
+
+
+def _delete_music_project_media(project: MusicEditorProject) -> None:
+    for asset in project.assets.all():
+        path = Path(asset.file_path)
+        try:
+            if path.resolve().is_relative_to(settings.storage_dir.resolve()) and path.exists() and path.is_file():
+                path.unlink()
+        except Exception:
+            pass
+    directory = _music_project_media_dir(project)
     try:
         if directory.resolve().is_relative_to(settings.storage_dir.resolve()) and directory.exists():
             shutil.rmtree(directory)
@@ -2456,14 +3696,29 @@ def _localized_youtube_modes(language: str) -> list[tuple[str, str]]:
     return [(value, labels.get(value, {}).get(language, labels.get(value, {}).get("en", label))) for value, label in actions.YOUTUBE_MODE_CHOICES]
 
 
-def _localized_subtitle_languages(language: str) -> list[tuple[str, str]]:
+def _localized_subtitle_languages(language: str) -> list[dict[str, str]]:
     labels = {
         "auto": {"en": "Auto", "ru": "Авто", "uk": "Авто", "fr": "Auto", "de": "Auto", "es": "Auto", "ka": "ავტო", "hy": "Ավտո", "it": "Auto"},
-        "ru": {"en": "Russian", "ru": "Русский", "uk": "Російська", "fr": "Russe", "de": "Russisch", "es": "Ruso", "ka": "რუსული", "hy": "Ռուսերեն", "it": "Russo"},
-        "uk": {"en": "Ukrainian", "ru": "Украинский", "uk": "Українська", "fr": "Ukrainien", "de": "Ukrainisch", "es": "Ucraniano", "ka": "უკრაინული", "hy": "Ուկրաիներեն", "it": "Ucraino"},
-        "en": {"en": "English", "ru": "Английский", "uk": "Англійська", "fr": "Anglais", "de": "Englisch", "es": "Inglés", "ka": "ინგლისური", "hy": "Անգլերեն", "it": "Inglese"},
     }
-    return [(value, labels.get(value, {}).get(language, labels.get(value, {}).get("en", label))) for value, label in actions.SUBTITLE_LANGUAGE_CHOICES]
+    available = {value for value, _label in actions.SUBTITLE_LANGUAGE_CHOICES}
+    options = [
+        {
+            "code": "auto",
+            "label": labels["auto"].get(language, labels["auto"]["en"]),
+            "flag": "",
+        }
+    ]
+    language_lookup = {item["code"]: item for item in LANGUAGE_OPTIONS}
+    options.extend(
+        {
+            "code": value,
+            "label": language_lookup.get(value, {}).get("native") or label,
+            "flag": language_lookup.get(value, {}).get("flag", ""),
+        }
+        for value, label in actions.SUBTITLE_LANGUAGE_CHOICES
+        if value != "auto" and value in available
+    )
+    return options
 
 
 def _localized_resume_templates(language: str) -> list[tuple[str, str]]:
@@ -2657,21 +3912,123 @@ def _error_json(exc: Exception, status: int = 400) -> JsonResponse:
     return JsonResponse({"error": str(exc) or exc.__class__.__name__}, status=status)
 
 
-def _attach_output_urls(job: dict) -> dict:
+def _attach_output_urls_many(jobs: list[dict]) -> list[dict]:
+    cache = _job_url_cache([str(job.get("id") or "") for job in jobs])
+    return [_attach_output_urls(job, cache) for job in jobs]
+
+
+def _attach_output_urls(job: dict, url_cache: dict[str, dict[str, object]] | None = None) -> dict:
     prepared = dict(job)
     prepared["detail_url"] = reverse("studio:job_detail", args=[job["id"]])
     prepared["download_all_url"] = reverse("studio:download_all_outputs", args=[job["id"]])
     prepared["delete_url"] = reverse("studio:delete_job", args=[job["id"]])
     prepared["repeat_url"] = reverse("studio:repeat_job", args=[job["id"]])
     outputs = []
+    job_id = str(job.get("id") or "")
+    cached = (url_cache or {}).get(job_id, {})
+    design_map = cached.get("design_projects") if isinstance(cached.get("design_projects"), dict) else _job_design_map(job_id)
+    video_map = cached.get("video_projects") if isinstance(cached.get("video_projects"), dict) else _job_video_map(job_id)
+    path_keys = cached.get("path_keys") if isinstance(cached.get("path_keys"), dict) else {}
     for output in job.get("outputs", []):
         item = dict(output)
         item["url"] = reverse("studio:download_output", args=[job["id"], item["index"]])
         item["preview_url"] = reverse("studio:preview_output", args=[job["id"], item["index"]])
         item["preview_kind"] = _preview_kind(item)
+        item["can_edit_design"] = _output_can_edit_design(item, job)
+        if item["can_edit_design"]:
+            item["edit_design_url"] = reverse("studio:edit_output_design", args=[job["id"], item["index"]])
+            output_key = str(path_keys.get(int(item.get("index") or 0)) or "") or _job_output_path_key(job_id, int(item.get("index") or 0))
+            design_project_id = design_map.get(output_key) if output_key else None
+            item["design_project_url"] = f"{reverse('studio:designer')}?{urlencode({'project': design_project_id})}" if design_project_id else ""
+        item["can_edit_video"] = _output_can_edit_video(item, job)
+        if item["can_edit_video"]:
+            item["edit_video_url"] = reverse("studio:edit_output_video", args=[job["id"], item["index"]])
+            output_key = str(path_keys.get(int(item.get("index") or 0)) or "") or _job_output_path_key(job_id, int(item.get("index") or 0))
+            video_project_id = video_map.get(output_key) if output_key else None
+            item["video_project_url"] = f"{reverse('studio:video_editor')}?{urlencode({'project': video_project_id})}" if video_project_id else ""
         outputs.append(item)
     prepared["outputs"] = outputs
     return prepared
+
+
+def _job_url_cache(job_ids: list[str]) -> dict[str, dict[str, object]]:
+    clean_ids = [job_id for job_id in dict.fromkeys(job_ids) if job_id]
+    if not clean_ids:
+        return {}
+    records = JobRecord.objects.filter(job_id__in=clean_ids).only("job_id", "params_json").prefetch_related("outputs")
+    cache: dict[str, dict[str, object]] = {}
+    for record in records:
+        params = _job_record_params(record)
+        cache[record.job_id] = {
+            "design_projects": _job_project_map_from_params(params, "design_projects"),
+            "video_projects": _job_project_map_from_params(params, "video_projects"),
+            "path_keys": {index: str(Path(output.path).resolve()) for index, output in enumerate(record.outputs.all())},
+        }
+    return cache
+
+
+def _job_design_map(job_id: str) -> dict[str, int]:
+    return _job_project_map(job_id, "design_projects")
+
+
+def _job_video_map(job_id: str) -> dict[str, int]:
+    return _job_project_map(job_id, "video_projects")
+
+
+def _job_project_map(job_id: str, key: str) -> dict[str, int]:
+    record = JobRecord.objects.filter(job_id=job_id).only("params_json").first()
+    if not record:
+        return {}
+    return _job_project_map_from_params(_job_record_params(record), key)
+
+
+def _job_project_map_from_params(params: dict[str, object], key: str) -> dict[str, int]:
+    raw = params.get(key)
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, int] = {}
+    for key, value in raw.items():
+        try:
+            result[str(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _job_output_path_key(job_id: str, index: int) -> str:
+    record = JobRecord.objects.filter(job_id=job_id).prefetch_related("outputs").first()
+    if not record:
+        return ""
+    outputs = list(record.outputs.all())
+    if index < 0 or index >= len(outputs):
+        return ""
+    return str(Path(outputs[index].path).resolve())
+
+
+def _output_can_edit_design(output: dict, job: dict | None = None) -> bool:
+    media_type = str(output.get("media_type") or "").lower()
+    name = str(output.get("name") or "").lower()
+    label = str(output.get("label") or "").lower()
+    job_kind = str((job or {}).get("kind") or "").lower()
+    if not (media_type.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        return False
+    if name.endswith(".zip"):
+        return False
+    cover_words = ("cover", "облож", "обл", "thumbnail", "png-cover")
+    return job_kind in {"cover", "youtube_cover"} or any(word in name or word in label for word in cover_words)
+
+
+def _output_can_edit_video(output: dict, job: dict | None = None) -> bool:
+    media_type = str(output.get("media_type") or "").lower()
+    name = str(output.get("name") or "").lower()
+    label = str(output.get("label") or "").lower()
+    job_kind = str((job or {}).get("kind") or "").lower()
+    if name.endswith(".zip"):
+        return False
+    is_video = media_type.startswith("video/") or name.endswith((".mp4", ".webm", ".mov", ".m4v", ".mkv"))
+    if not is_video:
+        return False
+    return job_kind in {"youtube", "download", "convert", "subtitles", "package", "video_export"} or any(word in label for word in ("short", "preview", "mp4", "video"))
 
 
 def _preview_kind(output: dict) -> str:

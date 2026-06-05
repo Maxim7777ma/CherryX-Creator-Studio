@@ -25,6 +25,9 @@ class Settings:
     max_image_mb: int
     max_video_mb: int
     video_timeout_seconds: int
+    video_export_workers: int
+    job_max_workers: int
+    account_concurrent_jobs: int
     session_ttl_minutes: int
     cleanup_interval_seconds: int
     youtube_max_duration_minutes: int
@@ -51,12 +54,16 @@ class Settings:
     free_daily_youtube_jobs: int
     free_daily_subtitle_jobs: int
     free_daily_package_jobs: int
+    openai_api_key: str
+    openai_enabled: bool
+    openai_text_model: str
+    openai_transcribe_model: str
+    openai_image_mode: str
+    openai_timeout_seconds: int
 
 
 def get_settings() -> Settings:
     token = os.getenv("BOT_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("BOT_TOKEN is missing in .env")
 
     return Settings(
         bot_token=token,
@@ -74,6 +81,9 @@ def get_settings() -> Settings:
         max_image_mb=parse_env_int("MAX_IMAGE_MB", 25, min_value=1),
         max_video_mb=parse_env_int("MAX_VIDEO_MB", 80, min_value=1),
         video_timeout_seconds=parse_env_int("VIDEO_TIMEOUT_SECONDS", 180, min_value=1),
+        video_export_workers=parse_env_int("VIDEO_EXPORT_WORKERS", max(2, (os.cpu_count() or 2) // 2), min_value=1),
+        job_max_workers=parse_env_int("JOB_MAX_WORKERS", max(32, (os.cpu_count() or 2) * 4), min_value=1),
+        account_concurrent_jobs=parse_env_int("ACCOUNT_CONCURRENT_JOBS", 10, min_value=1),
         session_ttl_minutes=parse_env_int("SESSION_TTL_MINUTES", 60, min_value=1),
         cleanup_interval_seconds=parse_env_int("CLEANUP_INTERVAL_SECONDS", 600, min_value=1),
         youtube_max_duration_minutes=parse_env_int("YOUTUBE_MAX_DURATION_MINUTES", 360, min_value=1),
@@ -100,6 +110,12 @@ def get_settings() -> Settings:
         free_daily_youtube_jobs=parse_env_int("FREE_DAILY_YOUTUBE_JOBS", 0, min_value=0),
         free_daily_subtitle_jobs=parse_env_int("FREE_DAILY_SUBTITLE_JOBS", 0, min_value=0),
         free_daily_package_jobs=parse_env_int("FREE_DAILY_PACKAGE_JOBS", 0, min_value=0),
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+        openai_enabled=os.getenv("OPENAI_ENABLED", "true").lower() in {"1", "true", "yes", "on"},
+        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-5-mini").strip() or "gpt-5-mini",
+        openai_transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe").strip() or "gpt-4o-mini-transcribe",
+        openai_image_mode=os.getenv("OPENAI_IMAGE_MODE", "responses").strip().lower() or "responses",
+        openai_timeout_seconds=parse_env_int("OPENAI_TIMEOUT_SECONDS", 90, min_value=1),
     )
 
 

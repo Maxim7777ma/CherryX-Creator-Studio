@@ -47,13 +47,24 @@
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
-            <a class="video-project-thumb design-project-thumb" href="{{ designer_url }}?project={{ project.id }}" style="{% if project.preview_url %}background-image: linear-gradient(180deg, rgba(2,6,23,.06), rgba(2,6,23,.62)), url('{{ project.preview_url }}');{% endif %}">
-              <span>{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} frames{% endif %}</span>
-              <b>{{ project.object_count }} layers · {{ project.storage_text }}</b>
+            <a class="video-project-thumb design-project-thumb{% if project.preview_url %} has-preview{% else %} is-empty-preview{% endif %}" href="{{ designer_url }}?project={{ project.id }}" style="--preview-x: {{ project.preview_focus.x|default:50 }}%; --preview-y: {{ project.preview_focus.y|default:50 }}%;">
+              <span class="design-project-preview-frame" aria-hidden="true">
+                {% if project.preview_url %}
+                  <span class="design-project-preview-image" style="background-image: url('{{ project.preview_url }}');"></span>
+                {% else %}
+                  <span class="design-project-preview-empty">
+                    <i></i>
+                    <i></i>
+                    <i></i>
+                  </span>
+                {% endif %}
+              </span>
+              <span class="design-project-thumb-badge">{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} frames{% endif %}</span>
+              <b>{{ project.object_count }} layers &middot; {{ project.storage_text }}</b>
             </a>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="Double-click to rename">{{ project.title }}</strong>
-              <span>{{ project.vector_count }} vectors · {{ project.storage_text }}</span>
+              <span>{{ project.vector_count }} vectors &middot; {{ project.storage_text }}</span>
             </div>
             <div class="video-project-actions">
               <a href="{{ designer_url }}?project={{ project.id }}">Open</a>

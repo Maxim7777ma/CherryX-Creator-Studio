@@ -15,11 +15,18 @@ class JobRecord(models.Model):
     message = models.TextField(blank=True)
     error = models.TextField(blank=True)
     params_json = models.TextField(blank=True)
+    output_count = models.PositiveIntegerField(default=0)
+    total_output_size = models.BigIntegerField(default=0)
+    primary_output_type = models.CharField(max_length=32, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["owner", "-created_at"], name="studio_jobr_owner_i_8ab6a1_idx"),
+            models.Index(fields=["guest_key", "-created_at"], name="studio_jobr_guest_k_739bdb_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.job_id} {self.status} {self.title}"
@@ -35,6 +42,9 @@ class JobOutputRecord(models.Model):
 
     class Meta:
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["job", "created_at"], name="studio_jobo_job_id_7f29d2_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.job.job_id}: {self.label}"
@@ -60,6 +70,11 @@ class VideoEditorProject(models.Model):
     title = models.CharField(max_length=180, default="Новый проект")
     state_json = models.JSONField(default=dict, blank=True)
     storage_bytes = models.BigIntegerField(default=0)
+    asset_count = models.PositiveIntegerField(default=0)
+    clip_count = models.PositiveIntegerField(default=0)
+    duration_seconds = models.FloatField(default=0)
+    thumbnail_path = models.TextField(blank=True)
+    last_export_status = models.CharField(max_length=24, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -87,6 +102,9 @@ class VideoEditorAsset(models.Model):
 
     class Meta:
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["project", "kind"], name="studio_vide_project_397c70_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"video-asset:{self.id}:{self.kind}:{self.original_name}"
@@ -99,6 +117,9 @@ class DesignerProject(models.Model):
     state_json = models.JSONField(default=dict, blank=True)
     storage_bytes = models.BigIntegerField(default=0)
     preview_path = models.TextField(blank=True)
+    asset_count = models.PositiveIntegerField(default=0)
+    object_count = models.PositiveIntegerField(default=0)
+    last_export_status = models.CharField(max_length=24, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -124,17 +145,67 @@ class DesignerAsset(models.Model):
 
     class Meta:
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["project", "kind"], name="studio_desi_project_5a35b9_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"design-asset:{self.id}:{self.original_name}"
 
 
+class MusicEditorProject(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="music_editor_projects", null=True, blank=True, on_delete=models.CASCADE)
+    guest_key = models.CharField(max_length=80, blank=True, db_index=True)
+    title = models.CharField(max_length=180, default="Новый проект")
+    state_json = models.JSONField(default=dict, blank=True)
+    storage_bytes = models.BigIntegerField(default=0)
+    asset_count = models.PositiveIntegerField(default=0)
+    clip_count = models.PositiveIntegerField(default=0)
+    duration_seconds = models.FloatField(default=0)
+    last_export_status = models.CharField(max_length=24, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["owner", "-updated_at"], name="studio_musi_owner_i_idx"),
+            models.Index(fields=["guest_key", "-updated_at"], name="studio_musi_guest__idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"music-project:{self.id}:{self.title}"
+
+
+class MusicEditorAsset(models.Model):
+    project = models.ForeignKey(MusicEditorProject, related_name="assets", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=16, db_index=True)
+    file_path = models.TextField()
+    media_type = models.CharField(max_length=120, default="application/octet-stream")
+    size = models.BigIntegerField(default=0)
+    original_name = models.CharField(max_length=240, blank=True)
+    duration = models.FloatField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["project", "kind"], name="studio_musi_project_2c31ad_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"music-asset:{self.id}:{self.kind}:{self.original_name}"
+
+
 class WorkspaceShare(models.Model):
     RESOURCE_DESIGN = "design_project"
     RESOURCE_VIDEO = "video_project"
+    RESOURCE_MUSIC = "music_project"
+
     RESOURCE_CHOICES = [
         (RESOURCE_DESIGN, "Design project"),
         (RESOURCE_VIDEO, "Video project"),
+        (RESOURCE_MUSIC, "Music project"),
     ]
     ROLE_VIEWER = "viewer"
     ROLE_EDITOR = "editor"

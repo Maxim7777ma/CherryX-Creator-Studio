@@ -1,0 +1,118 @@
+{% load ui_i18n %}
+<div class="detail-panel stats-files-panel" data-section="{{ section }}">
+  <div class="detail-panel-header stats-files-top">
+    <div class="section-title">
+      <h2>{% ui "files" %}</h2>
+      <span>{{ total_outputs }} {% ui "files_found" %}</span>
+    </div>
+
+    {% if show_file_filters %}
+      <form id="stats-files-filter-form" class="stats-filter-form" action="" method="get" novalidate>
+        <label class="stats-search-field">
+          <span>{% ui "files_search" %}</span>
+          <input name="q" type="search" placeholder="{% ui "files_search_placeholder" %}" value="{{ query }}" autocomplete="off">
+        </label>
+
+        <label class="stats-native-type">
+          <span>{% ui "file_type" %}</span>
+          <select name="type" class="stats-filter-type" data-stats-type-select>
+            <option value="">{% ui "file_type_all" %}</option>
+            <option value="image" {% if file_type == 'image' %}selected{% endif %}>{% ui "file_type_image" %}</option>
+            <option value="video" {% if file_type == 'video' %}selected{% endif %}>{% ui "file_type_video" %}</option>
+            <option value="pdf" {% if file_type == 'pdf' %}selected{% endif %}>PDF</option>
+            <option value="text" {% if file_type == 'text' %}selected{% endif %}>{% ui "file_type_text" %}</option>
+            <option value="audio" {% if file_type == 'audio' %}selected{% endif %}>{% ui "file_type_audio" %}</option>
+            <option value="other" {% if file_type == 'other' %}selected{% endif %}>{% ui "file_type_other" %}</option>
+          </select>
+        </label>
+
+        <div class="stats-type-picker" data-stats-type-picker>
+          <button class="stats-type-current" type="button" data-stats-type-current aria-expanded="false">
+            <span data-stats-type-current-icon></span>
+            <b data-stats-type-current-label>{% ui "file_type_all" %}</b>
+          </button>
+          <div class="stats-type-menu" data-stats-type-menu hidden>
+            <button type="button" data-type-value="" data-type-icon="folder" class="{% if not file_type %}is-active{% endif %}">{% ui "file_type_all" %}</button>
+            <button type="button" data-type-value="image" data-type-icon="image" class="{% if file_type == 'image' %}is-active{% endif %}">{% ui "file_type_image" %}</button>
+            <button type="button" data-type-value="video" data-type-icon="video" class="{% if file_type == 'video' %}is-active{% endif %}">{% ui "file_type_video" %}</button>
+            <button type="button" data-type-value="pdf" data-type-icon="file-text" class="{% if file_type == 'pdf' %}is-active{% endif %}">PDF</button>
+            <button type="button" data-type-value="text" data-type-icon="file" class="{% if file_type == 'text' %}is-active{% endif %}">{% ui "file_type_text" %}</button>
+            <button type="button" data-type-value="audio" data-type-icon="music" class="{% if file_type == 'audio' %}is-active{% endif %}">{% ui "file_type_audio" %}</button>
+            <button type="button" data-type-value="other" data-type-icon="archive" class="{% if file_type == 'other' %}is-active{% endif %}">{% ui "file_type_other" %}</button>
+          </div>
+        </div>
+
+        <button class="stats-filter-submit" type="submit">{% ui "search" %}</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="stats-files-table-head" aria-hidden="true">
+    <span>{% ui "file" %}</span>
+    <span>{% ui "size" %}</span>
+    <span>{% ui "actions" %}</span>
+  </div>
+
+  <div class="stats-list stats-files-wrapper" data-stats-files-list>
+    {% for output in outputs %}
+      <article class="stats-row stats-file-row" data-output-id="{{ output.name }}">
+        <span>
+          <b>{{ output.label|default:output.name }}</b>
+          <small>{{ output.job_title }}</small>
+        </span>
+        <strong>{{ output.size_text }}</strong>
+        <div class="stats-actions">
+          <a href="{{ output.detail_url }}">{% ui "open" %}</a>
+          <a href="{{ output.preview_url }}" target="_blank" rel="noreferrer">Preview</a>
+          {% if output.can_edit_design %}
+            <button class="stats-design-btn" type="button" data-edit-design-url="{{ output.edit_design_url }}">Редактировать дизайн</button>
+          {% endif %}
+          {% if output.can_edit_video %}
+            <button class="stats-design-btn" type="button" data-edit-video-url="{{ output.edit_video_url }}">Редактировать видео</button>
+          {% endif %}
+          <a href="{{ output.url }}" download>{% ui "download" %}</a>
+          <button class="stats-share-btn" type="button" data-share-url="{{ output.url }}" data-share-name="{{ output.label|default:output.name }}">{% ui "share" %}</button>
+        </div>
+      </article>
+    {% empty %}
+      <div class="empty-jobs stats-files-empty">{% ui "files_empty" %}</div>
+    {% endfor %}
+  </div>
+
+  {% if show_file_filters %}
+    <div class="stats-files-footer">
+      <div class="stats-files-meta">{% ui "page" %} {{ page }}/{{ pages }}</div>
+      {% if pages > 1 %}
+        <nav class="stats-files-pagination" aria-label="Pagination">
+          {% if page > 1 %}
+            <a href="?{% if query %}q={{ query|urlencode }}&{% endif %}{% if file_type %}type={{ file_type }}&{% endif %}page={{ page|add:-1 }}" data-page="{{ page|add:-1 }}" class="pagination-button pagination-previous" aria-label="{% ui "previous_page" %}"></a>
+          {% endif %}
+          {% for p in page_range %}
+            {% if p %}
+              <a href="?{% if query %}q={{ query|urlencode }}&{% endif %}{% if file_type %}type={{ file_type }}&{% endif %}page={{ p }}" data-page="{{ p }}" class="pagination-button{% if p == page %} is-active{% endif %}">{{ p }}</a>
+            {% else %}
+              <span class="page-ellipsis">...</span>
+            {% endif %}
+          {% endfor %}
+          {% if page < pages %}
+            <a href="?{% if query %}q={{ query|urlencode }}&{% endif %}{% if file_type %}type={{ file_type }}&{% endif %}page={{ page|add:1 }}" data-page="{{ page|add:1 }}" class="pagination-button pagination-next" aria-label="{% ui "next_page" %}"></a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div id="share-modal" class="share-modal" hidden>
+    <div class="share-modal-content">
+      <h3>{% ui "share_file" %}</h3>
+      <input type="text" id="share-link" class="share-link-input" readonly>
+      <div class="share-channels">
+        <a class="share-channel" data-channel="telegram" href="#">Telegram</a>
+        <a class="share-channel" data-channel="whatsapp" href="#">WhatsApp</a>
+        <a class="share-channel" data-channel="email" href="#">Email</a>
+        <a class="share-channel" data-channel="copy" href="#">{% ui "copy_link" %}</a>
+      </div>
+      <button class="share-modal-close" type="button">{% ui "close" %}</button>
+    </div>
+  </div>
+</div>

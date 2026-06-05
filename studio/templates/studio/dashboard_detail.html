@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Stats - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <script defer src="{% static 'studio/stats_files.js' %}"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page stats-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -26,7 +27,7 @@
         <article class="stats-card is-storage">
           <span>{% ui "volume" %}</span>
           <strong>{{ account_stats.total_output_size_text }}</strong>
-          <small>Доступно ещё {{ account_stats.storage_available_text }}</small>
+          <small>{% ui "billing_available_more" %} {{ account_stats.storage_available_text }}</small>
           <i><b style="width: {{ account_stats.storage_percent }}%"></b></i>
         </article>
         <article class="stats-card is-jobs">
@@ -40,30 +41,7 @@
       </section>
 
       {% if section == "files" or section == "storage" %}
-        <section class="detail-panel">
-          <div class="section-title">
-            <h2>{% ui "files" %}</h2>
-            <span>{{ outputs|length }}</span>
-          </div>
-          <div class="stats-list">
-            {% for output in outputs %}
-              <article class="stats-row">
-                <span>
-                  <b>{{ output.label|default:output.name }}</b>
-                  <small>{{ output.job_title }}</small>
-                </span>
-                <strong>{{ output.size_text }}</strong>
-                <div class="stats-actions">
-                  <a href="{{ output.detail_url }}">Открыть</a>
-                  <a href="{{ output.preview_url }}" target="_blank" rel="noreferrer">Preview</a>
-                  <a href="{{ output.url }}" download>{% ui "download" %}</a>
-                </div>
-              </article>
-            {% empty %}
-              <div class="empty-jobs">{% ui "no_outputs" %}</div>
-            {% endfor %}
-          </div>
-        </section>
+        {% include "studio/dashboard_files_section.html" %}
       {% else %}
         <section class="detail-panel">
           <div class="section-title">

@@ -11,6 +11,7 @@ logs/
 .pytest_cache/
 test-results/
 screenshots/
+native/bin/
 *.sqlite3
 *.db
 *.log
