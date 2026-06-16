@@ -2350,6 +2350,7 @@
           root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
           root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item.dataset.editorTool === tool));
         }));
+        setupMobileVideoEditor();
         root.querySelectorAll("[data-add-kind]").forEach((button) => button.addEventListener("click", () => {
           const kind = button.dataset.addKind;
           if (kind === "text") addTextClip();
@@ -2730,4 +2731,87 @@
         }
         render();
         refreshExportQueue();
+
+        function setupMobileVideoEditor() {
+          const mobileQuery = window.matchMedia("(max-width: 760px)");
+          const properties = root.querySelector(".editor-properties");
+          let startY = 0;
+          let startHeight = 0;
+          const sheetStorageKey = "videoEditorMobileSheetHeight";
+          const sheetMinHeight = 34;
+          const sheetCollapsedHeight = 44;
+          const sheetDefaultHeight = () => Math.round(Math.min((window.innerHeight || 760) * 0.2, 188));
+          const sheetMaxHeight = () => {
+            const viewport = window.innerHeight || document.documentElement.clientHeight || 760;
+            return Math.max(260, viewport - 122);
+          };
+          const clampSheetHeight = (value) => Math.max(sheetMinHeight, Math.min(sheetMaxHeight(), Math.round(Number(value) || sheetDefaultHeight())));
+          const applySheetHeight = (value, remember = true) => {
+            if (!properties) return;
+            const next = clampSheetHeight(value);
+            document.documentElement.style.setProperty("--mobile-editor-properties-height", `${next}px`);
+            properties.classList.toggle("is-sheet-collapsed", next <= sheetCollapsedHeight);
+            if (remember) localStorage.setItem(sheetStorageKey, String(next));
+          };
+          const syncMobileState = () => {
+            document.body.classList.toggle("is-mobile-video-editor", mobileQuery.matches);
+            if (mobileQuery.matches) {
+              applySheetHeight(localStorage.getItem(sheetStorageKey) || sheetDefaultHeight(), false);
+            }
+          };
+          const resizeProperties = (event) => {
+            if (!startHeight) return;
+            applySheetHeight(startHeight + (startY - event.clientY));
+          };
+          const stopResizeProperties = () => {
+            startHeight = 0;
+            document.body.classList.remove("is-resizing-video-sheet");
+            window.removeEventListener("pointermove", resizeProperties);
+            window.removeEventListener("pointerup", stopResizeProperties);
+            window.removeEventListener("pointercancel", stopResizeProperties);
+          };
+          const startResizeProperties = (event) => {
+            if (!mobileQuery.matches || !properties) return;
+            event.preventDefault();
+            startY = event.clientY;
+            startHeight = properties.getBoundingClientRect().height;
+            document.body.classList.add("is-resizing-video-sheet");
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            window.addEventListener("pointermove", resizeProperties);
+            window.addEventListener("pointerup", stopResizeProperties, {once: true});
+            window.addEventListener("pointercancel", stopResizeProperties, {once: true});
+          };
+          const revealActiveControls = () => {
+            if (!mobileQuery.matches) return;
+            const activePanel = root.querySelector(".editor-tool-panel.is-active");
+            const activeTool = root.querySelector(".editor-rail .editor-icon-button.is-active");
+            activePanel?.classList.remove("is-mobile-panel-enter");
+            void activePanel?.offsetWidth;
+            activePanel?.classList.add("is-mobile-panel-enter");
+            activeTool?.scrollIntoView({behavior: "smooth", inline: "center", block: "nearest"});
+          };
+          if (properties && !properties.querySelector(".editor-properties-grip")) {
+            const grip = document.createElement("button");
+            grip.className = "editor-properties-grip";
+            grip.type = "button";
+            grip.setAttribute("aria-label", t("resize_panel", "Resize panel"));
+            properties.prepend(grip);
+            grip.addEventListener("pointerdown", startResizeProperties);
+            grip.addEventListener("dblclick", () => {
+              const current = properties.getBoundingClientRect().height;
+              applySheetHeight(current <= sheetCollapsedHeight ? sheetDefaultHeight() : sheetMinHeight);
+            });
+          }
+          syncMobileState();
+          mobileQuery.addEventListener?.("change", syncMobileState);
+          root.querySelectorAll("[data-editor-tool], [data-panel-tab]").forEach((button) => {
+            button.addEventListener("click", () => window.setTimeout(revealActiveControls, 30));
+          });
+          root.querySelectorAll("[data-add-kind], [data-split-clip], [data-duplicate-clip], [data-delete-clip]").forEach((button) => {
+            button.addEventListener("click", () => {
+              if (!mobileQuery.matches) return;
+              root.querySelector(".editor-timeline-panel")?.scrollIntoView({behavior: "smooth", block: "center"});
+            });
+          });
+        }
       })();

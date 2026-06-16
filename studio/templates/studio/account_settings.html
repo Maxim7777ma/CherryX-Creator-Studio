@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "settings" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-settings-mobile-language">
   </head>
   <body class="auth-page theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <main class="auth-shell settings-shell">
@@ -110,7 +110,7 @@
                 <legend>{% ui "language" %}</legend>
                 <div class="language-grid">
                   {% for language in language_options %}
-                    <label class="language-button">
+                    <label class="language-button" data-code="{{ language.code|upper }}">
                       <input type="radio" name="interface_language" value="{{ language.code }}" {% if language.active %}checked{% endif %}>
                       <img src="{{ language.flag }}" alt="">
                       <span>{{ language.native }}</span>

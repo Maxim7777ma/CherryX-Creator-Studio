@@ -15,7 +15,6 @@
       </div>
       <nav>
         {% include "studio/_language_switcher.html" %}
-        <a data-icon="credit-card" href="{% url 'billing:pricing' %}">{% ui "pricing" %}</a>
         <a data-icon="log-in" href="{% url 'studio:login' %}">{% ui "login" %}</a>
         <a class="nav-primary" data-icon="sparkles" href="{% url 'studio:index' %}">{% ui "try_free" %}</a>
       </nav>
@@ -28,7 +27,7 @@
         <p>{% ui "landing_copy" %}</p>
         <div class="landing-actions">
           <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
-          <a class="secondary-link" data-icon="credit-card" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+          <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
         </div>
         <div class="brand-pills">
           <span data-icon="box">Product</span>
@@ -87,47 +86,107 @@
       <a href="{% url 'studio:designer' %}" data-icon="palette">
         <span>Design</span>
       </a>
-      <a href="{% url 'studio:index' %}?tool=resume" data-icon="credit-card">
+      <a href="{% url 'studio:index' %}?tool=resume" data-icon="file-text">
         <span>Resume</span>
       </a>
     </footer>
     <script>
       (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          const positionMenu = () => {
-            const rect = button.getBoundingClientRect();
-            const safeGap = 14;
-            const menuWidth = 230;
-            const right = Math.max(safeGap, window.innerWidth - rect.right);
-            const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
-            switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
-            switcher.style.setProperty(
-              "--language-menu-right",
-              `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
-            );
-          };
-          switcher.addEventListener("click", (event) => event.stopPropagation());
-          button.addEventListener("click", (event) => {
-            event.stopPropagation();
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-            if (open) positionMenu();
+        const mobileQuery = window.matchMedia("(max-width: 760px)");
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+        const body = document.body;
+        const nav = document.querySelector(".landing-nav");
+        const revealItems = [
+          document.querySelector(".landing-copy"),
+          document.querySelector(".landing-console"),
+          document.querySelector(".landing-dock"),
+        ].filter(Boolean);
+        const consoleGrid = document.querySelector(".console-grid");
+        const consoleCards = [...document.querySelectorAll(".console-grid article")];
+        const dockLinks = [...document.querySelectorAll(".landing-dock a")];
+        let carouselIndex = 0;
+        let carouselTimer = 0;
+
+        if (!nav || !revealItems.length) return;
+
+        const setFocusedCard = () => {
+          if (!consoleGrid || !consoleCards.length) return;
+          consoleCards.forEach((card, index) => {
+            const active = index === carouselIndex;
+            card.classList.toggle("is-mobile-focused", active);
+            card.classList.toggle("is-carousel-active", active);
           });
-          window.addEventListener("resize", () => {
-            if (switcher.classList.contains("is-open")) positionMenu();
-          });
-          window.addEventListener("scroll", () => {
-            if (switcher.classList.contains("is-open")) positionMenu();
-          }, { passive: true });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
+        };
+
+        const rotateCards = () => {
+          if (!mobileQuery.matches || reduceMotion.matches || consoleCards.length < 2) return;
+          carouselIndex = (carouselIndex + 1) % consoleCards.length;
+          setFocusedCard();
+        };
+
+        const startCarousel = () => {
+          window.clearInterval(carouselTimer);
+          if (!mobileQuery.matches || reduceMotion.matches || consoleCards.length < 2) return;
+          carouselTimer = window.setInterval(rotateCards, 3200);
+        };
+
+        const pauseCarousel = () => {
+          window.clearInterval(carouselTimer);
+        };
+
+        const setScrollState = () => {
+          const y = window.scrollY || document.documentElement.scrollTop || 0;
+          body.classList.toggle("is-nav-compact", y > 18);
+          body.classList.toggle("is-dock-compact", y > 120);
+        };
+
+        const enable = () => {
+          body.classList.add("is-mobile-landing");
+          setScrollState();
+
+          if (reduceMotion.matches) {
+            revealItems.forEach((item) => item.classList.add("is-visible"));
+            consoleCards.forEach((card) => card.classList.add("is-visible"));
+          } else {
+            revealItems.forEach((item, index) => {
+              window.setTimeout(() => item.classList.add("is-visible"), 80 + index * 110);
+            });
+            consoleCards.forEach((card, index) => {
+              window.setTimeout(() => card.classList.add("is-visible"), 180 + index * 90);
+            });
+          }
+
+          dockLinks.forEach((link, index) => link.classList.toggle("is-active", index === 0));
+          setFocusedCard();
+          startCarousel();
+        };
+
+        const disable = () => {
+          pauseCarousel();
+          body.classList.remove("is-mobile-landing", "is-nav-compact", "is-dock-compact");
+          revealItems.forEach((item) => item.classList.remove("is-visible"));
+          consoleCards.forEach((card) => card.classList.remove("is-visible", "is-mobile-focused", "is-carousel-active"));
+          dockLinks.forEach((link) => link.classList.remove("is-active"));
+        };
+
+        const sync = () => {
+          if (mobileQuery.matches) {
+            enable();
+          } else {
+            disable();
+          }
+        };
+
+        window.addEventListener("scroll", setScrollState, { passive: true });
+        window.addEventListener("resize", setFocusedCard);
+        consoleGrid?.addEventListener("pointerdown", () => {
+          pauseCarousel();
+          rotateCards();
+          window.setTimeout(startCarousel, 5200);
         });
+        mobileQuery.addEventListener?.("change", sync);
+        reduceMotion.addEventListener?.("change", sync);
+        sync();
       })();
     </script>
   </body>

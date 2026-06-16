@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "video_editor_nav" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-video-editor-grip-range">
     <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -368,6 +368,6 @@
     {{ app_messages|json_script:"app-messages" }}
     {% include "studio/_share_modal.html" with share_resource_type="video_project" share_resource_id=current_video_project.id %}
     <input type="file" accept="image/*,application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.txt" data-image-file hidden>
-    <script defer src="{% static 'studio/video_editor.js' %}"></script>
+    <script defer src="{% static 'studio/video_editor.js' %}?v=20260616-video-editor-grip-range"></script>
   </body>
 </html>

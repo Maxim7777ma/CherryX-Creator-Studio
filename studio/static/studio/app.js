@@ -47,9 +47,10 @@ setupJobFormDrafts();
 setupSubtitleStylePickers();
 setupJobFilters();
 setupOriginalityChecker();
+setupMobileWorkspace();
 restoreActiveTab();
 
-document.querySelectorAll(".tab").forEach((button) => {
+document.querySelectorAll(".tab[data-tab]").forEach((button) => {
   button.addEventListener("click", () => {
     activateTab(button.dataset.tab);
   });
@@ -160,6 +161,7 @@ function setupAccountPanel() {
   if (!panel || !button) return;
   const setOpen = (open) => {
     panel.classList.toggle("is-open", open);
+    document.body.classList.toggle("is-mobile-account-open", open);
     button.setAttribute("aria-expanded", open ? "true" : "false");
   };
   button.addEventListener("click", (event) => {
@@ -169,6 +171,142 @@ function setupAccountPanel() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") setOpen(false);
   });
+}
+
+function setupMobileWorkspace() {
+  const media = window.matchMedia("(max-width: 760px)");
+  const jobsPanel = document.querySelector(".jobs-panel");
+  const jobsToggle = document.querySelector("[data-mobile-jobs-toggle]");
+  const accountPanel = document.querySelector("[data-account-panel]");
+  const accountToggle = document.querySelector("[data-account-panel-toggle]");
+  const settingsShortcut = document.querySelector(".account-settings-shortcut, .account-settings-link");
+  const accountLanguageSwitcher = document.querySelector(".account-panel-content .language-switcher");
+  const accountLanguageButton = accountLanguageSwitcher?.querySelector(".language-current");
+  let mobileLanguageModal = null;
+
+  const closeMobileLanguageModal = () => {
+    if (!mobileLanguageModal) return;
+    const modalToRemove = mobileLanguageModal;
+    mobileLanguageModal.classList.remove("is-open");
+    document.body.classList.remove("is-mobile-language-open");
+    accountLanguageButton?.setAttribute("aria-expanded", "false");
+    mobileLanguageModal = null;
+    window.setTimeout(() => {
+      modalToRemove.remove();
+    }, 180);
+  };
+
+  const openMobileLanguageModal = () => {
+    if (!accountLanguageSwitcher || !accountLanguageButton || !media.matches) return;
+    closeMobileLanguageModal();
+    const modal = document.createElement("div");
+    modal.className = "mobile-language-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+
+    const backdrop = document.createElement("button");
+    backdrop.className = "mobile-language-backdrop";
+    backdrop.type = "button";
+    backdrop.setAttribute("aria-label", "Close language selector");
+    backdrop.addEventListener("click", closeMobileLanguageModal);
+
+    const form = document.createElement("form");
+    form.className = "mobile-language-panel";
+    form.method = accountLanguageSwitcher.method || "post";
+    form.action = accountLanguageSwitcher.action;
+
+    const handle = document.createElement("span");
+    handle.className = "mobile-language-handle";
+    handle.setAttribute("aria-hidden", "true");
+    form.appendChild(handle);
+
+    accountLanguageSwitcher.querySelectorAll('input[type="hidden"]').forEach((input) => {
+      form.appendChild(input.cloneNode(true));
+    });
+    accountLanguageSwitcher.querySelectorAll(".language-menu button").forEach((button) => {
+      const clone = button.cloneNode(true);
+      clone.classList.toggle("is-active", button.classList.contains("is-active"));
+      form.appendChild(clone);
+    });
+
+    modal.append(backdrop, form);
+    document.body.appendChild(modal);
+    mobileLanguageModal = modal;
+    document.body.classList.add("is-mobile-language-open");
+    accountLanguageButton.setAttribute("aria-expanded", "true");
+    window.requestAnimationFrame(() => modal.classList.add("is-open"));
+  };
+
+  const setMobile = () => {
+    document.body.classList.toggle("is-mobile-workspace", media.matches);
+    if (!media.matches) {
+      setJobsOpen(false);
+      document.body.classList.remove("is-mobile-account-open");
+      closeMobileLanguageModal();
+    }
+  };
+
+  const setJobsOpen = (open) => {
+    document.body.classList.toggle("is-mobile-jobs-open", open);
+    if (jobsToggle) jobsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      accountPanel?.classList.remove("is-open");
+      document.body.classList.remove("is-mobile-account-open");
+      accountToggle?.setAttribute("aria-expanded", "false");
+    }
+  };
+
+  jobsToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!media.matches) return;
+    setJobsOpen(!document.body.classList.contains("is-mobile-jobs-open"));
+  });
+
+  settingsShortcut?.addEventListener("click", (event) => {
+    if (!media.matches || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    settingsShortcut.classList.add("is-spinning");
+    window.setTimeout(() => {
+      window.location.href = settingsShortcut.href;
+    }, 260);
+  });
+
+  accountLanguageButton?.addEventListener("click", (event) => {
+    if (!media.matches) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    openMobileLanguageModal();
+  }, { capture: true });
+
+  document.addEventListener("click", (event) => {
+    if (!media.matches || !(event.target instanceof Element)) return;
+    if (document.body.classList.contains("is-mobile-jobs-open") && !event.target.closest(".jobs-panel") && !event.target.closest("[data-mobile-jobs-toggle]")) {
+      setJobsOpen(false);
+    }
+    if (document.body.classList.contains("is-mobile-account-open") && !event.target.closest("[data-account-panel]") && !event.target.closest(".mobile-language-modal")) {
+      accountPanel?.classList.remove("is-open");
+      document.body.classList.remove("is-mobile-account-open");
+      accountToggle?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!media.matches || event.key !== "Escape") return;
+    setJobsOpen(false);
+    accountPanel?.classList.remove("is-open");
+    document.body.classList.remove("is-mobile-account-open");
+    closeMobileLanguageModal();
+    accountToggle?.setAttribute("aria-expanded", "false");
+  });
+
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", setMobile);
+  } else {
+    media.addListener(setMobile);
+  }
+  setMobile();
 }
 
 function setupJobFormDrafts() {
@@ -909,6 +1047,11 @@ function setupDesignerPanel(panel) {
     plane.classList.toggle("is-drawing", tool === "draw");
     plane.classList.toggle("is-placing", isPlacingTool);
     shell.classList.toggle("is-pannable", tool === "pan" || spaceDown);
+    if (document.body.classList.contains("is-mobile-designer")) {
+      shell.style.touchAction = tool === "pan" ? "pan-x pan-y" : "none";
+    } else {
+      shell.style.touchAction = "";
+    }
     renderInspector();
   };
 
@@ -4430,6 +4573,8 @@ function setupDesignerPanelV2(panel) {
     event.returnValue = "";
   });
 
+  setupMobileDesignerWorkspace();
+
   zoom = clamp(Number(state.zoom) || 1, 0.03, 5);
   if (readOnly) {
     panel.classList.add("is-view-only");
@@ -4451,6 +4596,76 @@ function setupDesignerPanelV2(panel) {
     state.didFit = true;
     fitZoom();
     persist();
+  }
+
+  function setupMobileDesignerWorkspace() {
+    const media = window.matchMedia("(max-width: 760px)");
+    const inspectorShell = panel.querySelector("[data-designer-mobile-drawer]");
+    const toolbar = panel.querySelector("[data-designer-mobile-palette]");
+    const storageKey = "designerMobileInspectorHeight.v2";
+    let startY = 0;
+    let startHeight = 0;
+    const defaultHeight = () => 44;
+    const maxHeight = () => Math.max(300, (window.innerHeight || 760) - 128);
+    const clampHeight = (value) => Math.max(38, Math.min(maxHeight(), Math.round(Number(value) || defaultHeight())));
+    const applyHeight = (value, remember = true) => {
+      if (!inspectorShell) return;
+      const next = clampHeight(value);
+      document.documentElement.style.setProperty("--mobile-designer-inspector-height", `${next}px`);
+      inspectorShell.classList.toggle("is-sheet-collapsed", next <= 50);
+      if (remember) localStorage.setItem(storageKey, String(next));
+    };
+    const sync = () => {
+      document.body.classList.toggle("is-mobile-designer", media.matches);
+      if (!media.matches) return;
+      applyHeight(localStorage.getItem(storageKey) || defaultHeight(), false);
+      requestAnimationFrame(() => {
+        updatePlaneSize();
+        fitZoom();
+      });
+    };
+    const resize = (event) => {
+      if (!startHeight) return;
+      applyHeight(startHeight + (startY - event.clientY));
+    };
+    const stopResize = () => {
+      startHeight = 0;
+      document.body.classList.remove("is-resizing-designer-sheet");
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+    const startResize = (event) => {
+      if (!media.matches || !inspectorShell) return;
+      event.preventDefault();
+      startY = event.clientY;
+      startHeight = inspectorShell.getBoundingClientRect().height;
+      document.body.classList.add("is-resizing-designer-sheet");
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      window.addEventListener("pointermove", resize);
+      window.addEventListener("pointerup", stopResize, {once: true});
+      window.addEventListener("pointercancel", stopResize, {once: true});
+    };
+    if (inspectorShell && !inspectorShell.querySelector(".designer-inspector-grip")) {
+      const grip = document.createElement("button");
+      grip.className = "designer-inspector-grip";
+      grip.type = "button";
+      grip.setAttribute("aria-label", i18n.resize_panel || "Resize panel");
+      inspectorShell.prepend(grip);
+      grip.addEventListener("pointerdown", startResize);
+      grip.addEventListener("dblclick", () => {
+        const current = inspectorShell.getBoundingClientRect().height;
+        applyHeight(current <= 50 ? defaultHeight() : 38);
+      });
+    }
+    toolbar?.querySelectorAll("[data-design-tool]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!media.matches) return;
+        button.scrollIntoView({behavior: "smooth", inline: "center", block: "nearest"});
+      });
+    });
+    media.addEventListener?.("change", sync);
+    sync();
   }
 }
 
@@ -5016,24 +5231,38 @@ function buildExportSvg(frame, designState = null) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="${escapeHtml(frame.fill || "#ffffff")}"/>${objectMarkup}${strokeMarkup}</svg>`;
 }
 
-function activateTab(target) {
+function activateTab(target, options = {}) {
   if (!target) return;
+  const shouldReveal = options.reveal !== false;
   localStorage.setItem(ACTIVE_TAB_KEY, target);
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("is-active", item.dataset.tab === target));
   document.querySelectorAll(".tool-panel").forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === `tab-${target}`);
+  });
+  if (shouldReveal) scrollActiveMobileTool();
+}
+
+function scrollActiveMobileTool() {
+  if (!window.matchMedia("(max-width: 760px)").matches) return;
+  const panel = document.querySelector(".tool-panel.is-active");
+  if (!panel) return;
+  panel.classList.remove("is-mobile-panel-enter");
+  void panel.offsetWidth;
+  panel.classList.add("is-mobile-panel-enter");
+  window.requestAnimationFrame(() => {
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
 function restoreActiveTab() {
   const requested = new URLSearchParams(window.location.search).get("tool");
   if (requested && document.getElementById(`tab-${requested}`)) {
-    activateTab(requested);
+    activateTab(requested, { reveal: false });
     return;
   }
   const saved = localStorage.getItem(ACTIVE_TAB_KEY);
   if (saved && document.getElementById(`tab-${saved}`)) {
-    activateTab(saved);
+    activateTab(saved, { reveal: false });
   }
 }
 

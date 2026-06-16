@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-score-ring">
-    <script defer src="{% static 'studio/app.js' %}?v=20260615-score-ring"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-mobile-account-avatar">
+    <script defer src="{% static 'studio/app.js' %}?v=20260616-mobile-account-avatar"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
@@ -25,12 +25,13 @@
         <button class="account-panel-toggle" type="button" data-account-panel-toggle data-icon="panel-left-open" aria-expanded="false" aria-label="Open account panel"></button>
         <div class="limits account-bar account-panel-content">
           {% include "studio/_language_switcher.html" %}
-          <img class="account-avatar" src="{{ avatar_url }}" alt="">
           {% if is_guest %}
+            <a class="account-avatar account-settings-shortcut" href="{{ login_url }}" data-icon="settings" aria-label="{% ui "settings" %}"></a>
             <span>{% ui "guest_session" %}</span>
             <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
             <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
           {% else %}
+            <img class="account-avatar" src="{{ avatar_url }}" alt="">
             <span>{{ request.user.email }}</span>
             {% if has_access %}
               <button class="subscription-meter" type="button" data-subscription-open aria-expanded="false" aria-controls="subscription-drawer">
@@ -45,7 +46,7 @@
             {% else %}
               <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "activate" %}</a>
             {% endif %}
-            <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
+            <a class="topbar-link account-settings-link" href="{{ settings_url }}">{% ui "settings" %}</a>
             <form class="topbar-form" method="post" action="{% url 'studio:logout' %}">
               {% csrf_token %}
               <button type="submit">{% ui "logout" %}</button>
@@ -162,6 +163,9 @@
             </span>
           </a>
         </div>
+        <button class="tab mobile-jobs-tab" type="button" data-mobile-jobs-toggle data-icon="list-filter" aria-expanded="false" aria-controls="mobile-jobs-panel">
+          {% ui "tasks" %}
+        </button>
       </nav>
 
       <section class="workspace">
@@ -681,7 +685,7 @@
         </section>
       </section>
 
-      <aside class="jobs-panel" aria-live="polite">
+      <aside class="jobs-panel" id="mobile-jobs-panel" aria-live="polite">
         <div class="jobs-heading">
           <h2>{% ui "tasks" %}</h2>
           <span id="jobs-count">0</span>

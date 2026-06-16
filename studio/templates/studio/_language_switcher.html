@@ -51,7 +51,18 @@
             event.stopPropagation();
             const open = switcher.classList.toggle("is-open");
             button.setAttribute("aria-expanded", open ? "true" : "false");
-            if (open) positionMenu();
+            if (open) {
+              const menu = switcher.querySelector(".language-menu");
+              if (menu) {
+                const resetScroll = () => {
+                  menu.scrollTop = 0;
+                };
+                resetScroll();
+                requestAnimationFrame(resetScroll);
+                window.setTimeout(resetScroll, 80);
+              }
+              positionMenu();
+            }
           });
           window.addEventListener("resize", () => {
             if (switcher.classList.contains("is-open")) positionMenu();

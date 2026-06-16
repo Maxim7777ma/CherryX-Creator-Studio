@@ -18,9 +18,10 @@
   };
 
   const bindLanguageSwitchers = () => {
+    if (window.CXLanguageSwitcherReady) return;
     document.querySelectorAll(".language-switcher").forEach((switcher) => {
       const button = switcher.querySelector(".language-current");
-      if (!button || switcher.dataset.billingBound === "1") return;
+      if (!button || switcher.dataset.billingBound === "1" || switcher.dataset.languageSwitcherBound === "1") return;
       switcher.dataset.billingBound = "1";
       const positionMenu = () => {
         const rect = button.getBoundingClientRect();
@@ -102,6 +103,13 @@
       if (title) title.textContent = `${button.dataset.name || ""} - ${button.dataset.priceLabel || ""}`.trim();
       if (copy) copy.textContent = button.dataset.headline || "";
       if (persist) writeCheckoutState({plan: button.dataset.plan || ""});
+      if (persist && window.matchMedia("(max-width: 760px)").matches) {
+        button.closest(".checkout-plan-option")?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "center",
+        });
+      }
     };
 
     buttons.forEach((button) => {
@@ -238,7 +246,7 @@
       return true;
     };
 
-    const showStep = (stepNumber) => {
+    const showStep = (stepNumber, reveal = true) => {
       current = Math.max(1, Math.min(steps.length, Number(stepNumber) || 1));
       writeCheckoutState({step: current});
       steps.forEach((step) => {
@@ -251,6 +259,9 @@
         tab.classList.toggle("is-active", active);
         tab.setAttribute("aria-current", active ? "step" : "false");
       });
+      if (reveal && window.matchMedia("(max-width: 760px)").matches) {
+        wizard.scrollIntoView({behavior: "smooth", block: "start"});
+      }
     };
 
     tabs.forEach((tab) => {
@@ -277,11 +288,25 @@
     });
 
     const savedStep = Math.max(1, Math.min(steps.length, Number(readCheckoutState().step) || 1));
-    showStep(savedStep);
+    showStep(savedStep, false);
+  };
+
+  const bindPricingRail = () => {
+    const rail = document.querySelector(".pricing-page .pricing-grid");
+    if (!rail) return;
+    const target = rail.querySelector(".price-card.is-focused") || rail.querySelector(".price-card.is-current");
+    if (!target || !window.matchMedia("(max-width: 760px)").matches) return;
+    requestAnimationFrame(() => {
+      rail.scrollTo({
+        left: Math.max(0, target.offsetLeft - rail.offsetLeft - 14),
+        behavior: "smooth",
+      });
+    });
   };
 
   bindLanguageSwitchers();
   bindPasswordToggles();
   bindPlanPicker();
   bindCheckoutWizard();
+  bindPricingRail();
 })();
