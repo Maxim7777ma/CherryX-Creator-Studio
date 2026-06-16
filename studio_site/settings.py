@@ -82,6 +82,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 STATICFILES_DIRS: list[Path] = []
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -101,3 +104,9 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() in {"1", "true", "yes
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "CherryX Creator Studio <noreply@cherryx.local>")
 
 X_FRAME_OPTIONS = "SAMEORIGIN"
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
