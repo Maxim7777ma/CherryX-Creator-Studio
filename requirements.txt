@@ -32,6 +32,7 @@ idna==3.13
 imageio-ffmpeg==0.6.0
 iniconfig==2.3.0
 jiter==0.15.0
+lxml==6.1.1
 magic-filter==1.0.12
 markdown-it-py==4.0.0
 mdurl==0.1.2
@@ -48,7 +49,9 @@ protobuf==7.34.1
 pydantic_core==2.41.5
 pydantic==2.12.5
 Pygments==2.20.0
+pypdf==6.13.2
 pytest==9.0.3
+python-docx==1.2.0
 python-dotenv==1.2.2
 PyYAML==6.0.3
 reportlab==4.4.10

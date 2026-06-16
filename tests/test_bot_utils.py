@@ -147,20 +147,25 @@ class ContentHelperTests(unittest.TestCase):
         words = re_words("Тест, Apple-2026! Ґанок і відео")
         self.assertEqual(words, ["Тест", "Apple", "2026", "Ґанок", "і", "відео"])
 
-        tags = publication_hashtags("Apple Apple тестовое видео для канала")
+        tags = publication_hashtags("Apple Apple тестовое видео для канала", "монтаж обложка камера монтаж")
         self.assertEqual(tags[:2], ["#shorts", "#video"])
         self.assertEqual(tags.count("#apple"), 1)
-        self.assertLessEqual(len(tags), 8)
+        self.assertIn("#монтаж", tags)
+        self.assertLessEqual(len(tags), 12)
 
         description = publication_description(
             "  Мой ролик  ",
             "1:30",
             ["#shorts", "#video"],
             "субтитры готовы",
+            "В этом видео показываю быстрый монтаж и красивую обложку для публикации.",
+            "ru",
         )
         self.assertIn("Мой ролик", description)
         self.assertIn("Длительность: 1:30", description)
+        self.assertIn("Сохрани", description)
         self.assertIn("#shorts #video", description)
+        self.assertNotIn("Готово для публикации", description)
 
     def test_unique_archive_name_avoids_collisions(self) -> None:
         used = {"clip.mp4", "clip_1.mp4", ".env"}

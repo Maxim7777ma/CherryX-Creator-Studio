@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "video_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -19,15 +19,35 @@
       </div>
     </header>
 
-    <main class="video-projects-shell" data-video-projects data-editor-url="{{ video_editor_url }}" data-api-url="{{ video_projects_api_url }}">
+    <main class="video-projects-shell" data-project-list data-video-projects data-editor-url="{{ video_editor_url }}" data-api-url="{{ video_projects_api_url }}">
       <section class="video-projects-head">
         <div>
           <span>{% ui "video_editing" %}</span>
           <strong>{% ui "projects" %}</strong>
-          <small><b data-project-total>{{ video_projects|length }}</b> {% ui "in_workspace" %}</small>
+          <small><b data-project-total>{{ project_listing.total|default:video_projects|length }}</b> {% ui "in_workspace" %}</small>
         </div>
         <button type="button" data-create-project>{% ui "create_project" %}</button>
       </section>
+
+      <form class="project-filter-bar" method="get" data-project-filters>
+        <label>
+          <span>{% ui "project_search" %}</span>
+          <input type="search" name="q" value="{{ project_listing.query }}" placeholder="{% ui "project_search_placeholder" %}">
+        </label>
+        <label>
+          <span>{% ui "sort" %}</span>
+          <select name="sort">
+            <option value="updated" {% if project_listing.sort == "updated" %}selected{% endif %}>{% ui "recent" %}</option>
+            <option value="title" {% if project_listing.sort == "title" %}selected{% endif %}>{% ui "title" %}</option>
+            <option value="created" {% if project_listing.sort == "created" %}selected{% endif %}>{% ui "created" %}</option>
+            <option value="oldest" {% if project_listing.sort == "oldest" %}selected{% endif %}>{% ui "oldest" %}</option>
+          </select>
+        </label>
+        <button type="submit">{% ui "apply" %}</button>
+        {% if project_listing.query or project_listing.sort != "updated" %}
+          <a href="{% url 'studio:video_project_list' %}">{% ui "clear_filters" %}</a>
+        {% endif %}
+      </form>
 
       <section class="video-project-bulk" data-project-bulk hidden>
         <div>
@@ -49,11 +69,11 @@
             </label>
             <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.08), rgba(2,6,23,.72)), url('{{ project.thumbnail }}');{% endif %}">
               <span>{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
-              <b>{{ project.layer_count }} {% ui "clips" %} · {{ project.track_count }} {% ui "video_tracks_count" %}</b>
+              <b>{{ project.layer_count }} {% ui "clips" %} &middot; {{ project.track_count }} {% ui "video_tracks_count" %}</b>
             </a>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
-              <span>{% if project.clip_name %}{{ project.clip_name }} · {% endif %}{{ project.storage_text }}</span>
+              <span>{% if project.clip_name %}{{ project.clip_name }} &middot; {% endif %}{{ project.storage_text }}</span>
             </div>
             <div class="video-project-actions">
               <a href="{{ video_editor_url }}?project={{ project.id }}">{% ui "open" %}</a>
@@ -70,6 +90,18 @@
         </div>
         <button type="button" data-create-project>{% ui "create_project" %}</button>
       </article>
+
+      {% if project_listing.has_more or project_listing.page > 1 %}
+        <nav class="project-pagination" data-project-pagination aria-label="{% ui "projects" %}">
+          {% if project_listing.page > 1 %}
+            <a data-project-page="prev" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'-1' }}">{% ui "back" %}</a>
+          {% endif %}
+          <span>{{ project_listing.page }}</span>
+          {% if project_listing.has_more %}
+            <a data-project-page="next" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'1' }}">{% ui "load_more" %}</a>
+          {% endif %}
+        </nav>
+      {% endif %}
     </main>
 
     <div class="project-delete-modal" data-delete-modal hidden>
@@ -85,242 +117,10 @@
         </footer>
       </section>
     </div>
-
     <script>
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
-      (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          switcher.addEventListener("click", (event) => event.stopPropagation());
-          button.addEventListener("click", (event) => {
-            event.stopPropagation();
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-          });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
-        });
-
-        const root = document.querySelector("[data-video-projects]");
-        if (!root) return;
-        const i18n = window.CX_MUSIC_MESSAGES || {};
-        const t = (key, fallback, vars = {}) => {
-          let value = i18n[key] || fallback || key;
-          Object.entries(vars).forEach(([name, replacement]) => {
-            value = value.replaceAll(`{${name}}`, String(replacement));
-          });
-          return value;
-        };
-        const apiUrl = root.dataset.apiUrl;
-        const editorUrl = root.dataset.editorUrl;
-        const bulkBar = root.querySelector("[data-project-bulk]");
-        const selectedCount = root.querySelector("[data-selected-count]");
-        const totalCount = root.querySelector("[data-project-total]");
-        const clearSelection = root.querySelector("[data-clear-selection]");
-        const deleteSelected = root.querySelector("[data-delete-selected]");
-        const grid = root.querySelector("[data-project-grid]");
-        const emptyState = root.querySelector("[data-project-empty]");
-        const modal = document.querySelector("[data-delete-modal]");
-        const modalTitle = modal?.querySelector("[data-modal-title]");
-        const modalCopy = modal?.querySelector("[data-modal-copy]");
-        const modalList = modal?.querySelector("[data-modal-list]");
-        const modalConfirm = modal?.querySelector("[data-modal-confirm]");
-        const modalCancel = modal?.querySelectorAll("[data-modal-cancel]") || [];
-        let pendingDelete = null;
-        const csrfToken = (() => {
-          const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
-          return match ? decodeURIComponent(match[1]) : "";
-        })();
-        const requestJson = async (url, options = {}) => {
-          const response = await fetch(url, {
-            ...options,
-            headers: {
-              "Accept": "application/json",
-              ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": csrfToken} : {}),
-              ...(options.headers || {}),
-            },
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json();
-        };
-        const escapeHtml = (value) => String(value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
-        const cards = () => [...root.querySelectorAll("[data-project-id]")];
-        const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
-        const projectInfo = (card) => ({
-          id: Number(card.dataset.projectId),
-          title: card.dataset.projectTitle || card.querySelector("[data-project-title-text]")?.textContent?.trim() || t("untitled_project", "Untitled project"),
-        });
-        const updateEmptyState = () => {
-          const count = cards().length;
-          if (totalCount) totalCount.textContent = String(count);
-          if (emptyState) emptyState.hidden = count > 0;
-          if (grid) grid.hidden = count === 0;
-        };
-        const updateBulkBar = () => {
-          const count = selectedCards().length;
-          if (bulkBar) bulkBar.hidden = count === 0;
-          if (selectedCount) selectedCount.textContent = `${count} ${t("selected", "selected")}`;
-          cards().forEach((card) => card.classList.toggle("is-selected", Boolean(card.querySelector("[data-project-select]")?.checked)));
-        };
-        const setSelection = (checked) => {
-          cards().forEach((card) => {
-            const input = card.querySelector("[data-project-select]");
-            if (input) input.checked = checked;
-          });
-          updateBulkBar();
-        };
-        const closeModal = () => {
-          if (!modal || modalConfirm?.disabled) return;
-          modal.hidden = true;
-          document.body.classList.remove("project-delete-open");
-          pendingDelete = null;
-        };
-        const openModal = (items) => {
-          if (!modal || !modalTitle || !modalCopy || !modalList) return;
-          pendingDelete = items;
-          const count = items.length;
-          modalTitle.textContent = count === 1 ? t("delete_project_question", "Delete this project?") : t("delete_projects_question", `Delete ${count} projects?`, { count });
-          modalCopy.textContent = count === 1
-            ? t("delete_uploaded_files_copy", "This will remove the project and its uploaded files from the server.")
-            : t("delete_uploaded_files_many_copy", "Selected projects and their uploaded files will be removed from the server.");
-          modalList.innerHTML = items.slice(0, 5).map((item) => `<span>${escapeHtml(item.title)}</span>`).join("");
-          if (count > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${count - 5} ${escapeHtml(t("more", "more"))}</small>`);
-          modal.hidden = false;
-          document.body.classList.add("project-delete-open");
-          modalConfirm?.focus();
-        };
-        const removeDeletedCards = (ids) => {
-          ids.forEach((id) => {
-            const card = root.querySelector(`[data-project-id="${id}"]`);
-            if (!card) return;
-            card.classList.add("is-removing");
-            window.setTimeout(() => {
-              card.remove();
-              updateBulkBar();
-              updateEmptyState();
-            }, 180);
-          });
-        };
-        const renameProject = async (card, title) => {
-          const id = Number(card.dataset.projectId);
-          const data = await requestJson(`${apiUrl}${id}/rename/`, {
-            method: "POST",
-            body: JSON.stringify({title}),
-          });
-          return data.project;
-        };
-        const startRename = (titleNode) => {
-          const card = titleNode.closest("[data-project-id]");
-          if (!card || card.classList.contains("is-editing-title")) return;
-          const original = titleNode.textContent.trim();
-          const input = document.createElement("input");
-          input.className = "video-project-title-input";
-          input.type = "text";
-          input.value = original;
-          input.maxLength = 180;
-          input.setAttribute("aria-label", t("project_name", "Project name"));
-          card.classList.add("is-editing-title");
-          titleNode.replaceWith(input);
-          input.focus();
-          input.select();
-
-          let closed = false;
-          const finish = async (save) => {
-            if (closed) return;
-            closed = true;
-            const nextTitle = input.value.trim() || original;
-            const restored = document.createElement("strong");
-            restored.className = "video-project-title";
-            restored.dataset.projectTitleText = "";
-            restored.title = t("double_click_rename", "Double-click to rename");
-            restored.textContent = original;
-            input.replaceWith(restored);
-            card.classList.remove("is-editing-title");
-            restored.addEventListener("dblclick", () => startRename(restored));
-            if (!save || nextTitle === original) return;
-            card.classList.add("is-renaming");
-            try {
-              const project = await renameProject(card, nextTitle);
-              const savedTitle = project.title || nextTitle;
-              restored.textContent = savedTitle;
-              card.dataset.projectTitle = savedTitle;
-            } finally {
-              card.classList.remove("is-renaming");
-            }
-          };
-
-          input.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              finish(true);
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              finish(false);
-            }
-          });
-          input.addEventListener("blur", () => finish(true));
-        };
-
-        root.querySelectorAll("[data-create-project]").forEach((button) => button.addEventListener("click", async () => {
-          const state = {title: t("new_project", "New project"), aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
-          const data = await requestJson(`${apiUrl}create/`, {
-            method: "POST",
-            body: JSON.stringify({title: t("new_project", "New project"), state}),
-          });
-          window.location.href = `${editorUrl}?project=${data.project.id}`;
-        }));
-        root.querySelectorAll("[data-project-select]").forEach((input) => input.addEventListener("change", updateBulkBar));
-        root.querySelectorAll("[data-project-title-text]").forEach((titleNode) => {
-          titleNode.addEventListener("dblclick", () => startRename(titleNode));
-        });
-        clearSelection?.addEventListener("click", () => setSelection(false));
-        deleteSelected?.addEventListener("click", () => {
-          const items = selectedCards().map(projectInfo);
-          if (items.length) openModal(items);
-        });
-        root.querySelectorAll("[data-delete-project]").forEach((button) => {
-          button.addEventListener("click", () => {
-            const card = button.closest("[data-project-id]");
-            if (card) openModal([projectInfo(card)]);
-          });
-        });
-        modalCancel.forEach((button) => button.addEventListener("click", closeModal));
-        modalConfirm?.addEventListener("click", async () => {
-          if (!pendingDelete?.length || !modalConfirm) return;
-          const items = pendingDelete;
-          modalConfirm.disabled = true;
-          modalConfirm.textContent = t("deleting", "Deleting...");
-          try {
-            const data = items.length === 1
-              ? await requestJson(`${apiUrl}${items[0].id}/delete/`, {method: "POST", body: "{}"})
-              : await requestJson(`${apiUrl}delete/`, {method: "POST", body: JSON.stringify({ids: items.map((item) => item.id)})});
-            const deletedIds = data.deleted_ids || items.map((item) => item.id);
-            modal.hidden = true;
-            document.body.classList.remove("project-delete-open");
-            pendingDelete = null;
-            removeDeletedCards(deletedIds);
-          } finally {
-            modalConfirm.disabled = false;
-            modalConfirm.textContent = t("delete", "Delete");
-          }
-        });
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && modal && !modal.hidden) closeModal();
-        });
-        updateBulkBar();
-        updateEmptyState();
-      })();
     </script>
+    <script defer src="{% static 'studio/project_lists.js' %}"></script>
   </body>
 </html>
+

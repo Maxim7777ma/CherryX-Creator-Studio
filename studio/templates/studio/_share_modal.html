@@ -1,38 +1,39 @@
+{% load ui_i18n %}
 <div class="workspace-share-modal" data-share-modal data-resource-type="{{ share_resource_type }}" data-resource-id="{{ share_resource_id|default:'' }}" hidden>
   <div class="workspace-share-backdrop" data-share-close></div>
   <section class="workspace-share-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-share-title">
     <header>
-      <span>Workspace sharing</span>
-      <button type="button" data-share-close aria-label="Close"></button>
+      <span>{% ui "workspace_sharing" %}</span>
+      <button type="button" data-share-close aria-label="{% ui "close" %}"></button>
     </header>
-    <h2 id="workspace-share-title">Share project</h2>
+    <h2 id="workspace-share-title">{% ui "share_project" %}</h2>
     <div class="workspace-share-preview" data-share-preview>
       <div class="workspace-share-thumb" data-share-preview-thumb></div>
       <div>
-        <strong data-share-resource-title>Project invite</strong>
-        <span data-share-resource-label>Private project link</span>
-        <small>Invite links are valid for 14 days. Owners can change roles or revoke access any time.</small>
+        <strong data-share-resource-title>{% ui "project_invite" %}</strong>
+        <span data-share-resource-label>{% ui "private_project_link" %}</span>
+        <small>{% ui "share_valid_note" %}</small>
       </div>
     </div>
     <form data-share-form>
       <input type="email" name="email" placeholder="teammate@example.com" autocomplete="email" required>
       <input type="hidden" name="role" value="viewer">
-      <button type="submit">Send invite</button>
-      <div class="workspace-role-picker" data-role-picker aria-label="Access role">
+      <button type="submit">{% ui "send_invite" %}</button>
+      <div class="workspace-role-picker" data-role-picker aria-label="{% ui "access_role" %}">
         <button class="is-active" type="button" data-role-option="viewer" aria-pressed="true">
-          <span>View</span>
-          <small>Preview only</small>
+          <span>{% ui "view" %}</span>
+          <small>{% ui "preview_only" %}</small>
         </button>
         <button type="button" data-role-option="editor" aria-pressed="false">
-          <span>Edit</span>
-          <small>Save changes</small>
+          <span>{% ui "edit" %}</span>
+          <small>{% ui "save_changes" %}</small>
         </button>
       </div>
     </form>
     <div class="workspace-share-status" data-share-status></div>
     <div class="workspace-share-toolbar">
-      <strong>Invited people</strong>
-      <button type="button" data-share-copy-latest hidden>Copy latest link</button>
+      <strong>{% ui "invited_people" %}</strong>
+      <button type="button" data-share-copy-latest hidden>{% ui "copy_latest_link" %}</button>
     </div>
     <div class="workspace-share-list" data-share-list></div>
   </section>

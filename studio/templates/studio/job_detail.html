@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-score-ring">
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -37,7 +37,7 @@
 
     <main class="detail-layout">
       <section class="detail-main">
-        {% if job.outputs and not has_access %}
+        {% if job.outputs and not has_access and not is_originality %}
           <section class="paywall-hero">
             <div>
               <p class="eyebrow">{% ui "result_ready" %}</p>
@@ -46,6 +46,104 @@
             </div>
             <a class="primary-link" href="{{ checkout_url }}">{% ui "pay_download" %}</a>
           </section>
+        {% endif %}
+
+        {% if is_originality %}
+          <section class="detail-panel originality-job-hero">
+            <div class="originality-detail-score is-{{ originality_overall.tone|default:'none' }}" style="--score-deg: {{ originality_score_degrees|default:0 }}deg;">
+              <strong>{{ originality_overall.score|default:job.progress }}</strong>
+              <span>/100</span>
+            </div>
+            <div class="originality-detail-copy">
+              <p class="eyebrow">{% ui "originality_report_ready" %}</p>
+              <h2>{{ originality_overall.label|default:job.title }}</h2>
+              <p>
+                {% if originality_source.name %}{{ originality_source.name }} &middot;{% endif %}
+                {% if originality_source.kind_label %}{{ originality_source.kind_label }} &middot;{% endif %}
+                {{ originality_source.words|default:"0" }} {% ui "originality_words" %} &middot;
+                {{ originality_source.sentences|default:"0" }} {% ui "originality_sentences" %}
+              </p>
+              <div class="originality-detail-actions">
+                {% if originality_report_url %}
+                  <a class="primary-link" href="{{ originality_report_url }}" target="_blank" rel="noreferrer" data-icon="external-link">{% ui "originality_full_report" %}</a>
+                {% endif %}
+                <button class="secondary-action" type="button" data-copy-result-link="{{ originality_result_link }}">{% ui "copy_result_link" %}</button>
+                {% if originality_share_link %}
+                  <button class="secondary-action" type="button" data-copy-result-link="{{ originality_share_link }}">Share report</button>
+                {% endif %}
+                {% if has_access and job.outputs %}
+                  <a class="secondary-action" href="{{ job.download_all_url }}">{% ui "download_all" %}</a>
+                {% endif %}
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-panel originality-guidance">
+            <article>
+              <span data-icon="graduation-cap"></span>
+              <div>
+                <h3>{% ui "originality_student_title" %}</h3>
+                <p>{% ui "originality_student_copy" %}</p>
+              </div>
+            </article>
+            <article>
+              <span data-icon="clipboard-check"></span>
+              <div>
+                <h3>{% ui "originality_teacher_title" %}</h3>
+                <p>{% ui "originality_teacher_copy" %}</p>
+              </div>
+            </article>
+            <article>
+              <span data-icon="mail"></span>
+              <div>
+                <h3>{% ui "send_report_email" %}</h3>
+                <form class="originality-email-form" method="post" action="{{ originality_send_url }}" data-originality-email-form>
+                  {% csrf_token %}
+                  <input type="email" name="email" value="{{ originality_email_default }}" placeholder="email@example.com" required>
+                  <button class="secondary-action" type="submit">{% ui "send_report" %}</button>
+                </form>
+                <p class="originality-email-status" data-originality-email-status aria-live="polite"></p>
+              </div>
+            </article>
+            <article>
+              <span data-icon="user-check"></span>
+              <div>
+                <h3>{% ui "originality_account_title" %}</h3>
+                <p>{% if is_guest %}{% ui "originality_account_copy" %}{% else %}{% ui "originality_saved_account" %}{% endif %}</p>
+                {% if is_guest %}
+                  <a class="secondary-action" href="{{ originality_account_url }}">{% ui "login" %}</a>
+                {% endif %}
+              </div>
+            </article>
+          </section>
+
+          <section class="detail-panel originality-web-plan">
+            <article data-icon="scan-text">
+              <strong>{{ originality_check.mode_label|default:"Local" }} check</strong>
+              <span>{{ originality_check.price_cherryx|default:5 }} CherryX · {{ originality_check.web_queries_limit|default:0 }} web probes · {{ originality_check.web_status|default:"local" }}</span>
+            </article>
+            <article data-icon="external-link">
+              <strong>Share-ready result</strong>
+              <span>{% if originality_share_link %}Public report link is ready for client, teacher or teammate.{% else %}Create account storage to keep share links stable.{% endif %}</span>
+            </article>
+            <article data-icon="shield-check">
+              <strong>Provider placeholder</strong>
+              <span>Web search is prepared for SearXNG, Brave or Tavily connection later.</span>
+            </article>
+          </section>
+
+          {% if originality_recent_reports %}
+            <section class="detail-panel originality-report-list">
+              <h2>Мои проверки</h2>
+              {% for report in originality_recent_reports %}
+                <a href="{{ report.url }}">
+                  <span>{{ report.mode_label }} · {{ report.price }} CherryX</span>
+                  <b>{{ report.title }}</b>
+                  <small>{{ report.created_at|date:"d.m.Y H:i" }}</small>
+                </a>
+              {% endfor %}
+            </section>
+          {% endif %}
         {% endif %}
 
         <section class="detail-panel" data-detail-job data-job-id="{{ job.id }}">
@@ -61,7 +159,9 @@
                   <button class="secondary-action" type="submit">{% ui "repeat" %}</button>
                 </form>
               {% endif %}
-              {% if job.outputs %}
+              {% if is_originality and originality_report_url %}
+                <a class="secondary-action" href="{{ originality_report_url }}" target="_blank" rel="noreferrer">{% ui "originality_full_report" %}</a>
+              {% elif job.outputs %}
                 <a class="secondary-action" href="{{ job.download_all_url }}">{% if has_access %}{% ui "download_all" %}{% else %}{% ui "open_download" %}{% endif %}</a>
               {% endif %}
               {% if job.status != "queued" and job.status != "running" %}
@@ -76,6 +176,16 @@
             <span data-job-message>{{ job.error|default:job.message }}</span>
             <small class="job-eta" data-job-eta{% if not job.eta_text or job.status == "completed" or job.status == "failed" %} hidden{% endif %}>{{ job.eta_text }}</small>
           </p>
+          {% if job.ai_summary %}
+            <div class="ai-meta-row" data-ai-meta-row>
+              {% for meta in job.ai_summary %}
+                <span class="ai-meta-chip is-{{ meta.status|default:'unknown' }}" title="{{ meta.fallback_reason|default:meta.reason }}">
+                  <b>{{ meta.label }}</b>
+                  <small>{{ meta.detail }}</small>
+                </span>
+              {% endfor %}
+            </div>
+          {% endif %}
           <div class="progress detail-progress" aria-label="progress">
             <span data-job-progress style="width: {{ job.progress }}%"></span>
           </div>
@@ -83,27 +193,36 @@
 
         <section class="detail-panel">
           <div class="section-title">
-            <h2>{% ui "results" %}</h2>
-            <span><b data-output-count>{{ job.outputs|length }}</b> {% ui "files" %}</span>
+            <h2>{% if is_originality %}{% ui "originality_full_report" %}{% else %}{% ui "results" %}{% endif %}</h2>
+            <span><b data-output-count>{{ display_outputs|length }}</b> {% ui "files" %}</span>
           </div>
-          <div class="empty-jobs" data-empty-outputs{% if job.outputs %} hidden{% endif %}>{% ui "no_outputs" %}</div>
-          {% if job.outputs %}
+          <div class="empty-jobs" data-empty-outputs{% if display_outputs %} hidden{% endif %}>{% ui "no_outputs" %}</div>
+          {% if display_outputs %}
             <div class="preview-grid" data-preview-grid>
-              {% for output in job.outputs %}
+              {% for output in display_outputs %}
                 <article class="preview-card" data-output-index="{{ forloop.counter0 }}">
                   <div class="preview-head">
                     <div>
                       <h3>{{ output.label }}</h3>
-                      <p>{{ output.name }} · {{ output.size_text }}</p>
+                      <p>{{ output.name }} &middot; {{ output.size_text }}</p>
                     </div>
                     <div class="output-actions">
                       {% if output.can_edit_design %}
-                        <button class="output-link compact" type="button" data-edit-design-url="{{ output.edit_design_url }}">Редактировать дизайн</button>
+                        <button class="output-link compact" type="button" data-edit-design-url="{{ output.edit_design_url }}">{% ui "edit_design" %}</button>
                       {% endif %}
                       {% if output.can_edit_video %}
-                        <button class="output-link compact" type="button" data-edit-video-url="{{ output.edit_video_url }}">Редактировать видео</button>
+                        <button class="output-link compact" type="button" data-edit-video-url="{{ output.edit_video_url }}">{% ui "edit_video" %}</button>
                       {% endif %}
-                      <a class="output-link compact" href="{{ output.url }}" download>{% if has_access %}{% ui "download" %}{% else %}Checkout{% endif %}</a>
+                      {% if is_originality %}
+                        <a class="output-link compact" href="{{ output.preview_url }}" target="_blank" rel="noreferrer">{% ui "open" %}</a>
+                        {% if has_access %}
+                          <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
+                        {% endif %}
+                      {% elif has_access %}
+                        <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
+                      {% else %}
+                        <a class="output-link compact" href="{{ checkout_url }}">Checkout</a>
+                      {% endif %}
                     </div>
                   </div>
 
@@ -153,7 +272,7 @@
                 <li>
                   <span class="timeline-dot"></span>
                   <div>
-                    <p class="timeline-meta">{{ event.created_at_text }} · {{ event.progress }}% · {{ event.status_label }}</p>
+                    <p class="timeline-meta">{{ event.created_at_text }} &middot; {{ event.progress }}% &middot; {{ event.status_label }}</p>
                     <p>{{ event.message }}</p>
                   </div>
                 </li>
@@ -171,13 +290,20 @@
         if (!root) return;
         const jobId = root.dataset.jobId;
         const hasAccess = {{ has_access|yesno:"true,false" }};
+        const isOriginality = {{ is_originality|yesno:"true,false" }};
         const labels = {
           queued: "{% ui "queued" %}",
           running: "{% ui "active_jobs" %}",
           completed: "{% ui "completed" %}",
           failed: "{% ui "failed" %}",
           download: "{% ui "download" %}",
+          open: "{% ui "open" %}",
           checkout: "Checkout",
+          copied: "{% ui "result_link_copied" %}",
+          send: "{% ui "send_report" %}",
+          sending: "{% ui "sending_invite" %}",
+          emailSent: "{% ui "originality_email_sent" %}",
+          emailFailed: "{% ui "originality_email_failed" %}",
         };
         const statusNode = document.querySelector("[data-job-status]");
         const messageNode = document.querySelector("[data-job-message]");
@@ -195,11 +321,20 @@
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#039;");
 
+        const isDisplayOutput = (output) => {
+          if (!isOriginality) return true;
+          const name = String(output?.name || "").toLowerCase();
+          const mediaType = String(output?.media_type || "").toLowerCase();
+          return name.endsWith(".html") || mediaType.startsWith("text/html");
+        };
+
         const renderOutput = (output) => {
           const label = html(output.label || output.name || "");
           const name = html(output.name || "");
           const size = html(output.size_text || "");
-          const action = hasAccess ? labels.download : labels.checkout;
+          const action = isOriginality ? labels.open : (hasAccess ? labels.download : labels.checkout);
+          const actionHref = isOriginality ? output.preview_url : (hasAccess ? output.url : "{{ checkout_url|escapejs }}");
+          const downloadAttr = !isOriginality && hasAccess ? " download" : "";
             let body = `<div class="preview-missing">{% ui "preview_unavailable" %}</div>`;
           if (!output.exists) {
             body = `<div class="preview-missing">{% ui "file_missing" %}</div>`;
@@ -229,12 +364,12 @@
               <div class="preview-head">
                 <div>
                   <h3>${label}</h3>
-                  <p>${name} · ${size}</p>
+                  <p>${name} &middot; ${size}</p>
                 </div>
                 <div class="output-actions">
-                  ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">Редактировать дизайн</button>` : ""}
-                  ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">Редактировать видео</button>` : ""}
-                  <a class="output-link compact" href="${html(output.url)}" download>${html(action)}</a>
+                  ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">{% ui "edit_design" %}</button>` : ""}
+                  ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">{% ui "edit_video" %}</button>` : ""}
+                  <a class="output-link compact" href="${html(actionHref)}"${downloadAttr}>${html(action)}</a>
                 </div>
               </div>
               ${body}
@@ -246,6 +381,71 @@
           const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
           return match ? decodeURIComponent(match[1]) : "";
         };
+
+        document.addEventListener("click", async (event) => {
+          const button = event.target instanceof Element ? event.target.closest("[data-copy-result-link]") : null;
+          if (!button) return;
+          event.preventDefault();
+          const value = button.dataset.copyResultLink || window.location.href;
+          const original = button.textContent;
+          try {
+            await navigator.clipboard.writeText(value);
+            button.textContent = labels.copied;
+          } catch {
+            const input = document.createElement("input");
+            input.value = value;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+            button.textContent = labels.copied;
+          }
+          window.setTimeout(() => {
+            button.textContent = original;
+          }, 1800);
+        });
+
+        document.querySelectorAll("[data-originality-email-form]").forEach((form) => {
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const button = form.querySelector("button[type='submit']");
+            const status = form.closest("article")?.querySelector("[data-originality-email-status]");
+            const original = button ? button.textContent : "";
+            if (button) {
+              button.disabled = true;
+              button.textContent = labels.sending || labels.send;
+            }
+            if (status) {
+              status.textContent = "";
+              status.className = "originality-email-status";
+            }
+            try {
+              const response = await fetch(form.action, {
+                method: "POST",
+                body: new FormData(form),
+                headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+              });
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(payload.error || labels.emailFailed);
+              if (status) {
+                status.textContent = payload.message || labels.emailSent;
+                status.classList.add("is-success");
+              }
+            } catch (error) {
+              if (status) {
+                status.textContent = error.message || labels.emailFailed;
+                status.classList.add("is-error");
+              } else {
+                alert(error.message || labels.emailFailed);
+              }
+            } finally {
+              if (button) {
+                button.disabled = false;
+                button.textContent = original || labels.send;
+              }
+            }
+          });
+        });
 
         document.addEventListener("click", async (event) => {
           const button = event.target instanceof Element ? event.target.closest("[data-edit-design-url]") : null;
@@ -264,7 +464,7 @@
             if (!response.ok || !data.designer_url) throw new Error(data.error || "Design import failed");
             window.location.href = data.designer_url;
           } catch (error) {
-            button.textContent = original || "Редактировать дизайн";
+            button.textContent = original || "{% ui "edit_design" %}";
             button.dataset.loading = "0";
             alert(error.message || "Design import failed");
           }
@@ -287,7 +487,7 @@
             if (!response.ok || !data.video_editor_url) throw new Error(data.error || "Video import failed");
             window.location.href = data.video_editor_url;
           } catch (error) {
-            button.textContent = original || "Редактировать видео";
+            button.textContent = original || "{% ui "edit_video" %}";
             button.dataset.loading = "0";
             alert(error.message || "Video import failed");
           }
@@ -306,7 +506,7 @@
             etaNode.hidden = true;
             etaNode.textContent = "";
           }
-          const outputs = Array.isArray(job.outputs) ? job.outputs : [];
+          const outputs = (Array.isArray(job.outputs) ? job.outputs : []).filter(isDisplayOutput);
           outputCountNode.textContent = String(outputs.length);
           empty.hidden = outputs.length > 0;
           const liveIndexes = new Set();

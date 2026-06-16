@@ -465,16 +465,16 @@ def image_weight_note(source_size: int, output_size: int) -> str:
     return utils_image_weight_note(source_size, output_size)
 
 
-def publication_hashtags(title: str) -> list[str]:
-    return utils_publication_hashtags(title)
+def publication_hashtags(title: str, transcript_text: str = "") -> list[str]:
+    return utils_publication_hashtags(title, transcript_text)
 
 
 def re_words(text: str) -> list[str]:
     return utils_re_words(text)
 
 
-def publication_description(title: str, duration_seconds: float | None, hashtags: list[str], subtitle_note: str) -> str:
-    return utils_publication_description(title, format_duration(duration_seconds), hashtags, subtitle_note)
+def publication_description(title: str, duration_seconds: float | None, hashtags: list[str], subtitle_note: str, transcript_text: str = "", language: str | None = None) -> str:
+    return utils_publication_description(title, format_duration(duration_seconds), hashtags, subtitle_note, transcript_text, language)
 
 
 def zip_files(paths: list[Path], output: Path) -> Path:
@@ -2195,6 +2195,7 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
         await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 3, "Пробую добавить Pop-субтитры"))
         subtitled_path: Path | None = None
         subtitle_note = "Субтитры: речь не найдена или распознавание недоступно."
+        transcript_text = ""
         try:
             cues = await asyncio.to_thread(
                 transcribe_subtitle_cues,
@@ -2203,6 +2204,7 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
                 settings.subtitle_language or None,
             )
             if cues:
+                transcript_text = " ".join(cue.text for cue in cues[:24] if getattr(cue, "text", ""))
                 assets = await asyncio.to_thread(
                     create_subtitle_assets,
                     job.path,
@@ -2221,9 +2223,16 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
         state["stage"] = "Пакет публикации: описание"
         await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 4, "Пишу описание и хештеги"))
         description_path = output_dir / "description.txt"
-        hashtags = publication_hashtags(job.title)
+        hashtags = publication_hashtags(job.title, transcript_text)
         description_path.write_text(
-            publication_description(job.title, info.duration_seconds, hashtags, subtitle_note),
+            publication_description(
+                job.title,
+                info.duration_seconds,
+                hashtags,
+                subtitle_note,
+                transcript_text,
+                settings.subtitle_language,
+            ),
             encoding="utf-8",
         )
         package_files.append(description_path)

@@ -1,0 +1,72 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ style_detail.label }} - {% ui "subtitle_style" %}</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
+  </head>
+  <body class="theme-{{ theme_mode }} subtitle-style-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar detail-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow"><a class="back-link" href="{{ back_url }}">{% ui "back_to_project" %}</a></p>
+        <h1>{{ style_detail.label }}</h1>
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <a class="topbar-link detail-workspace-link" href="{{ back_url }}">{% ui "use_this_style" %}</a>
+      </div>
+    </header>
+
+    <main class="subtitle-style-detail subtitle-style-detail-v2">
+      <section class="subtitle-style-stage is-{{ style_detail.preview_class }}">
+        <div class="subtitle-style-stage-top">
+          <span>{% ui "subtitle_style" %}</span>
+          <b>{{ style_detail.label }}</b>
+        </div>
+        <div class="subtitle-style-stage-screen">
+          <div class="subtitle-style-stage-media"></div>
+          <div class="subtitle-style-stage-ui">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="subtitle-style-demo-line is-{{ style_detail.preview_class }}">
+            <span>{{ style_detail.preview_text }}</span>
+          </div>
+        </div>
+        <div class="subtitle-style-stage-timeline">
+          <span></span>
+          <b></b>
+          <span></span>
+        </div>
+      </section>
+
+      <section class="subtitle-style-detail-copy">
+        <span>Subtitle Style Lab</span>
+        <h2>{{ style_detail.short }}</h2>
+        <p>{{ style_detail.description }}</p>
+        <div class="subtitle-style-specs">
+          <span>Mobile reels</span>
+          <span>Burned captions</span>
+          <span>Preview ready</span>
+        </div>
+        <dl>
+          <div>
+            <dt>{% ui "how_it_looks" %}</dt>
+            <dd>{{ style_detail.look }}</dd>
+          </div>
+          <div>
+            <dt>{% ui "best_for" %}</dt>
+            <dd>{{ style_detail.best_for }}</dd>
+          </div>
+        </dl>
+        <div class="subtitle-style-actions">
+          <a class="primary-action subtitle-style-return" href="{{ back_url }}">{% ui "use_this_style" %}</a>
+          <a class="secondary-action subtitle-style-return" href="{{ back_url }}">{% ui "back_to_project" %}</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

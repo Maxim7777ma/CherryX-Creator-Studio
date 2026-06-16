@@ -124,36 +124,140 @@ def re_words(text: str) -> list[str]:
     return re.findall(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9]+", text or "")
 
 
-def publication_hashtags(title: str) -> list[str]:
-    words = [word.lower() for word in re_words(title) if len(word) >= 4][:6]
+def publication_hashtags(title: str, transcript_text: str = "") -> list[str]:
+    source_words = re_words(f"{title} {transcript_text}")
+    words = [word.lower() for word in source_words if _hashtag_word_allowed(word)]
     tags = ["#shorts", "#video"]
     for word in words:
         clean = re.sub(r"[^\w]+", "", word, flags=re.UNICODE)
-        if clean:
+        if clean and len(clean) >= 3:
             tags.append("#" + clean[:24])
     unique: list[str] = []
     for tag in tags:
         if tag not in unique:
             unique.append(tag)
-    return unique[:8]
+    return unique[:12]
 
 
-def publication_description(title: str, duration_text: str, hashtags: list[str], subtitle_note: str) -> str:
-    return "\n".join(
-        [
-            title.strip() or "Видео",
-            "",
-            "Готово для публикации:",
-            "- видео",
-            "- PNG-обложка 1280x720",
-            f"- {subtitle_note}",
-            "",
-            f"Длительность: {duration_text}",
-            "",
-            "Хештеги:",
-            " ".join(hashtags),
-        ]
+def publication_description(title: str, duration_text: str, hashtags: list[str], subtitle_note: str, transcript_text: str = "", language: str | None = None) -> str:
+    profile = _publication_language_profile(language, title, transcript_text)
+    clean_title = _publication_clean_title(title)
+    transcript_summary = _publication_summary(transcript_text, clean_title)
+    hook = _publication_hook(clean_title, transcript_summary, profile)
+    body = _publication_body(clean_title, transcript_summary, duration_text, profile)
+    cta = profile["cta"]
+    tags = " ".join(hashtags)
+    quality_note = _publication_quality_note(subtitle_note, profile)
+
+    parts = [
+        hook,
+        "",
+        body,
+        "",
+        cta,
+    ]
+    if quality_note:
+        parts.extend(["", quality_note])
+    if tags:
+        parts.extend(["", tags])
+    return "\n".join(part for part in parts if part is not None).strip() + "\n"
+
+
+def _hashtag_word_allowed(word: str) -> bool:
+    lower = word.lower()
+    if len(lower) < 4:
+        return False
+    stop = {
+        "video", "shorts", "test", "тест", "тестовое", "видео", "ролик", "short", "this", "that", "with",
+        "для", "про", "как", "это", "цей", "для", "und", "the", "and", "или", "или",
+    }
+    return lower not in stop
+
+
+def _publication_clean_title(title: str) -> str:
+    value = re.sub(r"[_\-]+", " ", title or "").strip()
+    value = re.sub(r"\s+", " ", value)
+    if not value:
+        return "Видео"
+    return value[:96]
+
+
+def _publication_summary(transcript_text: str, title: str) -> str:
+    text = re.sub(r"\s+", " ", transcript_text or "").strip()
+    if not text:
+        return title
+    sentences = re.split(r"(?<=[.!?…])\s+", text)
+    scored = sorted(
+        (sentence.strip() for sentence in sentences if len(sentence.strip()) >= 18),
+        key=lambda item: (len(re_words(item)), len(item)),
+        reverse=True,
     )
+    if scored:
+        return scored[0][:180].rstrip(" ,;:")
+    return text[:180].rstrip(" ,;:")
+
+
+def _publication_language_profile(language: str | None, title: str, transcript_text: str) -> dict[str, str]:
+    code = (language or "").lower()
+    sample = f"{title} {transcript_text}".lower()
+    if not code or code == "auto":
+        if re.search(r"[іїєґ]", sample):
+            code = "uk"
+        elif re.search(r"[а-яё]", sample):
+            code = "ru"
+        else:
+            code = "en"
+    profiles = {
+        "ru": {
+            "hook_prefix": "Смотрите до конца:",
+            "body_prefix": "В этом коротком видео",
+            "duration": "Длительность",
+            "cta": "Сохрани, чтобы не потерять, и напиши в комментариях, что думаешь.",
+            "subtitles": "Субтитры уже добавлены.",
+        },
+        "uk": {
+            "hook_prefix": "Дивіться до кінця:",
+            "body_prefix": "У цьому короткому відео",
+            "duration": "Тривалість",
+            "cta": "Збережи, щоб не загубити, і напиши в коментарях, що думаєш.",
+            "subtitles": "Субтитри вже додано.",
+        },
+        "en": {
+            "hook_prefix": "Watch this:",
+            "body_prefix": "In this short video",
+            "duration": "Duration",
+            "cta": "Save it for later and drop your thoughts in the comments.",
+            "subtitles": "Subtitles are included.",
+        },
+    }
+    return profiles.get(code, profiles["en"])
+
+
+def _publication_hook(title: str, summary: str, profile: dict[str, str]) -> str:
+    base = summary if summary and summary.lower() != title.lower() else title
+    base = re.sub(r"\s+", " ", base).strip(" .")
+    if len(base) > 96:
+        base = base[:93].rstrip(" ,;:") + "..."
+    return f"{profile['hook_prefix']} {base}"
+
+
+def _publication_body(title: str, summary: str, duration_text: str, profile: dict[str, str]) -> str:
+    subject = summary if summary and summary.lower() != title.lower() else title
+    subject = subject.strip(" .")
+    if len(subject) > 160:
+        subject = subject[:157].rstrip(" ,;:") + "..."
+    if title and title.lower() not in subject.lower():
+        subject = f"{title}: {subject}"
+    return f"{profile['body_prefix']} — {subject}. {profile['duration']}: {duration_text}."
+
+
+def _publication_quality_note(subtitle_note: str, profile: dict[str, str]) -> str:
+    if not subtitle_note:
+        return ""
+    lowered = subtitle_note.lower()
+    if "добав" in lowered or "added" in lowered:
+        return profile["subtitles"]
+    return ""
 
 
 def unique_archive_name(original_name: str, used_names: set[str]) -> str:

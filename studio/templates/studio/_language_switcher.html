@@ -18,4 +18,102 @@
       </button>
     {% endfor %}
   </div>
+  <span class="language-scrollbar" aria-hidden="true"><span></span></span>
 </form>
+<script>
+  (() => {
+    if (!window.CXLanguageSwitcherReady) {
+      window.CXLanguageSwitcherReady = true;
+      const bindSwitchers = () => {
+        document.querySelectorAll(".language-switcher").forEach((switcher) => {
+          if (switcher.dataset.languageSwitcherBound === "1") return;
+          const button = switcher.querySelector(".language-current");
+          if (!button) return;
+          switcher.dataset.languageSwitcherBound = "1";
+          const positionMenu = () => {
+            const rect = button.getBoundingClientRect();
+            const safeGap = 14;
+            const menuWidth = 230;
+            const right = Math.max(safeGap, window.innerWidth - rect.right);
+            const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+            switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+            switcher.style.setProperty(
+              "--language-menu-right",
+              `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+            );
+          };
+          const close = () => {
+            switcher.classList.remove("is-open");
+            button.setAttribute("aria-expanded", "false");
+          };
+          switcher.addEventListener("click", (event) => event.stopPropagation());
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const open = switcher.classList.toggle("is-open");
+            button.setAttribute("aria-expanded", open ? "true" : "false");
+            if (open) positionMenu();
+          });
+          window.addEventListener("resize", () => {
+            if (switcher.classList.contains("is-open")) positionMenu();
+          });
+          window.addEventListener("scroll", () => {
+            if (switcher.classList.contains("is-open")) positionMenu();
+          }, { passive: true });
+          document.addEventListener("click", (event) => {
+            if (!switcher.contains(event.target)) close();
+          });
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") close();
+          });
+        });
+      };
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bindSwitchers);
+      } else {
+        bindSwitchers();
+      }
+    }
+
+    if (window.CXLanguageScrollbarReady) return;
+    window.CXLanguageScrollbarReady = true;
+
+    const bind = () => {
+      document.querySelectorAll(".language-switcher").forEach((switcher) => {
+        if (switcher.dataset.languageScrollbarBound === "1") return;
+        const menu = switcher.querySelector(".language-menu");
+        const scrollbar = switcher.querySelector(".language-scrollbar");
+        const thumb = scrollbar?.querySelector("span");
+        if (!menu || !scrollbar || !thumb) return;
+        switcher.dataset.languageScrollbarBound = "1";
+
+        const update = () => {
+          const viewport = menu.clientHeight;
+          const content = menu.scrollHeight;
+          const inset = 14;
+          const trackHeight = Math.max(0, viewport - inset * 2);
+          const maxScroll = Math.max(0, content - viewport);
+          const canScroll = maxScroll > 1 && trackHeight > 42;
+          scrollbar.hidden = !canScroll;
+          if (!canScroll) return;
+          const thumbHeight = Math.min(trackHeight, Math.max(34, Math.round((viewport / content) * trackHeight)));
+          const travel = Math.max(1, trackHeight - thumbHeight);
+          const thumbTop = Math.round((menu.scrollTop / maxScroll) * travel);
+          switcher.style.setProperty("--language-scrollbar-height", `${trackHeight}px`);
+          switcher.style.setProperty("--language-scrollbar-thumb-height", `${thumbHeight}px`);
+          switcher.style.setProperty("--language-scrollbar-thumb-top", `${thumbTop}px`);
+        };
+
+        menu.addEventListener("scroll", update, {passive: true});
+        window.addEventListener("resize", update);
+        new MutationObserver(() => requestAnimationFrame(update)).observe(switcher, {attributes: true, attributeFilter: ["class"]});
+        requestAnimationFrame(update);
+      });
+    };
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", bind);
+    } else {
+      bind();
+    }
+  })();
+</script>

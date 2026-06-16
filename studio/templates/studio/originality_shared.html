@@ -1,0 +1,46 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CherryX Originality Report</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-originality-share">
+  </head>
+  <body class="theme-{{ theme_mode }} detail-page originality-share-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <main class="originality-share-shell">
+      <header class="originality-share-hero">
+        <div class="originality-detail-score is-{{ overall.tone|default:'none' }}" style="--score-deg: {{ score_degrees|default:0 }}deg;">
+          <strong>{{ overall.score|default:0 }}</strong>
+          <span>/100</span>
+        </div>
+        <div>
+          <p class="eyebrow">Verified by CherryX Originality</p>
+          <h1>{{ overall.label|default:"Originality report" }}</h1>
+          <p>
+            {% if source.name %}{{ source.name }} · {% endif %}
+            {{ source.words|default:0 }} words · {{ check.mode_label|default:"Local" }} · {{ check.price_cherryx|default:5 }} CherryX
+          </p>
+          {% if report_url %}
+            <a class="primary-link" href="{{ report_url }}" target="_blank" rel="noreferrer">Open full report</a>
+          {% endif %}
+        </div>
+      </header>
+
+      <section class="originality-share-metrics">
+        {% for metric in metrics %}
+          <article>
+            <span>{{ metric.label }}</span>
+            <b>{{ metric.score }}</b>
+            <small>{{ metric.detail }}</small>
+          </article>
+        {% endfor %}
+      </section>
+
+      <section class="originality-share-note">
+        <strong>Share settings</strong>
+        <span>This public link can be sent to a teacher, client or teammate. Web-source matching is prepared as a provider stub and can later connect to SearXNG, Brave Search or Tavily.</span>
+      </section>
+    </main>
+  </body>
+</html>

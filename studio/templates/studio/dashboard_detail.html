@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Stats - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
     <script defer src="{% static 'studio/stats_files.js' %}"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page stats-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -43,43 +43,7 @@
       {% if section == "files" or section == "storage" %}
         {% include "studio/dashboard_files_section.html" %}
       {% else %}
-        <section class="detail-panel">
-          <div class="section-title">
-            <h2>{% ui "tasks" %}</h2>
-            <span>{{ jobs|length }}</span>
-          </div>
-          <div class="stats-list">
-            {% for job in jobs %}
-              <article class="stats-row">
-                <span>
-                  <b>{{ job.title }}</b>
-                  <small>{{ job.message }}</small>
-                </span>
-                <strong>{{ job.progress }}%</strong>
-                <div class="stats-actions">
-                  <a href="{{ job.detail_url }}">Открыть</a>
-                  {% if job.repeatable %}
-                    <form method="post" action="{{ job.repeat_url }}">
-                      {% csrf_token %}
-                      <button type="submit">{% ui "repeat" %}</button>
-                    </form>
-                  {% endif %}
-                  {% if job.outputs %}
-                    <a href="{{ job.download_all_url }}">{% ui "download_all" %}</a>
-                  {% endif %}
-                  {% if job.status != "queued" and job.status != "running" %}
-                    <form method="post" action="{{ job.delete_url }}">
-                      {% csrf_token %}
-                      <button class="is-danger" type="submit">{% ui "delete" %}</button>
-                    </form>
-                  {% endif %}
-                </div>
-              </article>
-            {% empty %}
-              <div class="empty-jobs">{% ui "empty_tasks" %}</div>
-            {% endfor %}
-          </div>
-        </section>
+        {% include "studio/dashboard_tasks_section.html" %}
       {% endif %}
     </main>
   </body>

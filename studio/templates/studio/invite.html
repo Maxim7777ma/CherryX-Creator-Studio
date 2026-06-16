@@ -1,35 +1,35 @@
-{% load static %}
+{% load static ui_i18n %}
 <!doctype html>
 <html lang="{{ interface_language|default:'en' }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX invite</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="theme-{{ theme_mode }} invite-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <main class="invite-shell">
       <section class="invite-hero">
         <a class="back-link eyebrow" href="{% url 'studio:landing' %}">CherryX Creator Studio</a>
         <span>{{ resource_label }}</span>
-        <h1>{% if status == "wrong_email" %}This invite is for another email{% elif status == "expired" %}Invite expired{% elif status == "missing" %}Project unavailable{% else %}You were invited to collaborate{% endif %}</h1>
+        <h1>{% if status == "wrong_email" %}{% ui "invite_wrong_email_title" %}{% elif status == "expired" %}{% ui "invite_expired_title" %}{% elif status == "missing" %}{% ui "invite_missing_title" %}{% else %}{% ui "invite_ready_title" %}{% endif %}</h1>
         <p>
           {% if status == "ready" %}
-            {{ owner_display }} invited you to open <b>{{ resource_title }}</b> as {{ role }}.
+            {{ owner_display }} {% ui "invite_ready_prefix" %} <b>{{ resource_title }}</b> {% ui "invite_ready_as" %} {% if role == "editor" %}{% ui "role_editor" %}{% else %}{% ui "role_viewer" %}{% endif %}.
           {% elif status == "wrong_email" %}
-            Sign in with {{ share.email }} to accept this CherryX invite.
+            {% ui "invite_wrong_email_copy" %}
           {% elif status == "expired" %}
-            Ask the owner to send a fresh invitation.
+            {% ui "invite_expired_copy" %}
           {% else %}
-            The project may have been removed or the invitation was revoked.
+            {% ui "invite_missing_copy" %}
           {% endif %}
         </p>
         <div class="invite-actions">
           {% if status == "ready" or status == "wrong_email" %}
-            <a class="primary-action" href="{{ login_url }}">Sign in to accept</a>
-            <a class="topbar-link detail-workspace-link" href="{{ register_url }}">Create account</a>
+            <a class="primary-action" href="{{ login_url }}">{% ui "sign_in_accept" %}</a>
+            <a class="topbar-link detail-workspace-link" href="{{ register_url }}">{% ui "create_account" %}</a>
           {% else %}
-            <a class="primary-action" href="{% url 'studio:landing' %}">Back to CherryX</a>
+            <a class="primary-action" href="{% url 'studio:landing' %}">{% ui "back_to_cherryx" %}</a>
           {% endif %}
         </div>
       </section>
@@ -38,9 +38,9 @@
           <span>{{ resource_label }}</span>
         </div>
         <div>
-          <small>Shared project</small>
+          <small>{% ui "shared_project" %}</small>
           <strong>{{ resource_title }}</strong>
-          <p>{{ owner_display }} · {{ role|title }} access</p>
+          <p>{{ owner_display }} &middot; {% if role == "editor" %}{% ui "role_editor" %}{% else %}{% ui "role_viewer" %}{% endif %} {% ui "access" %}</p>
         </div>
       </section>
     </main>

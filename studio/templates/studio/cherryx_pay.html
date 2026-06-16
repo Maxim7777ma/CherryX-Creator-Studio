@@ -1,0 +1,323 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CherryX Pay - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-cherryx-pay-flow">
+  </head>
+  <body class="theme-{{ theme_mode }} detail-page cherryx-pay-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+    <header class="topbar studio-topbar detail-topbar cherryx-pay-topbar">
+      <div class="topbar-copy">
+        <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
+        <h1><span class="cherryx-brand-red">CherryX</span> Pay</h1>
+        <p class="topbar-note">Внутренний баланс для пакетов доступа, разовых функций и переводов между аккаунтами.</p>
+      </div>
+      <div class="limits account-bar">
+        {% include "studio/_language_switcher.html" %}
+        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">Студия</a>
+        <a class="topbar-link" href="{{ pricing_url }}">Тарифы</a>
+      </div>
+    </header>
+
+    <main class="cherryx-pay-shell is-minimal" data-cherryx-pay data-rate="{{ usd_rate }}" data-balance="{{ balance }}">
+      <section class="cherryx-pay-summary" aria-label="CherryX wallet summary">
+        <article class="cherryx-balance-tile" data-icon="wallet-cards">
+          <span>Баланс</span>
+          <strong><b data-pay-balance>{{ balance }}</b> <span class="cherryx-brand-red">CherryX</span></strong>
+          <small>Доступно для Studio</small>
+        </article>
+        <article class="cherryx-mini-tile" data-icon="badge-dollar-sign">
+          <span>Курс</span>
+          <strong>1 USD = {{ usd_rate }} CherryX</strong>
+          <small><i class="flag-us" aria-label="USA"></i> USA / CherryX</small>
+        </article>
+        <article class="cherryx-mini-tile" data-icon="shield-check">
+          <span>Защита</span>
+          <strong>Confirm first</strong>
+          <small>Email confirmation</small>
+        </article>
+        <article class="cherryx-mini-tile" data-icon="receipt-text">
+          <span>Оплата</span>
+          <strong>Пакеты и функции</strong>
+          <small>Pay as you go</small>
+        </article>
+      </section>
+
+      <section class="cherryx-pay-grid">
+        <form class="cherryx-pay-panel is-compact" data-topup-form>
+          <header>
+            <span data-icon="credit-card"></span>
+            <div>
+              <strong>Пополнить</strong>
+              <small>Demo-flow перед подключением Stripe, WayForPay или LiqPay.</small>
+            </div>
+          </header>
+          <div class="cherryx-quick-amounts" aria-label="Quick top up amounts">
+            <button type="button" data-usd-amount="1">$1</button>
+            <button type="button" data-usd-amount="5">$5</button>
+            <button type="button" data-usd-amount="10">$10</button>
+            <button type="button" data-usd-amount="25">$25</button>
+          </div>
+          <label>
+            <span>USD</span>
+            <input type="number" min="1" step="1" value="10" name="usd" data-topup-usd>
+          </label>
+          <div class="cherryx-conversion">
+            <span>Получишь</span>
+            <b><em data-topup-credits>1000</em> CherryX</b>
+          </div>
+          <button class="primary-action" type="submit" data-icon="circle-plus">Пополнить баланс</button>
+          <p data-topup-status></p>
+        </form>
+
+        <form class="cherryx-pay-panel is-compact" data-transfer-form>
+          <header>
+            <span data-icon="send"></span>
+            <div>
+              <strong>Перевести</strong>
+              <small>На другой аккаунт CherryX по email.</small>
+            </div>
+          </header>
+          <label>
+            <span>Email</span>
+            <input type="email" name="email" placeholder="client@example.com" required>
+          </label>
+          <label>
+            <span>CherryX</span>
+            <input type="number" min="1" step="1" value="250" name="credits" required>
+          </label>
+          <label class="cherryx-confirm">
+            <input type="checkbox" required>
+            <span>Подтверждаю перевод</span>
+          </label>
+          <button class="primary-action" type="submit" data-icon="send">Отправить</button>
+          <p data-transfer-status></p>
+        </form>
+      </section>
+
+      <section class="cherryx-plan-grid" aria-label="CherryX access packages">
+        <article>
+          <span>Для теста</span>
+          <b>Старт</b>
+          <strong>100 CherryX</strong>
+          <small>3 дня · 512 MB · полный поток скачивания</small>
+          <button type="button" data-pay-action data-title="Оплатить Старт" data-cost="100" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <a href="/billing/checkout/?plan=free">Checkout $1</a>
+        </article>
+        <article>
+          <span>Быстрый запуск</span>
+          <b>Starter</b>
+          <strong>900 CherryX</strong>
+          <small>7 дней · 2 GB · история задач и повтор запусков</small>
+          <button type="button" data-pay-action data-title="Оплатить Starter" data-cost="900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <a href="/billing/checkout/?plan=starter">Checkout $9</a>
+        </article>
+        <article class="is-featured">
+          <span>Лучший выбор</span>
+          <b>Creator Pro</b>
+          <strong>1900 CherryX</strong>
+          <small>30 дней · 20 GB · Shorts, обложки, субтитры, ZIP, PDF</small>
+          <button type="button" data-pay-action data-title="Оплатить Creator Pro" data-cost="1900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <a href="/billing/checkout/?plan=pro">Checkout $19</a>
+        </article>
+        <article>
+          <span>Для команды</span>
+          <b>Studio</b>
+          <strong>4900 CherryX</strong>
+          <small>90 дней · 100 GB · клиентские проекты и архив</small>
+          <button type="button" data-pay-action data-title="Оплатить Studio" data-cost="4900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <a href="/billing/checkout/?plan=studio">Checkout $49</a>
+        </article>
+      </section>
+
+      <section class="cherryx-pay-rows" aria-label="CherryX spend options">
+        <header>
+          <span data-icon="sparkles"></span>
+          <div>
+            <strong>Разовые функции за CherryX</strong>
+            <small>Бюджетные списания, когда подписка не нужна или нужен один результат.</small>
+          </div>
+        </header>
+        <article data-icon="refresh-cw"><b>Конвертация</b><span>Один файл, preview и готовое скачивание</span><strong>10</strong><button type="button" data-pay-action data-title="Оплатить конвертацию" data-cost="10" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="file-user"><b>PDF-резюме</b><span>Один экспорт PDF по шаблону</span><strong>30</strong><button type="button" data-pay-action data-title="Оплатить PDF-резюме" data-cost="30" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="image"><b>Обложка</b><span>PNG-обложка или AI-background</span><strong>35</strong><button type="button" data-pay-action data-title="Оплатить обложку" data-cost="35" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="captions"><b>Субтитры</b><span>SRT/VTT или MP4 с оформлением</span><strong>45</strong><button type="button" data-pay-action data-title="Оплатить субтитры" data-cost="45" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="youtube"><b>YouTube / Shorts</b><span>Один короткий клип или preview</span><strong>60</strong><button type="button" data-pay-action data-title="Оплатить YouTube / Shorts" data-cost="60" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="package"><b>Пакет публикации</b><span>ZIP, превью, тексты и ассеты</span><strong>75</strong><button type="button" data-pay-action data-title="Оплатить пакет публикации" data-cost="75" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="palette"><b>Дизайн экспорт</b><span>Макет, обложка или презентация</span><strong>20</strong><button type="button" data-pay-action data-title="Оплатить дизайн экспорт" data-cost="20" data-kind="Функция">Оплатить</button></article>
+        <article data-icon="zap"><b>Priority job</b><span>Быстрая очередь обработки</span><strong>25</strong><button type="button" data-pay-action data-title="Оплатить Priority job" data-cost="25" data-kind="Функция">Оплатить</button></article>
+      </section>
+
+      <section class="cherryx-pay-bottom">
+        <article class="cherryx-pay-note" data-icon="lock-keyhole">
+          <strong>Как работает подтверждение</strong>
+          <span>Любое списание сначала открывает модалку. В реальной версии перевод подтвердится email-кодом или 2FA, а пополнение пройдет через платежного провайдера.</span>
+        </article>
+        <article class="cherryx-pay-note" data-icon="history">
+          <strong>Последние операции</strong>
+          <span>Top up +1000 CherryX · Transfer pending 250 CherryX · Creator Pro draft 1900 CherryX</span>
+        </article>
+      </section>
+    </main>
+
+    <div class="cherryx-confirm-modal" data-confirm-modal hidden>
+      <div class="cherryx-confirm-backdrop" data-confirm-close></div>
+      <section role="dialog" aria-modal="true" aria-labelledby="cherryx-confirm-title">
+        <header>
+          <span data-icon="shield-check"></span>
+          <div>
+            <strong id="cherryx-confirm-title" data-confirm-title>Подтверждение</strong>
+            <small data-confirm-kind>CherryX Pay</small>
+          </div>
+        </header>
+        <p data-confirm-body></p>
+        <div class="cherryx-confirm-total">
+          <span>Сумма</span>
+          <b data-confirm-amount>0 CherryX</b>
+        </div>
+        <footer>
+          <button type="button" data-confirm-close>Отмена</button>
+          <button class="primary-action" type="button" data-confirm-submit data-icon="check-check">Подтвердить</button>
+        </footer>
+      </section>
+    </div>
+
+    <script>
+      (() => {
+        const root = document.querySelector("[data-cherryx-pay]");
+        const modal = document.querySelector("[data-confirm-modal]");
+        if (!root || !modal) return;
+
+        const rate = Number(root.dataset.rate || 100);
+        let balance = Number(root.dataset.balance || 0);
+        let confirmCallback = null;
+        const balanceNode = root.querySelector("[data-pay-balance]");
+        const topupForm = root.querySelector("[data-topup-form]");
+        const transferForm = root.querySelector("[data-transfer-form]");
+        const topupInput = root.querySelector("[data-topup-usd]");
+        const creditsNode = root.querySelector("[data-topup-credits]");
+        const confirmTitle = modal.querySelector("[data-confirm-title]");
+        const confirmKind = modal.querySelector("[data-confirm-kind]");
+        const confirmBody = modal.querySelector("[data-confirm-body]");
+        const confirmAmount = modal.querySelector("[data-confirm-amount]");
+        const confirmSubmit = modal.querySelector("[data-confirm-submit]");
+        const format = (value) => Math.round(value).toLocaleString("ru-RU");
+        const setBalance = (value) => {
+          balance = Math.max(0, Math.round(value));
+          balanceNode.textContent = format(balance);
+        };
+        const openConfirm = ({ title, kind, body, amount, action, onConfirm }) => {
+          confirmTitle.textContent = title;
+          confirmKind.textContent = kind || "CherryX Pay";
+          confirmBody.textContent = body;
+          confirmAmount.textContent = amount ? `${format(amount)} CherryX` : "Без списания";
+          confirmSubmit.textContent = action || "Подтвердить";
+          confirmCallback = onConfirm;
+          modal.hidden = false;
+          confirmSubmit.focus();
+        };
+        const closeConfirm = () => {
+          modal.hidden = true;
+          confirmCallback = null;
+        };
+        const updateTopup = () => {
+          const usd = Math.max(0, Number(topupInput.value || 0));
+          creditsNode.textContent = format(usd * rate);
+        };
+
+        modal.querySelectorAll("[data-confirm-close]").forEach((button) => button.addEventListener("click", closeConfirm));
+        confirmSubmit.addEventListener("click", () => {
+          if (typeof confirmCallback === "function") confirmCallback();
+          closeConfirm();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && !modal.hidden) closeConfirm();
+        });
+        root.querySelectorAll("[data-usd-amount]").forEach((button) => {
+          button.addEventListener("click", () => {
+            topupInput.value = button.dataset.usdAmount || "10";
+            updateTopup();
+          });
+        });
+        topupInput.addEventListener("input", updateTopup);
+        updateTopup();
+
+        topupForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          if (!topupForm.reportValidity()) return;
+          const usd = Math.max(0, Number(topupInput.value || 0));
+          const credits = Math.round(usd * rate);
+          openConfirm({
+            title: "Подтвердить пополнение",
+            kind: "Top up",
+            body: `Пополнить баланс на $${usd} по курсу 1 USD = ${rate} CherryX.`,
+            amount: credits,
+            action: "Пополнить",
+            onConfirm: () => {
+              setBalance(balance + credits);
+              root.querySelector("[data-topup-status]").textContent = `+${format(credits)} CherryX добавлено к demo-балансу.`;
+            },
+          });
+        });
+
+        transferForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          if (!transferForm.reportValidity()) return;
+          const data = new FormData(transferForm);
+          const email = String(data.get("email") || "").trim();
+          const credits = Math.round(Number(data.get("credits") || 0));
+          const status = root.querySelector("[data-transfer-status]");
+          if (credits > balance) {
+            status.textContent = "Недостаточно CherryX для перевода.";
+            return;
+          }
+          openConfirm({
+            title: "Подтвердить перевод",
+            kind: "Transfer",
+            body: `Отправить ${format(credits)} CherryX на аккаунт ${email}. В реальной версии потребуется email-код.`,
+            amount: credits,
+            action: "Отправить",
+            onConfirm: () => {
+              setBalance(balance - credits);
+              status.textContent = `${format(credits)} CherryX для ${email} ожидает подтверждения.`;
+              transferForm.reset();
+            },
+          });
+        });
+
+        root.querySelectorAll("[data-pay-action]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const cost = Math.round(Number(button.dataset.cost || 0));
+            const title = button.dataset.title || "Оплатить";
+            const kind = button.dataset.kind || "CherryX";
+            if (cost > balance) {
+              openConfirm({
+                title: "Недостаточно CherryX",
+                kind,
+                body: `Для операции нужно ${format(cost)} CherryX. Пополни баланс или выбери checkout в USD.`,
+                amount: cost,
+                action: "Понятно",
+                onConfirm: () => {},
+              });
+              return;
+            }
+            openConfirm({
+              title,
+              kind,
+              body: `Списать ${format(cost)} CherryX с внутреннего баланса. Это demo-списание для проверки потока.`,
+              amount: cost,
+              action: "Оплатить",
+              onConfirm: () => {
+                setBalance(balance - cost);
+                button.textContent = "Оплачено";
+                button.disabled = true;
+              },
+            });
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

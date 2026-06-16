@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "pricing" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-originality">
   </head>
   <body class="landing-page pricing-page">
     <header class="landing-nav">
@@ -31,15 +31,28 @@
           <h1>{% ui "pricing_title" %}</h1>
         </div>
         <p>{% ui "pricing_copy" %}</p>
+        {% if has_access %}
+          <div class="billing-state-banner" role="status">
+            <div>
+              <span>{% ui "pricing_active_access" %}</span>
+              <strong>{% ui "pricing_active_until" %}: {{ active_until|date:"d.m.Y H:i" }}</strong>
+            </div>
+            <a href="{% url 'studio:index' %}">{% ui "pricing_continue_workspace" %}</a>
+          </div>
+        {% endif %}
+        <a class="pricing-return-link" href="{{ checkout_return_url }}">{% ui "back" %}</a>
       </section>
 
       <section class="pricing-grid" aria-label="Pricing">
         {% for plan in plans %}
-          <article class="price-card {% if plan.code == 'pro' %}is-featured{% endif %} plan-{{ plan.code }}">
+          <article id="plan-{{ plan.code }}" class="price-card {% if plan.code == 'pro' %}is-featured{% endif %} {% if plan.code == current_plan_code %}is-current{% endif %} {% if plan.code == focused_plan_code %}is-focused{% endif %} plan-{{ plan.code }}">
             <div class="price-card-head">
               <span>{{ plan.badge }}</span>
               <strong>{{ plan.name }}</strong>
             </div>
+            {% if plan.code == current_plan_code %}
+              <div class="current-plan-pill">{% ui "pricing_current_plan" %}</div>
+            {% endif %}
             <div class="price-value">
               <strong>{{ plan.price_display }}</strong>
               <span>/ {{ plan.period_days }} {% ui "days" %}</span>
@@ -94,23 +107,6 @@
         </a>
       </footer>
     </main>
-    <script>
-      (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          button.addEventListener("click", () => {
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-          });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
-        });
-      })();
-    </script>
+    <script defer src="{% static 'studio/billing_pages.js' %}?v=20260615-checkout-state"></script>
   </body>
 </html>

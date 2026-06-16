@@ -1,0 +1,314 @@
+(() => {
+  const roots = document.querySelectorAll("[data-project-list]");
+  if (!roots.length) return;
+
+  document.querySelectorAll(".language-switcher").forEach((switcher) => {
+    const button = switcher.querySelector(".language-current");
+    if (!button) return;
+    const positionMenu = () => {
+      const rect = button.getBoundingClientRect();
+      const safeGap = 14;
+      const menuWidth = 230;
+      const right = Math.max(safeGap, window.innerWidth - rect.right);
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+      switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+      switcher.style.setProperty(
+        "--language-menu-right",
+        `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+      );
+    };
+    switcher.addEventListener("click", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = switcher.classList.toggle("is-open");
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) positionMenu();
+    });
+    window.addEventListener("resize", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    });
+    window.addEventListener("scroll", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    }, { passive: true });
+    document.addEventListener("click", () => {
+      switcher.classList.remove("is-open");
+      button.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  roots.forEach((root) => {
+    const filters = root.querySelector("[data-project-filters]");
+    const grid = root.querySelector("[data-project-grid]");
+    const empty = root.querySelector("[data-project-empty]");
+    const total = root.querySelector("[data-project-total]");
+    const modal = document.querySelector("[data-delete-modal]");
+    const modalTitle = modal?.querySelector("[data-modal-title]");
+    const modalCopy = modal?.querySelector("[data-modal-copy]");
+    const modalList = modal?.querySelector("[data-modal-list]");
+    const modalConfirm = modal?.querySelector("[data-modal-confirm]");
+    const modalCancel = modal?.querySelectorAll("[data-modal-cancel]") || [];
+    const bulk = root.querySelector("[data-project-bulk]");
+    const selectedCount = root.querySelector("[data-selected-count]");
+    if (!filters || !grid) return;
+
+    let loading = false;
+    let pendingDelete = null;
+    const i18n = window.CX_MUSIC_MESSAGES || {};
+    const t = (key, fallback, vars = {}) => {
+      let value = i18n[key] || fallback || key;
+      Object.entries(vars).forEach(([name, replacement]) => {
+        value = value.replaceAll(`{${name}}`, String(replacement));
+      });
+      return value;
+    };
+    const setLoading = (value) => {
+      loading = value;
+      root.classList.toggle("is-loading-projects", value);
+      filters.querySelectorAll("button, input, select").forEach((control) => {
+        control.disabled = value;
+      });
+    };
+
+    const syncFromDocument = (doc, mode) => {
+      const nextGrid = doc.querySelector("[data-project-grid]");
+      const nextEmpty = doc.querySelector("[data-project-empty]");
+      const nextTotal = doc.querySelector("[data-project-total]");
+      const nextPagination = doc.querySelector("[data-project-pagination]");
+      const currentPagination = root.querySelector("[data-project-pagination]");
+      if (nextGrid) {
+        if (mode === "append") grid.insertAdjacentHTML("beforeend", nextGrid.innerHTML);
+        else grid.innerHTML = nextGrid.innerHTML;
+      }
+      if (nextEmpty && empty) empty.hidden = nextEmpty.hidden;
+      if (nextTotal && total) total.textContent = nextTotal.textContent;
+      if (nextPagination) {
+        if (currentPagination) currentPagination.replaceWith(nextPagination);
+        else root.appendChild(nextPagination);
+      } else if (currentPagination) {
+        currentPagination.remove();
+      }
+      root.dispatchEvent(new CustomEvent("project-list:updated", {bubbles: true}));
+      enhanceCards();
+      updateBulk();
+    };
+
+    const load = async (url, mode = "replace") => {
+      if (loading) return;
+      setLoading(true);
+      try {
+        const response = await fetch(url, {headers: {"X-Requested-With": "XMLHttpRequest"}});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const html = await response.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        syncFromDocument(doc, mode);
+        window.history.replaceState({}, "", url);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const cards = () => Array.from(grid.querySelectorAll("[data-project-id]"));
+
+    const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
+
+    const projectInfo = (card) => ({
+      id: Number(card.dataset.projectId || 0),
+      title: card.dataset.projectTitle || card.querySelector("[data-project-title-text]")?.textContent?.trim() || t("untitled_project", "Untitled project"),
+    });
+
+    const updateBulk = () => {
+      const count = selectedCards().length;
+      if (bulk) bulk.hidden = count === 0;
+      if (selectedCount) selectedCount.textContent = `${count} ${t("selected", "selected")}`;
+      cards().forEach((card) => card.classList.toggle("is-selected", Boolean(card.querySelector("[data-project-select]")?.checked)));
+    };
+
+    const requestJson = async (url, options = {}) => {
+      const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          "Accept": "application/json",
+          ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": decodeURIComponent(csrf)} : {}),
+          ...(options.headers || {}),
+        },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    };
+
+    const escapeHtml = (value) => String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+    const openDeleteModal = (items) => {
+      if (!modal || !modalTitle || !modalCopy || !modalList) return;
+      pendingDelete = items;
+      modalTitle.textContent = items.length === 1
+        ? t("delete_project_question", "Delete this project?")
+        : t("delete_projects_question", `Delete ${items.length} projects?`, {count: items.length});
+      modalCopy.textContent = items.length === 1
+        ? t("delete_uploaded_files_copy", "This will remove the project and its uploaded files from the server.")
+        : t("delete_uploaded_files_many_copy", "Selected projects and their uploaded files will be removed from the server.");
+      modalList.innerHTML = items.slice(0, 5).map((item) => `<span>${escapeHtml(item.title)}</span>`).join("");
+      if (items.length > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${items.length - 5} ${escapeHtml(t("more", "more"))}</small>`);
+      modal.hidden = false;
+      document.body.classList.add("project-delete-open");
+      modalConfirm?.focus();
+    };
+
+    const closeDeleteModal = (force = false) => {
+      if (!modal || (!force && modalConfirm?.disabled)) return;
+      modal.hidden = true;
+      document.body.classList.remove("project-delete-open");
+      pendingDelete = null;
+    };
+
+    const removeDeletedCards = (ids) => {
+      ids.forEach((id) => {
+        const card = grid.querySelector(`[data-project-id="${id}"]`);
+        if (!card) return;
+        card.classList.add("is-removing");
+        window.setTimeout(() => {
+          card.remove();
+          if (empty) empty.hidden = cards().length > 0;
+          updateBulk();
+        }, 180);
+      });
+    };
+
+    const enhanceCards = () => {
+      cards().forEach((card) => {
+        if (card.dataset.projectLiveBound) return;
+        card.dataset.projectLiveBound = "1";
+        card.querySelector("[data-project-select]")?.addEventListener("change", updateBulk);
+        card.querySelector("[data-delete-project]")?.addEventListener("click", () => openDeleteModal([projectInfo(card)]));
+        card.querySelector("[data-duplicate-project]")?.addEventListener("click", async (event) => {
+          event.preventDefault();
+          const id = event.currentTarget.dataset.duplicateProject;
+          if (!id || !root.dataset.designerUrl) return;
+          const data = await requestJson(`${root.dataset.apiUrl}${id}/duplicate/`, {method: "POST", body: "{}"});
+          window.location.href = `${root.dataset.designerUrl}?project=${data.project.id}`;
+        });
+        card.querySelector("[data-project-title-text]")?.addEventListener("dblclick", () => {
+          const title = card.querySelector("[data-project-title-text]");
+          if (!title) return;
+          const original = title.textContent.trim();
+          const input = document.createElement("input");
+          input.className = "video-project-title-input";
+          input.value = original;
+          input.maxLength = 180;
+          title.replaceWith(input);
+          input.focus();
+          input.select();
+          let done = false;
+          const finish = async (save) => {
+            if (done) return;
+            done = true;
+            const restored = document.createElement("strong");
+            restored.className = "video-project-title";
+            restored.dataset.projectTitleText = "";
+            restored.title = t("double_click_rename", "Double-click to rename");
+            restored.textContent = original;
+            input.replaceWith(restored);
+            card.dataset.projectLiveBound = "";
+            enhanceCards();
+            const next = input.value.trim() || original;
+            if (!save || next === original) return;
+            const data = await requestJson(`${root.dataset.apiUrl}${card.dataset.projectId}/rename/`, {method: "POST", body: JSON.stringify({title: next})});
+            restored.textContent = data.project?.title || next;
+            card.dataset.projectTitle = restored.textContent;
+          };
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") finish(true);
+            if (event.key === "Escape") finish(false);
+          });
+          input.addEventListener("blur", () => finish(true), {once: true});
+        });
+      });
+    };
+
+    const editorHref = (id) => {
+      const base = root.dataset.editorUrl || root.dataset.designerUrl || "";
+      const joiner = base.includes("?") ? "&" : "?";
+      return `${base}${joiner}project=${id}`;
+    };
+
+    root.querySelectorAll("[data-create-project]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (root.matches("[data-music-projects]")) return;
+        button.disabled = true;
+        try {
+          const isDesign = root.matches("[data-design-projects]");
+          const title = isDesign ? t("new_design", "New design") : t("new_project", "New project");
+          const state = isDesign ? {version: 2, objects: [], vectors: []} : {title, aspect: "9 / 16", trimStart: "0", trimEnd: "100"};
+          const data = await requestJson(`${root.dataset.apiUrl}create/`, {
+            method: "POST",
+            body: JSON.stringify({title, state}),
+          });
+          window.location.href = editorHref(data.project.id);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
+    filters.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const url = new URL(window.location.href);
+      const data = new FormData(filters);
+      for (const key of Array.from(url.searchParams.keys())) url.searchParams.delete(key);
+      data.forEach((value, key) => {
+        const text = String(value || "").trim();
+        if (text) url.searchParams.set(key, text);
+      });
+      load(url.toString());
+    });
+
+    root.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target.closest("[data-project-page]") : null;
+      if (!target) return;
+      event.preventDefault();
+      load(target.href, target.dataset.projectPage === "next" ? "append" : "replace");
+    });
+
+    if (!root.matches("[data-music-projects]")) {
+      root.querySelector("[data-clear-selection]")?.addEventListener("click", () => {
+        cards().forEach((card) => {
+          const input = card.querySelector("[data-project-select]");
+          if (input) input.checked = false;
+        });
+        updateBulk();
+      });
+
+      root.querySelector("[data-delete-selected]")?.addEventListener("click", () => {
+        const items = selectedCards().map(projectInfo);
+        if (items.length) openDeleteModal(items);
+      });
+    }
+
+    modalCancel.forEach((button) => button.addEventListener("click", closeDeleteModal));
+    modalConfirm?.addEventListener("click", async () => {
+      if (!pendingDelete?.length || !modalConfirm) return;
+      const items = pendingDelete;
+      const originalText = modalConfirm.textContent;
+      modalConfirm.disabled = true;
+      modalConfirm.textContent = t("deleting", "Deleting...");
+      try {
+        const data = items.length === 1
+          ? await requestJson(`${root.dataset.apiUrl}${items[0].id}/delete/`, {method: "POST", body: "{}"})
+          : await requestJson(`${root.dataset.apiUrl}delete/`, {method: "POST", body: JSON.stringify({ids: items.map((item) => item.id)})});
+        closeDeleteModal(true);
+        removeDeletedCards(data.deleted_ids || items.map((item) => item.id));
+      } finally {
+        modalConfirm.disabled = false;
+        modalConfirm.textContent = originalText;
+      }
+    });
+    enhanceCards();
+    updateBulk();
+  });
+})();

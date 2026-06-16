@@ -29,10 +29,18 @@ Run the main Django Creator Studio:
 
 Creator Studio URL: `http://127.0.0.1:8000`
 
+`run_web.ps1` also starts the persistent background worker. Long-running jobs are stored in Django's database queue, so browser tabs and user sessions do not own the work.
+
 `run_django.ps1` starts the same Django site:
 
 ```powershell
 .\run_django.ps1
+```
+
+To run only the worker in another terminal:
+
+```powershell
+.\run_worker.ps1
 ```
 
 ## Environment
@@ -49,6 +57,16 @@ Useful settings:
 - `DJANGO_ALLOWED_HOSTS`: comma-separated hosts for Django, for example `127.0.0.1,localhost,my-tunnel.ngrok-free.app`.
 - `MAX_IMAGE_MB`, `MAX_VIDEO_MB`: upload limits.
 - `YOUTUBE_MAX_SHORTS`, `YOUTUBE_SHORT_SECONDS`: Shorts generation limits.
+- `PERSISTENT_JOB_QUEUE`: set to `true` to make the web process enqueue jobs and let `run_worker.ps1` execute them.
+- `SUBTITLE_MODEL`: Whisper model size for auto-subtitles. Use `medium` for better multilingual quality, or `small` for faster low-CPU runs.
+
+## Subtitle Quality
+
+Auto-subtitles use faster-whisper locally. For best results:
+
+- choose the spoken language when you know it; use `Auto` only for mixed or unknown audio;
+- keep `SUBTITLE_MODEL=medium` for production-quality Russian, Ukrainian, English, and multilingual clips;
+- use clean source audio when possible; the app applies VAD and subtitle post-processing, but noisy music-heavy audio still reduces accuracy.
 
 ## How To Share Or Demo
 

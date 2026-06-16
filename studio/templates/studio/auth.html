@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% if mode == "register" %}{% ui "create_account" %}{% else %}{% ui "login" %}{% endif %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="auth-page auth-mode-{{ mode }} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <main class="auth-shell">
@@ -91,10 +91,31 @@
         document.querySelectorAll(".language-switcher").forEach((switcher) => {
           const button = switcher.querySelector(".language-current");
           if (!button) return;
-          button.addEventListener("click", () => {
+          const positionMenu = () => {
+            const rect = button.getBoundingClientRect();
+            const safeGap = 14;
+            const menuWidth = 230;
+            const right = Math.max(safeGap, window.innerWidth - rect.right);
+            const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+            switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+            switcher.style.setProperty(
+              "--language-menu-right",
+              `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+            );
+          };
+          switcher.addEventListener("click", (event) => event.stopPropagation());
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
             const open = switcher.classList.toggle("is-open");
             button.setAttribute("aria-expanded", open ? "true" : "false");
+            if (open) positionMenu();
           });
+          window.addEventListener("resize", () => {
+            if (switcher.classList.contains("is-open")) positionMenu();
+          });
+          window.addEventListener("scroll", () => {
+            if (switcher.classList.contains("is-open")) positionMenu();
+          }, { passive: true });
           document.addEventListener("click", (event) => {
             if (!switcher.contains(event.target)) {
               switcher.classList.remove("is-open");

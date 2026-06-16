@@ -8,13 +8,20 @@ class CherryXMusicStudio {
     this.projectId = this.container.dataset.projectId || "";
     this.projectsApiUrl = this.normalizeApiUrl(this.container.dataset.projectsApiUrl || "");
     this.projectTitle = this.container.dataset.projectTitle || "Untitled Beat";
+    this.toneSrc = this.container.dataset.toneSrc || "https://cdn.jsdelivr.net/npm/tone@14/build/Tone.js";
 
     this.baseCellWidth = 42;
     this.cellWidth = 42;
-    this.rowHeight = 34;
+    this.whiteKeyHeight = 36;
+    this.blackKeyHeight = 24;
+    this.rowHeight = this.whiteKeyHeight;
+    this.pianoRows = [];
+    this.trackRowHeight = 68;
     this.steps = 16;
     this.timelineBars = 64;
+    this.timelineSeconds = 300;
     this.tracks = 6;
+    this.trackNames = [];
     this.zoom = 1;
 
     this.bpm = 120;
@@ -26,11 +33,14 @@ class CherryXMusicStudio {
 
     this.tool = "draw";
     this.arrangeTool = "select";
+    this.activeView = "playlist";
     this.noteLengthBeats = 1;
     this.selectedChannelId = null;
     this.selectedPatternId = null;
     this.selectedClipId = null;
     this.selectedNoteId = null;
+    this.selectedClipIds = new Set();
+    this.selectedNoteIds = new Set();
 
     this.channels = [
       this.createChannel("Piano", "instrument", "#ff7a18", "piano"),
@@ -48,9 +58,13 @@ class CherryXMusicStudio {
     this.players = {};
     this.master = null;
     this.audioReady = false;
+    this.audioGraphReady = false;
+    this.audioUnlockPromise = null;
+    this.toneLoadPromise = null;
     this.history = [];
     this.historyIndex = -1;
-    this.maxHistory = 50;
+    this.maxUndoSteps = 5;
+    this.maxHistory = this.maxUndoSteps + 1;
     this.readyForAutosave = false;
     this.isDirty = false;
     this.autoSaveTimer = null;
@@ -67,9 +81,12 @@ class CherryXMusicStudio {
     this.ensureDefaultProject();
     this.selectedChannelId = this.selectedChannelId || this.channels[0]?.id || null;
     this.selectedPatternId = this.selectedPatternId || this.patterns[0]?.id || null;
-    this.initAudioGraph();
     this.bindEvents();
+    this.initCustomSelects();
+    this.applyLocalizedControlTitles();
+    this.loadUiPrefs();
     this.renderAll();
+    this.applyUiPrefs();
     this.saveHistory();
     this.readyForAutosave = true;
     this.startAutoSave();
@@ -99,11 +116,14 @@ class CherryXMusicStudio {
     this.elements.playlistGrid = q("[data-playlist-grid]");
     this.elements.pianoKeys = q("[data-piano-keys]");
     this.elements.pianoRoll = q("[data-piano-roll]");
+    this.elements.pianoRuler = q("[data-piano-ruler]");
+    this.elements.pianoPlayhead = q("[data-piano-playhead]");
     this.elements.noteLayer = q("[data-piano-notes]");
     this.elements.channelList = q("[data-channel-list]");
     this.elements.stepSequencer = q("[data-step-sequencer]");
     this.elements.mixer = q("[data-mixer]");
     this.elements.assetList = q("[data-asset-list]");
+    this.elements.assetSearch = q("[data-asset-search]");
     this.elements.audioInput = q("[data-audio-input]");
     this.elements.inspector = q("[data-inspector]");
     this.elements.activePatternLabel = q("[data-active-pattern-label]");
@@ -127,7 +147,7 @@ class CherryXMusicStudio {
       button.addEventListener("click", () => this.setArrangeTool(button.dataset.arrangeTool, button));
     });
     this.container.querySelectorAll("[data-zoom]").forEach(button => {
-      button.addEventListener("click", () => this.changeZoom(button.dataset.zoom === "in" ? 0.12 : -0.12));
+      button.addEventListener("click", () => this.changeZoom(button.dataset.zoom === "in" ? 0.25 : -0.25));
     });
     this.container.querySelectorAll("[data-preset]").forEach(button => {
       button.addEventListener("click", () => this.applyPreset(button.dataset.preset));
@@ -136,12 +156,25 @@ class CherryXMusicStudio {
       button.addEventListener("click", () => this.addDrumChannel(button.dataset.drum));
     });
 
-    this.elements.bpmInput?.addEventListener("change", event => {
-      this.bpm = this.clamp(parseInt(event.target.value, 10) || 120, 40, 300);
-      event.target.value = this.bpm;
-      if (window.Tone) Tone.Transport.bpm.value = this.bpm;
+    const applyBpm = (value, save = true) => {
+      this.bpm = this.clamp(parseInt(value, 10) || 120, 40, 300);
+      if (this.elements.bpmInput) this.elements.bpmInput.value = this.bpm;
+      if (this.audioReady && window.Tone) Tone.Transport.bpm.value = this.bpm;
+      this.updateTimelineLength();
+      this.applyTimelineMetrics();
+      this.generateRuler();
+      this.renderTrackGrid();
+      this.renderPlaylist();
+      this.updatePlayhead();
       if (this.isPlaying) this.startStepPlayback();
-      this.saveHistory();
+      if (save) this.saveHistory();
+    };
+    this.elements.bpmInput?.addEventListener("change", event => applyBpm(event.target.value));
+    this.container.querySelectorAll("[data-bpm-step]").forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        applyBpm(this.bpm + Number(button.dataset.bpmStep || 0));
+      });
     });
     this.elements.projectName?.addEventListener("input", event => {
       this.projectTitle = event.target.value.trim() || "Untitled Beat";
@@ -152,15 +185,51 @@ class CherryXMusicStudio {
     });
     this.elements.audioInput?.addEventListener("change", event => this.handleAudioUpload(event));
     this.elements.pianoRoll?.addEventListener("click", event => this.handlePianoRollClick(event));
+    this.elements.pianoRoll?.addEventListener("contextmenu", event => this.showPianoRollContextMenu(event));
+    this.elements.pianoRoll?.addEventListener("mousedown", event => {
+      if (event.shiftKey) {
+        this.startSurfacePan(event, this.elements.pianoRoll);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) this.startNoteBoxSelect(event);
+    });
+    this.elements.pianoRoll?.addEventListener("pointerdown", event => {
+      if (event.ctrlKey || event.metaKey) this.startNoteBoxSelect(event);
+    });
     this.elements.pianoRoll?.addEventListener("scroll", () => this.syncPianoScroll());
+    this.elements.pianoRuler?.addEventListener("mousedown", event => this.startPianoSeek(event));
+    this.elements.pianoPlayhead?.addEventListener("mousedown", event => this.startPianoSeek(event));
     this.elements.playlistGrid?.addEventListener("scroll", () => this.syncTimelineScroll());
+    this.elements.playlistGrid?.addEventListener("mousedown", event => {
+      if (event.shiftKey) {
+        this.startSurfacePan(event, this.elements.playlistGrid);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) this.startClipBoxSelect(event);
+    }, true);
+    this.elements.playlistGrid?.addEventListener("pointerdown", event => {
+      if (event.ctrlKey || event.metaKey) this.startClipBoxSelect(event);
+    }, true);
     this.elements.playlistGrid?.addEventListener("dragover", event => event.preventDefault());
     this.elements.playlistGrid?.addEventListener("drop", event => this.handlePlaylistDrop(event));
+    this.elements.ruler?.addEventListener("mousedown", event => {
+      if (event.shiftKey) this.startSurfacePan(event, this.elements.playlistGrid);
+    }, true);
+    this.elements.ruler?.addEventListener("mousedown", event => this.startTimelineSeek(event));
+    this.elements.playhead?.addEventListener("mousedown", event => this.startTimelineSeek(event));
 
     this.container.querySelector("[data-save-project]")?.addEventListener("click", () => this.saveProject());
     this.container.querySelector("[data-add-channel]")?.addEventListener("click", () => this.addChannel());
+    this.elements.playlistGrid?.addEventListener("click", event => {
+      if (event.target.closest("[data-add-track]")) this.addTrack();
+      const deleteButton = event.target.closest("[data-delete-track]");
+      if (deleteButton) this.deleteTrack(Number(deleteButton.dataset.deleteTrack));
+    });
     this.container.querySelector('[data-action="new-pattern"]')?.addEventListener("click", () => this.addPatternClip());
     this.container.querySelector('[data-action="upload-audio"]')?.addEventListener("click", () => this.elements.audioInput?.click());
+    this.container.querySelector('[data-action="export-audio"]')?.addEventListener("click", () => {
+      this.toast(this.t("audio_export_unavailable", "Audio export is not connected yet."), "info");
+    });
     this.container.querySelector('[data-action="drum-fill"]')?.addEventListener("click", () => this.fillDrumLoop());
     this.container.querySelector('[data-action="clear-pattern"]')?.addEventListener("click", () => this.clearActivePattern());
     this.container.querySelector('[data-action="send-pattern-to-playlist"]')?.addEventListener("click", () => this.sendActivePatternToPlaylist());
@@ -176,6 +245,7 @@ class CherryXMusicStudio {
     this.elements.patternSelect?.addEventListener("change", event => {
       this.selectedPatternId = event.target.value;
       this.renderAll();
+      this.saveUiPrefs();
       this.saveHistory();
     });
     this.elements.channelSelect?.addEventListener("change", event => {
@@ -183,19 +253,189 @@ class CherryXMusicStudio {
       this.renderChannels();
       this.renderMixer();
       this.updatePatternControls();
+      this.saveUiPrefs();
       this.saveHistory();
     });
     this.elements.noteLength?.addEventListener("change", event => {
       this.noteLengthBeats = Number(event.target.value) || 1;
+      this.saveUiPrefs();
     });
+    this.elements.snap?.addEventListener("change", () => {
+      this.applyTimelineMetrics();
+      this.syncCustomSelects();
+      this.saveUiPrefs();
+    });
+    this.elements.assetSearch?.addEventListener("input", () => this.renderAssets());
 
     document.addEventListener("keydown", event => this.handleHotkeys(event));
-    document.addEventListener("click", () => this.hideContextMenu());
+    document.addEventListener("click", () => {
+      this.hideContextMenu();
+      this.closeCustomSelects();
+    });
     window.addEventListener("beforeunload", () => this.writeLocalBackup());
   }
 
+  initCustomSelects() {
+    this.container.querySelectorAll("select[data-custom-select]").forEach(select => this.ensureCustomSelect(select));
+    this.syncCustomSelects();
+  }
+
+  ensureCustomSelect(select) {
+    if (!select || select.dataset.customSelectReady === "1") return select._customSelect;
+    select.dataset.customSelectReady = "1";
+    select.classList.add("cx-native-select");
+    const wrap = document.createElement("div");
+    wrap.className = "cx-custom-select";
+    wrap.dataset.customSelectFor = select.dataset.selectLabel || select.title || "";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cx-custom-select-trigger";
+    button.setAttribute("aria-haspopup", "listbox");
+    button.setAttribute("aria-expanded", "false");
+    button.title = select.title || select.dataset.selectLabel || this.t("select", "Select");
+    button.innerHTML = `
+      <span class="cx-custom-select-label"></span>
+      <strong></strong>
+    `;
+    const menu = document.createElement("div");
+    menu.className = "cx-custom-select-menu";
+    menu.setAttribute("role", "listbox");
+    wrap.append(button, menu);
+    select.insertAdjacentElement("afterend", wrap);
+    const openMenu = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const isOpen = wrap.classList.contains("is-open");
+      this.closeCustomSelects(wrap);
+      wrap.classList.toggle("is-open", !isOpen);
+      button.setAttribute("aria-expanded", String(!isOpen));
+    };
+    button.addEventListener("click", openMenu);
+    menu.addEventListener("click", event => {
+      const item = event.target.closest("[data-custom-option]");
+      if (!item) return;
+      event.preventDefault();
+      event.stopPropagation();
+      select.value = item.dataset.customOption;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      this.syncCustomSelect(select);
+      this.closeCustomSelects();
+    });
+    select._customSelect = { wrap, button, menu };
+    this.syncCustomSelect(select);
+    return select._customSelect;
+  }
+
+  syncCustomSelects() {
+    this.container.querySelectorAll("select[data-custom-select]").forEach(select => this.syncCustomSelect(select));
+  }
+
+  syncCustomSelect(select) {
+    const custom = this.ensureCustomSelect(select);
+    if (!custom) return;
+    const selected = select.selectedOptions?.[0] || select.options?.[0];
+    const label = select.dataset.selectLabel || select.title || this.t("select", "Select");
+    custom.button.querySelector(".cx-custom-select-label").textContent = label;
+    custom.button.querySelector("strong").textContent = selected?.textContent?.trim() || label;
+    custom.button.title = `${label}: ${selected?.textContent?.trim() || ""}`.trim();
+    custom.menu.innerHTML = [...select.options].map(option => {
+      const text = option.textContent.trim();
+      return `
+      <button type="button" role="option" data-custom-option="${this.escapeHtml(option.value)}" class="${option.selected ? "is-selected" : ""}" aria-selected="${option.selected ? "true" : "false"}" title="${this.escapeHtml(text)}">
+        ${this.escapeHtml(text)}
+      </button>
+    `;
+    }).join("");
+  }
+
+  closeCustomSelects(except = null) {
+    this.container.querySelectorAll(".cx-custom-select.is-open").forEach(wrap => {
+      if (wrap === except) return;
+      wrap.classList.remove("is-open");
+      wrap.querySelector(".cx-custom-select-trigger")?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  uiPrefsKey() {
+    return `cherryx-music-ui:${this.projectId || "draft"}`;
+  }
+
+  loadUiPrefs() {
+    try {
+      const prefs = JSON.parse(localStorage.getItem(this.uiPrefsKey()) || "{}");
+      if (prefs.activeView) this.activeView = prefs.activeView;
+      if (prefs.tool) this.tool = prefs.tool;
+      if (prefs.arrangeTool) this.arrangeTool = prefs.arrangeTool;
+      if (prefs.noteLengthBeats) this.noteLengthBeats = Number(prefs.noteLengthBeats) || this.noteLengthBeats;
+      if (prefs.selectedPatternId) this.selectedPatternId = prefs.selectedPatternId;
+      if (prefs.selectedChannelId) this.selectedChannelId = prefs.selectedChannelId;
+      if (prefs.snap && this.elements.snap?.querySelector(`option[value="${CSS.escape(prefs.snap)}"]`)) this.elements.snap.value = prefs.snap;
+    } catch (error) {
+      console.warn("Could not load music editor UI prefs", error);
+    }
+  }
+
+  saveUiPrefs() {
+    try {
+      localStorage.setItem(this.uiPrefsKey(), JSON.stringify({
+        activeView: this.activeView,
+        tool: this.tool,
+        arrangeTool: this.arrangeTool,
+        noteLengthBeats: this.noteLengthBeats,
+        selectedPatternId: this.selectedPatternId,
+        selectedChannelId: this.selectedChannelId,
+        snap: this.elements.snap?.value || "1/32"
+      }));
+    } catch (error) {
+      console.warn("Could not save music editor UI prefs", error);
+    }
+  }
+
+  applyUiPrefs() {
+    if (!this.patterns.some(pattern => pattern.id === this.selectedPatternId)) this.selectedPatternId = this.patterns[0]?.id || null;
+    if (!this.channels.some(channel => channel.id === this.selectedChannelId)) this.selectedChannelId = this.channels[0]?.id || null;
+    this.switchView(this.activeView || "playlist", this.container.querySelector(`[data-view="${this.activeView || "playlist"}"]`));
+    this.setTool(this.tool || "draw", this.container.querySelector(`[data-tool="${this.tool || "draw"}"]`));
+    this.setArrangeTool(this.arrangeTool || "select", this.container.querySelector(`[data-arrange-tool="${this.arrangeTool || "select"}"]`));
+    this.updatePatternControls();
+  }
+
+  applyLocalizedControlTitles() {
+    const titles = {
+      "playlist": this.t("playlist", "Playlist"),
+      "piano-roll": this.t("piano_roll", "Piano Roll"),
+      "step-seq": this.t("channel_rack", "Channel Rack"),
+      "mixer": this.t("mixer", "Mixer")
+    };
+    this.container.querySelectorAll("[data-view]").forEach(button => {
+      const title = titles[button.dataset.view] || button.textContent.trim();
+      button.title = button.title || title;
+      button.setAttribute("aria-label", button.getAttribute("aria-label") || title);
+    });
+    const actionTitles = {
+      "send-pattern-to-playlist": this.t("send_to_playlist", "Send pattern to playlist"),
+      "quantize-notes": this.t("quantize_notes", "Quantize notes"),
+      "octave-up": this.t("octave_up", "Octave up"),
+      "octave-down": this.t("octave_down", "Octave down")
+    };
+    Object.entries(actionTitles).forEach(([action, title]) => {
+      this.container.querySelectorAll(`[data-action="${action}"]`).forEach(button => {
+        button.title = button.title || title;
+        button.setAttribute("aria-label", button.getAttribute("aria-label") || title);
+      });
+    });
+    this.container.querySelectorAll("[data-tool]").forEach(button => {
+      const title = button.textContent.trim();
+      button.title = button.title || title;
+      button.setAttribute("aria-label", button.getAttribute("aria-label") || title);
+    });
+  }
+
   handleHotkeys(event) {
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName)) return;
+    const key = event.key.toLowerCase();
+    const hasModifier = event.ctrlKey || event.metaKey;
+    const isEditable = this.isEditableTarget(event.target);
+    if (isEditable) return;
     if (event.code === "Space") {
       event.preventDefault();
       this.isPlaying ? this.pause() : this.play();
@@ -204,26 +444,49 @@ class CherryXMusicStudio {
       event.preventDefault();
       this.deleteSelected();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    if (hasModifier && key === "s") {
       event.preventDefault();
       this.saveProject();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
+    if (hasModifier && key === "d") {
       event.preventDefault();
       this.duplicateSelected();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+    if (hasModifier && key === "z") {
       event.preventDefault();
       event.shiftKey ? this.redo() : this.undo();
     }
-    if ((event.ctrlKey || event.metaKey) && (event.key === "+" || event.key === "=")) {
+    if (hasModifier && key === "y") {
       event.preventDefault();
-      this.changeZoom(0.12);
+      this.redo();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key === "-") {
+    if (hasModifier && (event.key === "+" || event.key === "=")) {
       event.preventDefault();
-      this.changeZoom(-0.12);
+      this.changeZoom(0.25);
     }
+    if (hasModifier && event.key === "-") {
+      event.preventDefault();
+      this.changeZoom(-0.25);
+    }
+    if (this.activeView === "piano-roll" && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      const hasSelection = this.selectedNoteId || this.selectedNoteIds.size;
+      if (hasSelection) {
+        event.preventDefault();
+        if (event.shiftKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+          this.resizeSelectedNotes(event.key === "ArrowRight" ? this.snapGridSize() : -this.snapGridSize());
+          return;
+        }
+        const dx = event.key === "ArrowLeft" ? -this.snapGridSize() : event.key === "ArrowRight" ? this.snapGridSize() : 0;
+        const dr = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+        this.nudgeSelectedNotes(dx, dr);
+      }
+    }
+  }
+
+  isEditableTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName;
+    return ["INPUT", "TEXTAREA", "SELECT"].includes(tag) || Boolean(target.closest?.("[contenteditable='true']"));
   }
 
   createChannel(name, type = "instrument", color = "#ff7a18", preset = "piano") {
@@ -261,47 +524,90 @@ class CherryXMusicStudio {
   }
 
   initAudioGraph() {
-    if (!window.Tone) return;
-    this.master = new Tone.Volume(-4).toDestination();
-    this.channels.forEach(channel => this.ensureSynth(channel));
-    Tone.Transport.bpm.value = this.bpm;
+    if (!window.Tone || !this.audioReady || this.audioGraphReady) return;
+    this.audioGraphReady = true;
+    try {
+      this.master = new Tone.Volume(-4).toDestination();
+      this.channels.forEach(channel => this.ensureSynth(channel));
+      Tone.Transport.bpm.value = this.bpm;
+    } catch (error) {
+      this.audioGraphReady = false;
+      console.warn("Tone graph error:", error);
+    }
+  }
+
+  loadTone() {
+    if (window.Tone) return Promise.resolve(window.Tone);
+    if (this.toneLoadPromise) return this.toneLoadPromise;
+    this.toneLoadPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[src="${this.toneSrc}"]`);
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.Tone), { once: true });
+        existing.addEventListener("error", () => reject(new Error("Tone.js failed to load")), { once: true });
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = this.toneSrc;
+      script.async = true;
+      script.onload = () => resolve(window.Tone);
+      script.onerror = () => reject(new Error("Tone.js failed to load"));
+      document.head.appendChild(script);
+    }).finally(() => {
+      this.toneLoadPromise = null;
+    });
+    return this.toneLoadPromise;
   }
 
   async unlockAudio() {
-    if (!window.Tone || this.audioReady) return;
-    try {
-      await Tone.start();
-      this.audioReady = true;
-    } catch (error) {
-      console.warn("Tone start error:", error);
-    }
+    if (this.audioReady) return;
+    if (this.audioUnlockPromise) return this.audioUnlockPromise;
+    this.audioUnlockPromise = (async () => {
+      try {
+        await this.loadTone();
+        if (!window.Tone) return;
+        await Tone.start();
+        this.audioReady = true;
+        this.initAudioGraph();
+      } catch (error) {
+        console.warn("Tone start error:", error);
+      } finally {
+        this.audioUnlockPromise = null;
+      }
+    })();
+    return this.audioUnlockPromise;
   }
 
   ensureSynth(channel) {
-    if (!window.Tone || !channel) return null;
+    if (!window.Tone || !channel || !this.audioReady) return null;
+    this.initAudioGraph();
     this.normalizeChannel(channel);
     if (this.synths[channel.id]) return this.synths[channel.id];
     let synth;
-    if (channel.type === "drum") {
-      if (channel.preset === "hat") {
-        synth = new Tone.MetalSynth({ frequency: 220, envelope: { attack: 0.001, decay: 0.08, release: 0.02 }, harmonicity: 4, modulationIndex: 20, resonance: 3500, octaves: 1.5 });
-      } else if (channel.preset === "snare" || channel.preset === "clap") {
-        synth = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.05 } });
+    try {
+      if (channel.type === "drum") {
+        if (channel.preset === "hat") {
+          synth = new Tone.MetalSynth({ frequency: 220, envelope: { attack: 0.001, decay: 0.08, release: 0.02 }, harmonicity: 4, modulationIndex: 20, resonance: 3500, octaves: 1.5 });
+        } else if (channel.preset === "snare" || channel.preset === "clap") {
+          synth = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.05 } });
+        } else {
+          synth = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.35, sustain: 0.01, release: 0.1 } });
+        }
       } else {
-        synth = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.35, sustain: 0.01, release: 0.1 } });
+        synth = new Tone.PolySynth(Tone.Synth, this.instrumentConfig(channel.preset));
       }
-    } else {
-      synth = new Tone.PolySynth(Tone.Synth, this.instrumentConfig(channel.preset));
+      const volume = new Tone.Volume(this.volumeToDb(channel.volume));
+      const highpass = new Tone.Filter(channel.fx?.highpass || 20, "highpass");
+      const lowpass = new Tone.Filter(channel.fx?.lowpass || 20000, "lowpass");
+      const delay = new Tone.FeedbackDelay("8n", this.clamp(Number(channel.send?.delay || 0), 0, 100) / 250);
+      const reverb = new Tone.Reverb({ decay: 1.8, wet: this.clamp(Number(channel.send?.reverb || 0), 0, 100) / 100 });
+      const pan = new Tone.Panner(channel.pan / 100);
+      synth.chain(volume, highpass, lowpass, delay, reverb, pan, this.master || Tone.Destination);
+      this.synths[channel.id] = { synth, volume, highpass, lowpass, delay, reverb, pan };
+      return this.synths[channel.id];
+    } catch (error) {
+      console.warn("Tone synth error:", error);
+      return null;
     }
-    const volume = new Tone.Volume(this.volumeToDb(channel.volume));
-    const highpass = new Tone.Filter(channel.fx?.highpass || 20, "highpass");
-    const lowpass = new Tone.Filter(channel.fx?.lowpass || 20000, "lowpass");
-    const delay = new Tone.FeedbackDelay("8n", this.clamp(Number(channel.send?.delay || 0), 0, 100) / 250);
-    const reverb = new Tone.Reverb({ decay: 1.8, wet: this.clamp(Number(channel.send?.reverb || 0), 0, 100) / 100 });
-    const pan = new Tone.Panner(channel.pan / 100);
-    synth.chain(volume, highpass, lowpass, delay, reverb, pan, this.master || Tone.Destination);
-    this.synths[channel.id] = { synth, volume, highpass, lowpass, delay, reverb, pan };
-    return this.synths[channel.id];
   }
 
   normalizeChannel(channel) {
@@ -342,6 +648,7 @@ class CherryXMusicStudio {
     if (action === "play") this.play();
     if (action === "pause") this.pause();
     if (action === "stop") this.stop();
+    if (action === "pause-stop") this.isPlaying ? this.pause() : this.stop();
     if (action === "rewind") this.rewind();
   }
 
@@ -356,7 +663,11 @@ class CherryXMusicStudio {
     this.updateTransportButtons();
     this.startClock();
     this.startStepPlayback();
-    this.startAudioClips();
+    if (this.transportPlaysArrangement()) {
+      this.startAudioClips();
+    } else {
+      this.stopAudioPlayers();
+    }
   }
 
   pause() {
@@ -389,9 +700,18 @@ class CherryXMusicStudio {
 
   updateTransportButtons() {
     const play = this.container.querySelector('[data-transport="play"]');
-    if (!play) return;
-    play.classList.toggle("is-playing", this.isPlaying);
-    play.textContent = this.isPlaying ? this.t("pause", "Pause") : this.t("play", "Play");
+    const pauseStop = this.container.querySelector('[data-transport="pause-stop"]');
+    if (play) {
+      play.classList.toggle("is-playing", this.isPlaying);
+      play.setAttribute("aria-label", this.isPlaying ? this.t("pause", "Pause") : this.t("play", "Play"));
+      play.title = this.isPlaying ? this.t("pause", "Pause") : this.t("play", "Play");
+    }
+    if (pauseStop) {
+      pauseStop.classList.toggle("is-playing", this.isPlaying);
+      pauseStop.textContent = this.isPlaying ? this.t("pause", "Pause") : this.t("stop", "Stop");
+      pauseStop.setAttribute("aria-label", this.isPlaying ? this.t("pause", "Pause") : this.t("stop", "Stop"));
+      pauseStop.title = this.isPlaying ? this.t("pause", "Pause") : this.t("stop", "Stop");
+    }
   }
 
   startClock() {
@@ -411,14 +731,37 @@ class CherryXMusicStudio {
   startStepPlayback() {
     this.stopStepPlayback();
     this.stepTimer = setInterval(() => {
-      this.playArrangementTick(this.playTick);
-      this.playTick += 1;
-    }, this.tickSeconds() * 1000);
+      try {
+        this.playTransportTick(this.playTick);
+        this.playTick += 1;
+      } catch (error) {
+        console.warn("Playback tick error:", error);
+      }
+    }, Math.max(40, this.tickSeconds() * 1000));
   }
 
   stopStepPlayback() {
     if (this.stepTimer) clearInterval(this.stepTimer);
     this.stepTimer = null;
+  }
+
+  transportPlaysPattern() {
+    return this.activeView === "step-seq" || this.activeView === "piano-roll";
+  }
+
+  transportPlaysArrangement() {
+    return !this.transportPlaysPattern();
+  }
+
+  playTransportTick(globalTick) {
+    if (this.transportPlaysPattern()) {
+      const pattern = this.getActivePattern();
+      const stepCount = this.patternStepCount(pattern);
+      this.clearPlayingStep();
+      this.playPatternTick(pattern, globalTick % stepCount, globalTick);
+      return;
+    }
+    this.playArrangementTick(globalTick);
   }
 
   playArrangementTick(globalTick) {
@@ -444,15 +787,18 @@ class CherryXMusicStudio {
 
   playPatternTick(pattern, stepIndex, localTick = stepIndex) {
     if (!pattern) return;
-    this.container.querySelectorAll(`[data-step-index="${stepIndex}"]`).forEach(pad => pad.classList.add("playing"));
+    const safeStepIndex = this.clamp(Math.floor(Number(stepIndex) || 0), 0, this.patternStepCount(pattern) - 1);
+    if (pattern.id === this.getActivePattern()?.id) {
+      this.container.querySelectorAll(`[data-step-index="${safeStepIndex}"]`).forEach(pad => pad.classList.add("playing"));
+    }
     const hasSolo = this.channels.some(channel => channel.solo);
     this.channels.forEach(channel => {
       if (channel.muted || (hasSolo && !channel.solo)) return;
-      if (this.getPatternSteps(pattern, channel.id)[stepIndex]) this.triggerChannel(channel, this.getStepVelocity(pattern, channel.id, stepIndex));
+      if (this.getPatternSteps(pattern, channel.id)[safeStepIndex]) this.triggerChannel(channel, this.getStepVelocity(pattern, channel.id, safeStepIndex));
     });
     (pattern.notes || []).forEach(note => {
       const noteTick = this.beatsToTicks(note.x / this.cellWidth) % this.patternStepCount(pattern);
-      if (noteTick !== stepIndex) return;
+      if (noteTick !== safeStepIndex) return;
       const channel = this.channels.find(item => item.id === note.channelId) || this.getSelectedChannel();
       if (!channel || channel.muted || (hasSolo && !channel.solo)) return;
       this.triggerNote(channel, note);
@@ -499,17 +845,21 @@ class CherryXMusicStudio {
       if (clip.muted) return;
       const asset = this.assets.find(item => item.id === clip.assetId || String(item.serverId) === String(clip.assetId));
       if (!asset?.url) return;
-      const delay = Math.max(0, this.pixelsToSeconds(clip.x) - this.currentTime);
+      const clipStart = this.pixelsToSeconds(clip.x);
+      const clipLength = this.pixelsToSeconds(clip.width);
+      const delay = Math.max(0, clipStart - this.currentTime);
+      const playbackOffset = Math.max(0, this.currentTime - clipStart);
       const audio = new Audio(asset.url);
       const baseVolume = this.clamp(Number(clip.volume ?? 85), 0, 120) / 100;
       const trimStart = Math.max(0, Number(clip.trimStart || 0));
       const trimEnd = Math.max(0, Number(clip.trimEnd || 0));
-      const clipDuration = Math.max(0.05, this.pixelsToSeconds(clip.width) - trimEnd);
+      const clipDuration = Math.max(0.05, clipLength - trimEnd - playbackOffset);
+      if (playbackOffset >= clipLength - trimEnd) return;
       audio.volume = Math.min(1, baseVolume);
-      audio.currentTime = trimStart;
+      audio.currentTime = trimStart + playbackOffset;
       const timeout = setTimeout(() => {
         if (!this.isPlaying) return;
-        audio.currentTime = trimStart;
+        audio.currentTime = trimStart + playbackOffset;
         audio.play().catch(() => {});
         this.applyAudioFade(audio, clip, baseVolume);
       }, delay * 1000);
@@ -561,6 +911,161 @@ class CherryXMusicStudio {
     return (px / this.cellWidth) * (60 / this.bpm);
   }
 
+  secondsToPixels(seconds) {
+    return (seconds * this.bpm / 60) * this.cellWidth;
+  }
+
+  patternDurationSeconds(pattern = this.getActivePattern()) {
+    return Math.max(this.tickSeconds(), this.patternStepCount(pattern) * this.tickSeconds());
+  }
+
+  patternPlaybackTime(seconds = this.currentTime) {
+    const duration = this.patternDurationSeconds();
+    return ((seconds % duration) + duration) % duration;
+  }
+
+  maxTimelineX() {
+    return this.timelineBars * this.cellWidth;
+  }
+
+  updateTimelineLength() {
+    const minBeatsForDuration = Math.ceil((this.timelineSeconds * this.bpm) / 60);
+    const contentEndBeats = this.clips.reduce((max, clip) => {
+      const end = (Number(clip.x) || 0) + (Number(clip.width) || 0);
+      return Math.max(max, Math.ceil(end / this.cellWidth));
+    }, 0);
+    const nextBeats = Math.ceil(Math.max(64, minBeatsForDuration, contentEndBeats + 16) / 4) * 4;
+    const changed = nextBeats !== this.timelineBars;
+    this.timelineBars = nextBeats;
+    return changed;
+  }
+
+  getTrackRowHeight() {
+    const firstLane = this.elements.playlistGrid?.querySelector("[data-track-lane]");
+    const measured = firstLane?.getBoundingClientRect().height;
+    if (measured) {
+      this.trackRowHeight = measured;
+      return measured;
+    }
+    const raw = getComputedStyle(this.container).getPropertyValue("--cx-track-row");
+    const parsed = parseFloat(raw);
+    this.trackRowHeight = Number.isFinite(parsed) ? parsed : this.trackRowHeight;
+    return this.trackRowHeight;
+  }
+
+  getTrackHeaderWidth() {
+    const raw = getComputedStyle(this.container).getPropertyValue("--cx-track-head");
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : 136;
+  }
+
+  seekToPixels(px, snap = true) {
+    const rawX = this.clamp(Number(px) || 0, 0, this.maxTimelineX());
+    const x = snap ? this.snapX(rawX) : rawX;
+    this.currentTime = this.pixelsToSeconds(x);
+    this.playTick = Math.floor(this.currentTime / this.tickSeconds());
+    this.updateTimeDisplay();
+    this.updatePlayhead();
+    if (this.isPlaying) {
+      this.stopStepPlayback();
+      this.stopAudioPlayers();
+      this.startStepPlayback();
+      if (this.transportPlaysArrangement()) this.startAudioClips();
+    }
+  }
+
+  timelinePointFromEvent(event) {
+    const source = this.elements.ruler || this.elements.playlistGrid;
+    if (!source) return 0;
+    const rect = source.getBoundingClientRect();
+    const scrollLeft = this.elements.playlistGrid?.scrollLeft || 0;
+    return event.clientX - rect.left + scrollLeft;
+  }
+
+  pianoPointFromEvent(event) {
+    if (!this.elements.pianoRoll) return 0;
+    const rect = this.elements.pianoRoll.getBoundingClientRect();
+    return event.clientX - rect.left + this.elements.pianoRoll.scrollLeft;
+  }
+
+  startTimelineSeek(event) {
+    if (event.button !== 0) return;
+    if (event.shiftKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const seek = moveEvent => this.seekToPixels(this.timelinePointFromEvent(moveEvent), true);
+    seek(event);
+    const onMove = moveEvent => seek(moveEvent);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  startPianoSeek(event) {
+    if (event.button !== 0) return;
+    if (event.shiftKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    const seek = moveEvent => this.seekToPixels(this.pianoPointFromEvent(moveEvent), true);
+    seek(event);
+    const onMove = moveEvent => seek(moveEvent);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      this.suppressNoteClick = true;
+      window.setTimeout(() => { this.suppressNoteClick = false; }, 120);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  startSurfacePan(event, surface) {
+    if (!surface || event.button !== 0) return;
+    if (this.isEditableTarget(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = surface.scrollLeft;
+    const startTop = surface.scrollTop;
+    let moved = false;
+    surface.classList.add("is-panning");
+    document.body.classList.add("cx-surface-panning");
+
+    const pan = moveEvent => {
+      moveEvent.preventDefault();
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+      surface.scrollLeft = startLeft - dx;
+      surface.scrollTop = startTop - dy;
+      if (surface === this.elements.playlistGrid) this.syncTimelineScroll();
+      if (surface === this.elements.pianoRoll) this.syncPianoScroll();
+    };
+    const stop = () => {
+      document.removeEventListener("mousemove", pan);
+      document.removeEventListener("mouseup", stop);
+      surface.classList.remove("is-panning");
+      document.body.classList.remove("cx-surface-panning");
+      if (moved) {
+        this.suppressClipClick = true;
+        this.suppressNoteClick = true;
+        window.setTimeout(() => {
+          this.suppressClipClick = false;
+          this.suppressNoteClick = false;
+        }, 120);
+      }
+    };
+    document.addEventListener("mousemove", pan);
+    document.addEventListener("mouseup", stop);
+  }
+
   beatsToTicks(beats) {
     return Math.round((Number(beats) || 0) * 4);
   }
@@ -568,9 +1073,11 @@ class CherryXMusicStudio {
   renderAll() {
     this.channels.forEach(channel => this.normalizeChannel(channel));
     this.patterns.forEach(pattern => this.normalizePattern(pattern));
+    this.updateTimelineLength();
     this.applyZoom();
     this.generateRuler();
     this.generatePianoKeys();
+    this.renderTrackGrid();
     this.renderPlaylist();
     this.renderNotes();
     this.renderChannels();
@@ -585,9 +1092,117 @@ class CherryXMusicStudio {
     if (this.elements.projectName) this.elements.projectName.value = this.projectTitle;
   }
 
+  renderTrackGrid() {
+    if (!this.elements.playlistGrid) return;
+    this.ensureTrackNames();
+    this.elements.playlistGrid.innerHTML = "";
+    for (let index = 0; index < this.tracks; index += 1) {
+      const name = document.createElement("div");
+      name.className = "cx-track-name";
+      name.dataset.trackName = String(index);
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "cx-track-title";
+      title.dataset.renameTrack = String(index);
+      title.title = this.t("double_click_rename", "Double-click to rename");
+      title.textContent = this.trackNames[index] || `${this.t("track", "Track")} ${index + 1}`;
+      title.addEventListener("dblclick", event => this.startTrackRename(event, index));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "cx-track-delete";
+      remove.dataset.deleteTrack = String(index);
+      remove.title = this.t("delete", "Delete");
+      remove.setAttribute("aria-label", `${this.t("delete", "Delete")} ${title.textContent}`);
+      remove.disabled = this.tracks <= 1;
+      name.append(title, remove);
+      const lane = document.createElement("div");
+      lane.className = "cx-track-lane";
+      lane.dataset.trackLane = String(index);
+      this.elements.playlistGrid.append(name, lane);
+    }
+    const addCell = document.createElement("div");
+    addCell.className = "cx-track-add-cell";
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.dataset.addTrack = "";
+    addButton.title = this.t("track_added", "Add track");
+    addButton.setAttribute("aria-label", this.t("track_added", "Add track"));
+    addButton.textContent = this.t("track", "Track");
+    addCell.appendChild(addButton);
+    const addLane = document.createElement("div");
+    addLane.className = "cx-track-add-lane";
+    this.elements.playlistGrid.append(addCell, addLane);
+  }
+
+  addTrack() {
+    this.tracks = this.clamp(this.tracks + 1, 1, 24);
+    this.ensureTrackNames();
+    this.trackNames[this.tracks - 1] = `${this.t("track", "Track")} ${this.tracks}`;
+    this.renderTrackGrid();
+    this.renderPlaylist();
+    this.toast(this.t("track_added", "Track added"), "success");
+    this.saveHistory();
+  }
+
+  ensureTrackNames() {
+    this.trackNames = Array.isArray(this.trackNames) ? this.trackNames : [];
+    for (let index = 0; index < this.tracks; index += 1) {
+      if (!this.trackNames[index]) this.trackNames[index] = `${this.t("track", "Track")} ${index + 1}`;
+    }
+    this.trackNames = this.trackNames.slice(0, this.tracks);
+  }
+
+  startTrackRename(event, index) {
+    event.preventDefault();
+    event.stopPropagation();
+    const button = event.currentTarget;
+    const original = this.trackNames[index] || button.textContent.trim();
+    const input = document.createElement("input");
+    input.className = "cx-track-title-input";
+    input.type = "text";
+    input.maxLength = 48;
+    input.value = original;
+    input.setAttribute("aria-label", this.t("track", "Track"));
+    button.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let closed = false;
+    const finish = save => {
+      if (closed) return;
+      closed = true;
+      const next = input.value.trim() || original;
+      if (save) this.trackNames[index] = next;
+      this.renderTrackGrid();
+      this.renderPlaylist();
+      if (save && next !== original) this.saveHistory();
+    };
+    input.addEventListener("keydown", keyEvent => {
+      if (keyEvent.key === "Enter") finish(true);
+      if (keyEvent.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+
+  deleteTrack(index) {
+    if (this.tracks <= 1 || !Number.isFinite(index)) return;
+    const removedName = this.trackNames[index] || `${this.t("track", "Track")} ${index + 1}`;
+    this.clips = this.clips
+      .filter(clip => Number(clip.track || 0) !== index)
+      .map(clip => ({ ...clip, track: Number(clip.track || 0) > index ? Number(clip.track || 0) - 1 : Number(clip.track || 0) }));
+    this.trackNames.splice(index, 1);
+    this.tracks = Math.max(1, this.tracks - 1);
+    this.selectedClipId = null;
+    this.renderTrackGrid();
+    this.renderPlaylist();
+    this.updateInspectorDefault();
+    this.toast(`${this.t("delete", "Delete")}: ${removedName}`, "info");
+    this.saveHistory();
+  }
+
   changeZoom(delta) {
     const oldWidth = this.cellWidth;
-    this.zoom = this.clamp(Number((this.zoom + delta).toFixed(2)), 0.62, 1.9);
+    this.zoom = this.clamp(Number((this.zoom + delta).toFixed(2)), 0.25, 6);
     this.cellWidth = Math.round(this.baseCellWidth * this.zoom);
     this.scaleProjectX(this.cellWidth / oldWidth);
     this.applyZoom();
@@ -612,34 +1227,80 @@ class CherryXMusicStudio {
 
   applyZoom() {
     this.container.style.setProperty("--cx-cell", `${this.cellWidth}px`);
+    this.applyTimelineMetrics();
     if (this.elements.zoomLevel) this.elements.zoomLevel.textContent = `${Math.round(this.zoom * 100)}%`;
   }
 
-  generateRuler() {
-    if (!this.elements.ruler) return;
-    this.elements.ruler.innerHTML = "";
-    for (let i = 1; i <= this.timelineBars; i++) {
-      const span = document.createElement("span");
-      span.textContent = i;
-      this.elements.ruler.appendChild(span);
+  applyTimelineMetrics() {
+    const width = this.maxTimelineX();
+    this.container.style.setProperty("--cx-timeline-beats", String(this.timelineBars));
+    this.container.style.setProperty("--cx-timeline-width", `${width}px`);
+    this.container.style.setProperty("--cx-snap", `${this.snapGridSize()}px`);
+    if (this.elements.ruler) {
+      this.elements.ruler.style.width = `${width}px`;
+      this.elements.ruler.style.minWidth = `${width}px`;
+      this.elements.ruler.style.gridTemplateColumns = `repeat(${this.timelineBars}, var(--cx-cell))`;
     }
+    if (this.elements.pianoRuler) {
+      this.elements.pianoRuler.style.width = `${width}px`;
+      this.elements.pianoRuler.style.minWidth = `${width}px`;
+      this.elements.pianoRuler.style.gridTemplateColumns = `repeat(${this.timelineBars}, var(--cx-cell))`;
+    }
+  }
+
+  generateRuler() {
+    this.applyTimelineMetrics();
+    if (this.elements.ruler) this.elements.ruler.innerHTML = "";
+    if (this.elements.pianoRuler) this.elements.pianoRuler.innerHTML = "";
+    for (let i = 1; i <= this.timelineBars; i++) {
+      if (this.elements.ruler) {
+        const span = document.createElement("span");
+        span.textContent = i;
+        span.title = this.formatTimelineBeat(i - 1);
+        this.elements.ruler.appendChild(span);
+      }
+      if (this.elements.pianoRuler) {
+        const tick = document.createElement("span");
+        tick.textContent = i % 4 === 1 ? String(Math.floor((i - 1) / 4) + 1) : "";
+        tick.title = this.formatTimelineBeat(i - 1);
+        this.elements.pianoRuler.appendChild(tick);
+      }
+    }
+  }
+
+  formatTimelineBeat(beatIndex) {
+    const seconds = this.pixelsToSeconds(beatIndex * this.cellWidth);
+    const minutes = Math.floor(seconds / 60);
+    const rest = Math.floor(seconds % 60);
+    const centiseconds = Math.floor((seconds % 1) * 100);
+    return `${minutes}:${String(rest).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
   }
 
   generatePianoKeys() {
     if (!this.elements.pianoKeys) return;
     this.elements.pianoKeys.innerHTML = "";
+    this.pianoRows = [];
+    let top = 0;
     const notes = ["C", "B", "A#", "A", "G#", "G", "F#", "F", "E", "D#", "D", "C#"];
     for (let octave = 7; octave >= 1; octave--) {
       notes.forEach(name => {
         const note = `${name}${octave}`;
+        const isBlack = name.includes("#");
+        const height = isBlack ? this.blackKeyHeight : this.whiteKeyHeight;
+        const row = this.pianoRows.length;
         const key = document.createElement("div");
-        key.className = `cx-piano-key ${name.includes("#") ? "black-key" : "white-key"} ${name === "C" ? "c-note" : ""}`;
+        key.className = `cx-piano-key ${isBlack ? "black-key" : "white-key"} ${name === "C" ? "c-note" : ""}`;
         key.dataset.note = note;
+        key.dataset.row = String(row);
+        key.style.height = `${height}px`;
         key.textContent = note;
         key.addEventListener("click", () => this.playNote(note));
         this.elements.pianoKeys.appendChild(key);
+        this.pianoRows.push({ note, top, height, isBlack });
+        top += height;
       });
     }
+    this.container.style.setProperty("--cx-piano-height", `${top}px`);
   }
 
   async playNote(note) {
@@ -660,6 +1321,7 @@ class CherryXMusicStudio {
   }
 
   switchView(viewName, button) {
+    this.activeView = viewName;
     this.container.querySelectorAll("[data-view]").forEach(item => item.classList.remove("active"));
     this.container.querySelectorAll(`[data-view="${viewName}"]`).forEach(item => item.classList.add("active"));
     button?.classList.add("active");
@@ -669,12 +1331,20 @@ class CherryXMusicStudio {
       this.renderNotes();
       this.updateActivePatternLabel();
     }
+    if (this.isPlaying) {
+      this.clearPlayingStep();
+      this.stopAudioPlayers();
+      if (this.transportPlaysArrangement()) this.startAudioClips();
+    }
+    this.updatePlayhead();
+    this.saveUiPrefs();
   }
 
   setTool(tool, button) {
     this.tool = tool;
     this.container.querySelectorAll("[data-tool]").forEach(item => item.classList.remove("active"));
     button?.classList.add("active");
+    this.saveUiPrefs();
   }
 
   setArrangeTool(tool, button) {
@@ -682,6 +1352,7 @@ class CherryXMusicStudio {
     this.container.querySelectorAll("[data-arrange-tool]").forEach(item => item.classList.remove("active"));
     button?.classList.add("active");
     if (this.elements.playlistGrid) this.elements.playlistGrid.dataset.arrangeTool = tool;
+    this.saveUiPrefs();
   }
 
   updatePatternControls() {
@@ -698,14 +1369,20 @@ class CherryXMusicStudio {
         .join("");
     }
     if (this.elements.noteLength) this.elements.noteLength.value = String(this.noteLengthBeats);
+    this.syncCustomSelects();
   }
 
   handlePianoRollClick(event) {
+    if (this.suppressNoteClick) {
+      this.suppressNoteClick = false;
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) return;
     const pattern = this.getActivePattern();
-    if (!pattern || !this.elements.pianoRoll || event.target.closest(".cx-note")) return;
+    if (!pattern || !this.elements.pianoRoll || event.target.closest(".cx-note, .cx-piano-ruler, .cx-piano-playhead")) return;
     if (this.tool === "select") return;
     const point = this.relativePoint(event, this.elements.pianoRoll);
-    const row = Math.floor(point.y / this.rowHeight);
+    const row = this.pianoRowFromY(point.y);
     const noteName = this.noteFromRow(row);
     if (!noteName) return;
     const snappedX = this.snapX(point.x);
@@ -719,7 +1396,7 @@ class CherryXMusicStudio {
       }
       return;
     }
-    const note = { id: this.uuid(), channelId: this.selectedChannelId, note: noteName, row, x: snappedX, y: row * this.rowHeight, width: this.cellWidth * this.noteLengthBeats, velocity: 85 };
+    const note = { id: this.uuid(), channelId: this.selectedChannelId, note: noteName, row, x: snappedX, y: this.pianoRowAt(row).top, width: this.cellWidth * this.noteLengthBeats, velocity: 85 };
     pattern.notes.push(note);
     this.renderNotes();
     this.selectNote(note.id);
@@ -727,24 +1404,181 @@ class CherryXMusicStudio {
     this.saveHistory();
   }
 
+  startNoteBoxSelect(event) {
+    if (event.button !== 0 || event.target.closest(".cx-note-resize")) return;
+    const pattern = this.getActivePattern();
+    if (!pattern || !this.elements.pianoRoll) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.startBoxSelection(event, this.elements.pianoRoll, ".cx-note", boxRect => {
+      this.selectedNoteIds.clear();
+      this.selectedClipIds.clear();
+      this.selectedClipId = null;
+      this.selectedNoteId = null;
+      this.elements.noteLayer.querySelectorAll(".cx-note").forEach(el => {
+        const selected = this.rectsIntersect(boxRect, el.getBoundingClientRect());
+        el.classList.toggle("selected", selected);
+        if (selected) this.selectedNoteIds.add(el.dataset.noteId);
+      });
+    }, () => {
+      this.updateInspectorDefault();
+    });
+  }
+
+  startClipBoxSelect(event) {
+    if (event.button !== 0 || this.isClipResizeEdge(event)) return;
+    if (!this.elements.playlistGrid) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.startBoxSelection(event, this.elements.playlistGrid, ".cx-pattern-clip,.cx-audio-clip", boxRect => {
+      this.selectedClipIds.clear();
+      this.selectedNoteIds.clear();
+      this.selectedClipId = null;
+      this.selectedNoteId = null;
+      this.elements.playlistGrid.querySelectorAll(".cx-pattern-clip,.cx-audio-clip").forEach(el => {
+        const selected = this.rectsIntersect(boxRect, el.getBoundingClientRect());
+        el.classList.toggle("cx-clip-selected", selected);
+        if (selected) this.selectedClipIds.add(el.dataset.clipId);
+      });
+    }, () => {
+      this.updateInspectorDefault();
+    });
+  }
+
+  startBoxSelection(event, container, itemSelector, onChange, onFinish = () => {}) {
+    if (this.selectionBoxActive) return;
+    this.selectionBoxActive = true;
+    const start = this.relativePoint(event, container);
+    const box = document.createElement("div");
+    box.className = "cx-selection-box";
+    container.appendChild(box);
+    const paint = point => {
+      const left = Math.min(start.x, point.x);
+      const top = Math.min(start.y, point.y);
+      const width = Math.abs(point.x - start.x);
+      const height = Math.abs(point.y - start.y);
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${width}px`;
+      box.style.height = `${height}px`;
+    };
+    paint(start);
+    const update = () => onChange(box.getBoundingClientRect(), itemSelector);
+    const onMove = moveEvent => {
+      paint(this.relativePoint(moveEvent, container));
+      update();
+    };
+    const onUp = upEvent => {
+      if (upEvent) paint(this.relativePoint(upEvent, container));
+      update();
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      box.remove();
+      this.selectionBoxActive = false;
+      onFinish();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }
+
+  rectsIntersect(a, b) {
+    return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+  }
+
+  showPianoRollContextMenu(event) {
+    if (event.target.closest(".cx-note")) return;
+    event.preventDefault();
+    const pattern = this.getActivePattern();
+    const point = this.relativePoint(event, this.elements.pianoRoll);
+    const row = this.clamp(this.pianoRowFromY(point.y), 0, (this.elements.pianoKeys?.children.length || 1) - 1);
+    const noteName = this.noteFromRow(row);
+    const x = this.snapX(point.x);
+    this.showContextMenu(event.clientX, event.clientY, [
+      pattern && noteName ? { label: `${this.t("note", "Note")} ${noteName}`, icon: "https://api.iconify.design/lucide/circle-plus.svg", action: () => this.createNoteAt(x, row) } : null,
+      pattern ? { label: this.t("quantize_notes", "Quantize notes"), icon: "https://api.iconify.design/lucide/magnet.svg", action: () => this.quantizeActivePatternNotes() } : null,
+      pattern ? { label: this.t("octave_up", "Octave up"), icon: "https://api.iconify.design/lucide/arrow-up.svg", action: () => this.moveSelectedNotesOctave(-12) } : null,
+      pattern ? { label: this.t("octave_down", "Octave down"), icon: "https://api.iconify.design/lucide/arrow-down.svg", action: () => this.moveSelectedNotesOctave(12) } : null,
+      pattern ? { label: this.t("send_to_playlist", "Send pattern to playlist"), icon: "https://api.iconify.design/lucide/send-horizontal.svg", action: () => this.sendActivePatternToPlaylist() } : null,
+      { label: this.t("open_channel_rack", "Open Channel Rack"), icon: "https://api.iconify.design/lucide/grid-3x3.svg", action: () => this.switchView("step-seq", this.container.querySelector('[data-view="step-seq"]')) }
+    ].filter(Boolean));
+  }
+
+  showNoteContextMenu(event, noteId) {
+    event.preventDefault();
+    event.stopPropagation();
+    const pattern = this.getActivePattern();
+    const note = pattern?.notes.find(item => item.id === noteId);
+    if (!note) return;
+    if (!this.selectedNoteIds.has(noteId)) this.selectNote(noteId);
+    const multiple = this.selectedNoteIds.size > 1;
+    this.showContextMenu(event.clientX, event.clientY, [
+      { label: multiple ? this.t("duplicate", "Duplicate") : `${this.t("duplicate", "Duplicate")} ${note.note}`, icon: "https://api.iconify.design/lucide/copy-plus.svg", action: () => this.duplicateSelected() },
+      { label: this.t("quantize_notes", "Quantize notes"), icon: "https://api.iconify.design/lucide/magnet.svg", action: () => this.quantizeActivePatternNotes() },
+      { label: this.t("octave_up", "Octave up"), icon: "https://api.iconify.design/lucide/arrow-up.svg", action: () => this.moveSelectedNotesOctave(-12) },
+      { label: this.t("octave_down", "Octave down"), icon: "https://api.iconify.design/lucide/arrow-down.svg", action: () => this.moveSelectedNotesOctave(12) },
+      { label: this.t("send_to_playlist", "Send pattern to playlist"), icon: "https://api.iconify.design/lucide/send-horizontal.svg", action: () => this.sendActivePatternToPlaylist() },
+      { label: this.t("delete", "Delete"), icon: "https://api.iconify.design/lucide/trash-2.svg", danger: true, action: () => this.deleteSelected() }
+    ]);
+  }
+
+  createNoteAt(x, row) {
+    const pattern = this.getActivePattern();
+    const noteName = this.noteFromRow(row);
+    if (!pattern || !noteName) return;
+    const note = {
+      id: this.uuid(),
+      channelId: this.selectedChannelId,
+      note: noteName,
+      row,
+      x: this.snapX(x),
+      y: this.pianoRowAt(row).top,
+      width: this.cellWidth * this.noteLengthBeats,
+      velocity: 85
+    };
+    pattern.notes.push(note);
+    this.renderNotes();
+    this.selectNote(note.id);
+    this.flashPianoKey(noteName);
+    this.saveHistory();
+  }
+
   renderNotes() {
     if (!this.elements.noteLayer) return;
     const pattern = this.getActivePattern();
     this.elements.noteLayer.innerHTML = "";
+    this.renderPianoGridRows();
     if (!pattern) return;
     (pattern.notes || []).forEach(note => {
       const channel = this.channels.find(item => item.id === note.channelId);
       const el = document.createElement("div");
-      el.className = `cx-note ${note.id === this.selectedNoteId ? "selected" : ""}`;
+      const rowMeta = this.pianoRowAt(Number(note.row || 0));
+      const rowTop = rowMeta.top;
+      const noteHeight = Math.max(10, Math.min(16, rowMeta.height - 8));
+      const rowInset = Math.max(2, Math.round((rowMeta.height - noteHeight) / 2));
+      const noteLabel = note.note || "";
+      note.y = rowTop;
+      el.className = `cx-note ${rowMeta.isBlack ? "is-black-row" : "is-white-row"} ${note.id === this.selectedNoteId || this.selectedNoteIds.has(note.id) ? "selected" : ""}`;
       el.dataset.noteId = note.id;
+      el.dataset.noteLabel = noteLabel;
+      el.title = noteLabel;
+      el.setAttribute("aria-label", noteLabel);
       el.style.left = `${note.x}px`;
-      el.style.top = `${note.y}px`;
+      el.style.top = `${rowTop + rowInset}px`;
+      el.style.height = `${noteHeight}px`;
       el.style.width = `${note.width || this.cellWidth}px`;
       el.style.setProperty("--note-color", channel?.color || "#ff7a18");
-      el.textContent = note.note;
       el.addEventListener("click", event => {
         event.stopPropagation();
-        this.selectNote(note.id);
+        if (this.suppressNoteClick) {
+          this.suppressNoteClick = false;
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) this.toggleNoteSelection(note.id);
+        else this.selectNote(note.id);
       });
       el.addEventListener("dblclick", event => {
         event.stopPropagation();
@@ -754,6 +1588,7 @@ class CherryXMusicStudio {
         this.updateInspectorDefault();
         this.saveHistory();
       });
+      el.addEventListener("contextmenu", event => this.showNoteContextMenu(event, note.id));
       el.addEventListener("mousedown", event => this.startNoteDrag(event, note.id));
       const handle = document.createElement("span");
       handle.className = "cx-note-resize";
@@ -763,28 +1598,61 @@ class CherryXMusicStudio {
     });
   }
 
+  renderPianoGridRows() {
+    if (!this.elements.noteLayer) return;
+    const fragment = document.createDocumentFragment();
+    (this.pianoRows || []).forEach((row, index) => {
+      const line = document.createElement("span");
+      line.className = `cx-note-row ${row.isBlack ? "is-black" : "is-white"} ${String(row.note || "").startsWith("C") ? "is-c" : ""}`;
+      line.dataset.row = String(index);
+      line.style.top = `${row.top}px`;
+      line.style.height = `${row.height}px`;
+      fragment.appendChild(line);
+    });
+    this.elements.noteLayer.appendChild(fragment);
+  }
+
   startNoteDrag(event, noteId) {
     if (event.button !== 0 || event.target.closest(".cx-note-resize")) return;
+    if (event.ctrlKey || event.metaKey) return;
     const pattern = this.getActivePattern();
     const note = pattern?.notes.find(item => item.id === noteId);
     if (!note) return;
-    this.selectNote(noteId);
+    const isGroupDrag = this.selectedNoteIds.size > 1 && this.selectedNoteIds.has(noteId);
+    if (!isGroupDrag) this.selectNote(noteId);
+    const notes = isGroupDrag
+      ? pattern.notes.filter(item => this.selectedNoteIds.has(item.id))
+      : [note];
+    const origins = new Map(notes.map(item => [item.id, { x: item.x, row: item.row, y: item.y, note: item.note }]));
     const startX = event.clientX;
     const startY = event.clientY;
-    const originX = note.x;
-    const originY = note.y;
+    const origin = origins.get(noteId);
+    let didDrag = false;
     const onMove = moveEvent => {
-      note.x = Math.max(0, this.snapX(originX + moveEvent.clientX - startX));
-      const row = this.clamp(Math.floor((originY + moveEvent.clientY - startY) / this.rowHeight), 0, this.elements.pianoKeys.children.length - 1);
-      note.row = row;
-      note.y = row * this.rowHeight;
-      note.note = this.noteFromRow(row) || note.note;
+      didDrag = didDrag || Math.abs(moveEvent.clientX - startX) > 3 || Math.abs(moveEvent.clientY - startY) > 3;
+      const anchorX = this.snapX(origin.x + moveEvent.clientX - startX);
+      const deltaX = anchorX - origin.x;
+      const anchorRow = this.clamp(this.pianoRowFromY(origin.y + moveEvent.clientY - startY), 0, this.elements.pianoKeys.children.length - 1);
+      const deltaRow = anchorRow - origin.row;
+      notes.forEach(item => {
+        const itemOrigin = origins.get(item.id);
+        item.x = Math.max(0, this.snapX(itemOrigin.x + deltaX));
+        const row = this.clamp(itemOrigin.row + deltaRow, 0, this.elements.pianoKeys.children.length - 1);
+        item.row = row;
+        item.y = this.pianoRowAt(row).top;
+        item.note = this.noteFromRow(row) || item.note;
+      });
       this.renderNotes();
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      this.showNoteInspector(note);
+      if (isGroupDrag) this.updateInspectorDefault();
+      else this.showNoteInspector(note);
+      if (didDrag) {
+        this.suppressNoteClick = true;
+        setTimeout(() => { this.suppressNoteClick = false; }, 120);
+      }
       this.saveHistory();
     };
     document.addEventListener("mousemove", onMove);
@@ -813,6 +1681,8 @@ class CherryXMusicStudio {
   }
 
   renderPlaylist() {
+    if (this.updateTimelineLength()) this.generateRuler();
+    this.applyTimelineMetrics();
     const lanes = this.container.querySelectorAll("[data-track-lane]");
     lanes.forEach(lane => {
       lane.innerHTML = "";
@@ -826,7 +1696,7 @@ class CherryXMusicStudio {
       const lane = this.container.querySelector(`[data-track-lane="${clip.track}"]`);
       if (!lane) return;
       const el = document.createElement("div");
-      el.className = `${clip.type === "audio" ? "cx-audio-clip" : "cx-pattern-clip"} ${clip.id === this.selectedClipId ? "cx-clip-selected" : ""}`;
+      el.className = `${clip.type === "audio" ? "cx-audio-clip" : "cx-pattern-clip"} ${clip.id === this.selectedClipId || this.selectedClipIds.has(clip.id) ? "cx-clip-selected" : ""}`;
       el.classList.toggle("is-muted", Boolean(clip.muted));
       el.dataset.clipId = clip.id;
       el.style.left = `${clip.x}px`;
@@ -835,6 +1705,14 @@ class CherryXMusicStudio {
       el.innerHTML = this.clipMarkup(clip);
       el.addEventListener("click", event => {
         event.stopPropagation();
+        if (this.suppressClipClick) {
+          this.suppressClipClick = false;
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+          this.toggleClipSelection(clip.id);
+          return;
+        }
         if (this.handleClipToolClick(event, clip)) return;
         this.selectClip(clip.id);
       });
@@ -848,10 +1726,10 @@ class CherryXMusicStudio {
         }
       });
       el.addEventListener("mousedown", event => this.startClipDrag(event, clip.id));
-      const handle = document.createElement("span");
-      handle.className = "cx-clip-resize";
-      handle.addEventListener("mousedown", event => this.startClipResize(event, clip.id));
-      el.appendChild(handle);
+      el.addEventListener("mousemove", event => {
+        el.classList.toggle("is-resize-edge", this.isClipResizeEdge(event));
+      });
+      el.addEventListener("mouseleave", () => el.classList.remove("is-resize-edge"));
       lane.appendChild(el);
     });
   }
@@ -875,10 +1753,13 @@ class CherryXMusicStudio {
     const pattern = this.patterns.find(item => item.id === clip.patternId);
     const noteCount = (pattern?.notes || []).length;
     const activeSteps = Object.values(pattern?.stepsByChannel || {}).reduce((sum, steps) => sum + steps.filter(Boolean).length, 0);
+    const contentCount = noteCount + activeSteps;
     return `
-      <span class="cx-clip-title">${title}</span>
-      <span class="cx-pattern-mini">${this.patternMiniBars(pattern)}</span>
-      <span class="cx-clip-badge">${noteCount + activeSteps}</span>
+      <span class="cx-clip-titlebar">
+        <span class="cx-clip-name">${title}</span>
+        <span class="cx-clip-count">${contentCount}</span>
+      </span>
+      <span class="cx-pattern-mini" aria-hidden="true">${this.patternMiniPreview(clip, pattern)}</span>
     `;
   }
 
@@ -892,6 +1773,10 @@ class CherryXMusicStudio {
   }
 
   handleLaneClick(event, lane) {
+    if (this.suppressClipClick) {
+      this.suppressClipClick = false;
+      return;
+    }
     if (event.target.closest(".cx-pattern-clip, .cx-audio-clip")) return;
     if (this.arrangeTool !== "draw") return;
     const point = this.relativePoint(event, lane);
@@ -930,19 +1815,107 @@ class CherryXMusicStudio {
     });
   }
 
-  patternMiniBars(pattern) {
+  patternMiniPreview(clip, pattern) {
+    if (!pattern) return '<span class="cx-pattern-mini-empty"></span>';
+    const pct = value => `${this.clamp(Number(value) || 0, 0, 100).toFixed(3)}%`;
     const stepCount = this.patternStepCount(pattern);
-    const previewCount = 16;
-    const ticks = Array.from({ length: previewCount }, () => 0);
-    Object.values(pattern?.stepsByChannel || {}).forEach(steps => {
-      steps.forEach((active, index) => {
-        if (active) ticks[Math.floor(index / stepCount * previewCount)] += 1;
+    const patternBeats = Math.max(1, stepCount / 4);
+    const clipBeats = Math.max(0.25, Number(clip?.width || this.cellWidth * patternBeats) / this.cellWidth);
+    const notes = Array.isArray(pattern.notes) ? pattern.notes : [];
+    const stepEntries = Object.entries(pattern.stepsByChannel || {});
+    const activeStepCount = stepEntries.reduce((sum, [, steps]) => sum + (Array.isArray(steps) ? steps.filter(Boolean).length : 0), 0);
+
+    if (!notes.length && !activeStepCount) {
+      return `<span class="cx-pattern-wave-midline"></span><span class="cx-pattern-mini-empty"></span>`;
+    }
+
+    const sampleCount = Math.min(128, Math.max(36, Math.round(Number(clip?.width || this.cellWidth * patternBeats) / 5)));
+    const wrapPosition = (localBeat, start, length) => {
+      let position = localBeat - start;
+      if (position < 0 && start + length > patternBeats) position = localBeat + patternBeats - start;
+      return position;
+    };
+    const noteEnvelope = (position, length) => {
+      const attack = Math.min(0.08, length * 0.24);
+      const release = Math.min(0.32, length * 0.34);
+      if (position < 0 || position > length) return 0;
+      if (position < attack) return attack ? position / attack : 1;
+      if (position > length - release) return release ? Math.max(0, (length - position) / release) : 0;
+      return 0.68 + 0.22 * Math.abs(Math.sin((position / Math.max(length, 0.125)) * Math.PI * 2));
+    };
+    const drumShape = channel => {
+      if (channel?.preset === "kick") return { length: 0.72, decay: 0.16, gain: 1 };
+      if (channel?.preset === "snare" || channel?.preset === "clap") return { length: 0.46, decay: 0.11, gain: 0.78 };
+      if (channel?.preset === "hat") return { length: 0.2, decay: 0.045, gain: 0.48 };
+      return { length: 0.42, decay: 0.12, gain: 0.62 };
+    };
+    const localAmplitude = localBeat => {
+      let value = 0;
+      notes.forEach(note => {
+        const channel = this.channels.find(item => item.id === note.channelId);
+        const start = (((Number(note.x) || 0) / this.cellWidth) % patternBeats + patternBeats) % patternBeats;
+        const length = Math.max(0.125, (Number(note.width) || this.cellWidth) / this.cellWidth);
+        const position = wrapPosition(localBeat, start, length);
+        const envelope = noteEnvelope(position, length);
+        if (!envelope) return;
+        const velocity = this.clamp(Number(note.velocity) || 85, 1, 100) / 100;
+        const channelVolume = this.clamp(Number(channel?.volume ?? 80), 0, 100) / 100;
+        const vibration = 0.76 + 0.24 * Math.abs(Math.sin((localBeat * 18.7) + (Number(note.row) || 0)));
+        value += envelope * velocity * (0.65 + channelVolume * 0.35) * vibration * 0.78;
       });
+      stepEntries.forEach(([channelId, steps]) => {
+        if (!Array.isArray(steps)) return;
+        const channel = this.channels.find(item => item.id === channelId);
+        const shape = drumShape(channel);
+        steps.forEach((active, index) => {
+          if (!active) return;
+          const start = index / 4;
+          const position = wrapPosition(localBeat, start, shape.length);
+          if (position < 0 || position > shape.length) return;
+          const velocity = this.clamp(Number(pattern.stepVelocity?.[channelId]?.[index] || 88), 1, 100) / 100;
+          const transient = Math.exp(-position / shape.decay);
+          const vibration = 0.72 + 0.28 * Math.abs(Math.sin((localBeat + index) * 33.1));
+          value += transient * shape.gain * velocity * vibration;
+        });
+      });
+      return value;
+    };
+
+    const raw = Array.from({ length: sampleCount }, (_, index) => {
+      let value = 0;
+      for (let sub = 0; sub < 3; sub += 1) {
+        const beat = ((index + (sub + 1) / 4) / sampleCount) * clipBeats;
+        const localBeat = ((beat % patternBeats) + patternBeats) % patternBeats;
+        value = Math.max(value, localAmplitude(localBeat));
+      }
+      return value;
     });
-    (pattern?.notes || []).forEach(note => {
-      ticks[Math.floor((this.beatsToTicks(note.x / this.cellWidth) % stepCount) / stepCount * previewCount)] += 1;
+    const smoothed = raw.map((value, index) => ((raw[index - 1] || value) + value * 2 + (raw[index + 1] || value)) / 4);
+    const max = Math.max(...smoothed, 0.01);
+    const points = smoothed.map((value, index) => {
+      const x = sampleCount <= 1 ? 0 : (index / (sampleCount - 1)) * 100;
+      const pulse = 0.86 + 0.14 * Math.sin(index * 1.91 + stepCount);
+      const amp = this.clamp((value / max) * 34 * pulse, 1.5, 38);
+      const direction = Math.sin(index * 1.37 + stepCount * 0.31) >= 0 ? 1 : -1;
+      const y = this.clamp(50 - amp * direction, 8, 92);
+      return { x, y };
     });
-    return ticks.map(count => `<i style="height:${Math.min(90, 18 + count * 18)}%"></i>`).join("");
+    let path = points.length ? `M ${points[0].x.toFixed(3)} ${points[0].y.toFixed(3)}` : "";
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const point = points[index];
+      const controlX = ((previous.x + point.x) / 2).toFixed(3);
+      const controlY = previous.y.toFixed(3);
+      path += ` Q ${controlX} ${controlY} ${point.x.toFixed(3)} ${point.y.toFixed(3)}`;
+    }
+
+    return `
+      <span class="cx-pattern-wave-midline"></span>
+      <svg class="cx-pattern-wave-svg" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false" aria-hidden="true">
+        <path class="cx-pattern-wave-glow" d="${path}"></path>
+        <path class="cx-pattern-wave-line" d="${path}"></path>
+      </svg>
+    `;
   }
 
   createPatternClipFromLane(event, lane) {
@@ -1072,7 +2045,8 @@ class CherryXMusicStudio {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `cx-context-menu-item ${item.danger ? "is-danger" : ""}`;
-      button.textContent = item.label;
+      if (item.icon) button.style.setProperty("--menu-icon", `url("${item.icon}")`);
+      button.innerHTML = `${item.icon ? '<span class="menu-icon" aria-hidden="true"></span>' : ""}<span>${this.escapeHtml(item.label)}</span>`;
       button.addEventListener("click", event => {
         event.stopPropagation();
         this.hideContextMenu();
@@ -1183,28 +2157,59 @@ class CherryXMusicStudio {
   }
 
   startClipDrag(event, clipId) {
-    if (event.button !== 0 || event.target.closest(".cx-clip-resize")) return;
+    if (event.button !== 0) return;
+    if (this.isClipResizeEdge(event)) {
+      this.startClipResize(event, clipId);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) return;
     if (["slice", "mute", "fade", "automation"].includes(this.arrangeTool)) return;
     const clip = this.clips.find(item => item.id === clipId);
     if (!clip) return;
-    this.selectClip(clipId);
+    const isGroupDrag = this.selectedClipIds.size > 1 && this.selectedClipIds.has(clipId);
+    if (!isGroupDrag) this.selectClip(clipId);
+    const clips = isGroupDrag
+      ? this.clips.filter(item => this.selectedClipIds.has(item.id))
+      : [clip];
+    const origins = new Map(clips.map(item => [item.id, { x: item.x, track: item.track }]));
     const startX = event.clientX;
     const startY = event.clientY;
-    const originX = clip.x;
-    const originTrack = clip.track;
+    const origin = origins.get(clipId);
+    const rowHeight = this.getTrackRowHeight();
+    let didDrag = false;
     const onMove = moveEvent => {
-      clip.x = Math.max(0, this.snapX(originX + moveEvent.clientX - startX));
-      clip.track = this.clamp(originTrack + Math.round((moveEvent.clientY - startY) / 84), 0, this.tracks - 1);
+      didDrag = didDrag || Math.abs(moveEvent.clientX - startX) > 3 || Math.abs(moveEvent.clientY - startY) > 3;
+      const anchorX = this.snapX(origin.x + moveEvent.clientX - startX);
+      const deltaX = anchorX - origin.x;
+      const deltaTrack = Math.round((moveEvent.clientY - startY) / rowHeight);
+      clips.forEach(item => {
+        const itemOrigin = origins.get(item.id);
+        item.x = Math.max(0, this.snapX(itemOrigin.x + deltaX));
+        item.track = this.clamp(itemOrigin.track + deltaTrack, 0, this.tracks - 1);
+      });
       this.renderPlaylist();
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      this.showClipInspector(clip);
+      if (isGroupDrag) this.updateInspectorDefault();
+      else this.showClipInspector(clip);
+      if (didDrag) {
+        this.suppressClipClick = true;
+        setTimeout(() => { this.suppressClipClick = false; }, 120);
+      }
       this.saveHistory();
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
+  }
+
+  isClipResizeEdge(event) {
+    const clipEl = event.target.closest?.(".cx-pattern-clip, .cx-audio-clip");
+    if (!clipEl) return false;
+    const rect = clipEl.getBoundingClientRect();
+    const threshold = Math.min(12, Math.max(8, rect.width * 0.16));
+    return event.clientX >= rect.right - threshold;
   }
 
   startClipResize(event, clipId) {
@@ -1228,6 +2233,8 @@ class CherryXMusicStudio {
   }
 
   selectClip(clipId) {
+    this.selectedClipIds.clear();
+    this.selectedNoteIds.clear();
     this.selectedClipId = clipId;
     this.selectedNoteId = null;
     const clip = this.clips.find(item => item.id === clipId);
@@ -1242,11 +2249,36 @@ class CherryXMusicStudio {
   }
 
   selectNote(noteId) {
+    this.selectedNoteIds.clear();
+    this.selectedClipIds.clear();
     this.selectedNoteId = noteId;
     this.selectedClipId = null;
     this.renderNotes();
     const note = this.getActivePattern()?.notes.find(item => item.id === noteId);
     if (note) this.showNoteInspector(note);
+  }
+
+  toggleClipSelection(clipId) {
+    this.selectedNoteIds.clear();
+    this.selectedNoteId = null;
+    this.selectedClipId = null;
+    this.selectedClipIds.has(clipId) ? this.selectedClipIds.delete(clipId) : this.selectedClipIds.add(clipId);
+    this.renderPlaylist();
+    this.updateInspectorDefault();
+  }
+
+  toggleNoteSelection(noteId) {
+    this.selectedClipIds.clear();
+    this.selectedClipId = null;
+    this.selectedNoteId = null;
+    this.selectedNoteIds.has(noteId) ? this.selectedNoteIds.delete(noteId) : this.selectedNoteIds.add(noteId);
+    this.renderNotes();
+    this.updateInspectorDefault();
+  }
+
+  clearMultiSelection() {
+    this.selectedClipIds.clear();
+    this.selectedNoteIds.clear();
   }
 
   renderChannels() {
@@ -1335,57 +2367,175 @@ class CherryXMusicStudio {
     this.elements.mixer.innerHTML = "";
     this.channels.forEach(channel => {
       const pack = this.ensureSynth(channel);
+      const panLabel = channel.pan === 0 ? "C" : channel.pan < 0 ? `L ${Math.abs(channel.pan)}` : `R ${channel.pan}`;
+      const hpLabel = channel.fx.highpass >= 1000 ? `${(channel.fx.highpass / 1000).toFixed(1)}k` : `${channel.fx.highpass}`;
+      const lpLabel = channel.fx.lowpass >= 1000 ? `${(channel.fx.lowpass / 1000).toFixed(1)}k` : `${channel.fx.lowpass}`;
+      const meterLevel = channel.muted ? 4 : Math.max(8, channel.volume);
+      const controlPercent = (value, min, max) => `${this.clamp(((Number(value) - min) / (max - min)) * 100, 0, 100)}%`;
+      const channelPatterns = this.patterns.filter(pattern => {
+        const hasNotes = (pattern.notes || []).some(note => note.channelId === channel.id);
+        const hasSteps = (pattern.stepsByChannel?.[channel.id] || []).some(Boolean);
+        return hasNotes || hasSteps;
+      });
+      const channelPatternIds = new Set(channelPatterns.map(pattern => pattern.id));
+      const channelNotes = this.patterns.reduce((sum, pattern) => sum + (pattern.notes || []).filter(note => note.channelId === channel.id).length, 0);
+      const channelSteps = this.patterns.reduce((sum, pattern) => sum + (pattern.stepsByChannel?.[channel.id] || []).filter(Boolean).length, 0);
+      const channelClips = this.clips.filter(clip => clip.type === "pattern" && channelPatternIds.has(clip.patternId)).length;
       const el = document.createElement("div");
       el.className = `cx-mixer-channel ${channel.id === this.selectedChannelId ? "selected" : ""}`;
       el.style.setProperty("--channel-color", channel.color);
+      el.style.setProperty("--meter-level", `${meterLevel}%`);
+      el.style.setProperty("--pan-position", `${(channel.pan + 100) / 2}%`);
       el.dataset.channelId = channel.id;
       el.innerHTML = `
-        <div class="cx-mixer-title"><span></span>${this.escapeHtml(channel.name)}</div>
-        <div class="cx-mixer-preset">${this.escapeHtml(channel.preset)}</div>
-        <div class="cx-meter-group">
-          <div class="cx-meter-bar left" style="--level:${Math.max(8, channel.volume * 0.8)}%"></div>
-          <div class="cx-meter-bar right" style="--level:${Math.max(8, channel.volume * 0.7)}%"></div>
+        <div class="cx-mixer-head">
+          <button type="button" class="cx-mixer-drag" data-mixer-drag title="${this.escapeHtml(this.t("drag_to_reorder", "Drag to reorder"))}" aria-label="${this.escapeHtml(this.t("drag_to_reorder", "Drag to reorder"))}"></button>
+          <span class="cx-mixer-color" aria-hidden="true"></span>
+          <div class="cx-mixer-name-wrap">
+            <div class="cx-mixer-name">${this.escapeHtml(channel.name)}</div>
+            <div class="cx-mixer-sub">${this.escapeHtml(channel.type)} / ${this.escapeHtml(channel.preset)}</div>
+          </div>
+          <div class="cx-mixer-head-actions">
+            <button type="button" data-duplicate-channel title="${this.escapeHtml(this.t("duplicate_channel", "Duplicate channel"))}" aria-label="${this.escapeHtml(this.t("duplicate_channel", "Duplicate channel"))}"></button>
+            <button type="button" data-delete-channel title="${this.escapeHtml(this.t("delete_channel", "Delete channel"))}" aria-label="${this.escapeHtml(this.t("delete_channel", "Delete channel"))}" ${this.channels.length <= 1 ? "disabled" : ""}></button>
+          </div>
+        </div>
+        <div class="cx-mixer-meter" aria-hidden="true">
+          <div class="cx-meter-fill left"></div>
+          <div class="cx-meter-fill right"></div>
+          <div class="cx-meter-peak"></div>
+        </div>
+        <div class="cx-mixer-main">
+          <label class="cx-mixer-row">
+            <span>Vol</span>
+            <input class="cx-mixer-slider cx-fader" data-mix-control="volume" type="range" min="0" max="100" value="${channel.volume}" style="--control-value:${controlPercent(channel.volume, 0, 100)}">
+            <output data-mix-output="volume">${channel.volume}%</output>
+          </label>
+          <label class="cx-mixer-row cx-pan-row">
+            <span>Pan</span>
+            <input class="cx-mixer-slider cx-pan" data-mix-control="pan" type="range" min="-100" max="100" value="${channel.pan}" style="--control-value:${controlPercent(channel.pan, -100, 100)}">
+            <output data-mix-output="pan">${panLabel}</output>
+          </label>
+        </div>
+        <div class="cx-mixer-controls">
+          <button type="button" data-mute class="${channel.muted ? "active" : ""}" title="Mute">M</button>
+          <button type="button" data-solo class="${channel.solo ? "solo-active" : ""}" title="Solo">S</button>
+          <span class="cx-mixer-state">${channel.muted ? "Muted" : channel.solo ? "Solo" : "Live"}</span>
+        </div>
+        <div class="cx-mixer-route" aria-label="${this.escapeHtml(this.t("channel_contents", "Channel contents"))}">
+          <button type="button" data-mixer-jump="playlist" title="${this.escapeHtml(this.t("go_to_playlist", "Go to playlist"))}"><b>${channelClips}</b><span>${this.escapeHtml(this.t("clips", "Clips"))}</span></button>
+          <button type="button" data-mixer-jump="piano-roll" title="${this.escapeHtml(this.t("piano_roll", "Piano Roll"))}"><b>${channelNotes}</b><span>${this.escapeHtml(this.t("notes", "Notes"))}</span></button>
+          <button type="button" data-mixer-jump="step-seq" title="${this.escapeHtml(this.t("channel_rack", "Channel Rack"))}"><b>${channelSteps}</b><span>${this.escapeHtml(this.t("steps", "Steps"))}</span></button>
         </div>
         <div class="cx-mixer-fx">
-          <label>HP <input data-fx="highpass" type="range" min="20" max="8000" value="${channel.fx.highpass}"></label>
-          <label>LP <input data-fx="lowpass" type="range" min="200" max="20000" value="${channel.fx.lowpass}"></label>
-          <label>Rev <input data-send="reverb" type="range" min="0" max="100" value="${channel.send.reverb}"></label>
-          <label>Dly <input data-send="delay" type="range" min="0" max="100" value="${channel.send.delay}"></label>
+          <label class="cx-mixer-fx-row"><span>HP</span><input class="cx-mixer-slider" data-fx="highpass" type="range" min="20" max="8000" value="${channel.fx.highpass}" style="--control-value:${controlPercent(channel.fx.highpass, 20, 8000)}"><output data-mix-output="highpass">${hpLabel}</output></label>
+          <label class="cx-mixer-fx-row"><span>LP</span><input class="cx-mixer-slider" data-fx="lowpass" type="range" min="200" max="20000" value="${channel.fx.lowpass}" style="--control-value:${controlPercent(channel.fx.lowpass, 200, 20000)}"><output data-mix-output="lowpass">${lpLabel}</output></label>
+          <label class="cx-mixer-fx-row"><span>Rev</span><input class="cx-mixer-slider" data-send="reverb" type="range" min="0" max="100" value="${channel.send.reverb}" style="--control-value:${controlPercent(channel.send.reverb, 0, 100)}"><output data-mix-output="reverb">${channel.send.reverb}%</output></label>
+          <label class="cx-mixer-fx-row"><span>Dly</span><input class="cx-mixer-slider" data-send="delay" type="range" min="0" max="100" value="${channel.send.delay}" style="--control-value:${controlPercent(channel.send.delay, 0, 100)}"><output data-mix-output="delay">${channel.send.delay}%</output></label>
         </div>
-        <div class="cx-fader-container"><input class="cx-fader" type="range" min="0" max="100" value="${channel.volume}"></div>
-        <div class="cx-fader-value">${channel.volume}%</div>
-        <div class="cx-mixer-controls">
-          <button type="button" data-mute class="${channel.muted ? "active" : ""}">M</button>
-          <button type="button" data-solo class="${channel.solo ? "solo-active" : ""}">S</button>
-        </div>
-        <div class="cx-pan-container"><label>L</label><input class="cx-pan" type="range" min="-100" max="100" value="${channel.pan}"><label>R</label></div>
       `;
-      el.querySelector(".cx-fader")?.addEventListener("input", event => {
-        channel.volume = Number(event.target.value);
+      const formatPan = value => value === 0 ? "C" : value < 0 ? `L ${Math.abs(value)}` : `R ${value}`;
+      const formatFreq = value => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+      el.querySelectorAll("input").forEach(input => {
+        input.addEventListener("click", event => event.stopPropagation());
+        input.addEventListener("pointerdown", event => event.stopPropagation());
+      });
+      el.querySelectorAll("button").forEach(button => {
+        button.addEventListener("click", event => event.stopPropagation());
+      });
+      const updateMixerReadout = () => {
+        const activeLevel = channel.muted ? 4 : Math.max(8, channel.volume);
+        el.style.setProperty("--meter-level", `${activeLevel}%`);
+        el.style.setProperty("--pan-position", `${(channel.pan + 100) / 2}%`);
+        el.querySelector('[data-mix-output="volume"]').textContent = `${channel.volume}%`;
+        el.querySelector('[data-mix-output="pan"]').textContent = formatPan(channel.pan);
+        el.querySelector('[data-mix-output="highpass"]').textContent = formatFreq(channel.fx.highpass);
+        el.querySelector('[data-mix-output="lowpass"]').textContent = formatFreq(channel.fx.lowpass);
+        el.querySelector('[data-mix-output="reverb"]').textContent = `${channel.send.reverb}%`;
+        el.querySelector('[data-mix-output="delay"]').textContent = `${channel.send.delay}%`;
+        el.querySelector('[data-mix-control="volume"]')?.style.setProperty("--control-value", controlPercent(channel.volume, 0, 100));
+        el.querySelector('[data-mix-control="pan"]')?.style.setProperty("--control-value", controlPercent(channel.pan, -100, 100));
+        el.querySelector('[data-fx="highpass"]')?.style.setProperty("--control-value", controlPercent(channel.fx.highpass, 20, 8000));
+        el.querySelector('[data-fx="lowpass"]')?.style.setProperty("--control-value", controlPercent(channel.fx.lowpass, 200, 20000));
+        el.querySelector('[data-send="reverb"]')?.style.setProperty("--control-value", controlPercent(channel.send.reverb, 0, 100));
+        el.querySelector('[data-send="delay"]')?.style.setProperty("--control-value", controlPercent(channel.send.delay, 0, 100));
+        if (channel.id === this.selectedChannelId) {
+          this.updateInspectorOutput("channel-volume", channel.volume, "%");
+          this.updateInspectorOutput("channel-pan", channel.pan);
+          this.updateInspectorOutput("channel-highpass", channel.fx.highpass, "Hz");
+          this.updateInspectorOutput("channel-lowpass", channel.fx.lowpass, "Hz");
+          this.updateInspectorOutput("channel-reverb", channel.send.reverb, "%");
+          this.updateInspectorOutput("channel-delay", channel.send.delay, "%");
+        }
+      };
+      const resetMixerInput = input => {
+        if (input.dataset.mixControl === "volume") {
+          channel.volume = 80;
+          input.value = channel.volume;
+          if (pack?.volume) pack.volume.volume.value = this.volumeToDb(channel.volume);
+        }
+        if (input.dataset.mixControl === "pan") {
+          channel.pan = 0;
+          input.value = channel.pan;
+          if (pack?.pan) pack.pan.pan.value = 0;
+        }
+        if (input.dataset.fx === "highpass") {
+          channel.fx.highpass = 20;
+          input.value = channel.fx.highpass;
+          this.applyChannelFx(channel);
+        }
+        if (input.dataset.fx === "lowpass") {
+          channel.fx.lowpass = 20000;
+          input.value = channel.fx.lowpass;
+          this.applyChannelFx(channel);
+        }
+        if (input.dataset.send) {
+          channel.send[input.dataset.send] = 0;
+          input.value = 0;
+          this.applyChannelFx(channel);
+        }
+        updateMixerReadout();
+        if (channel.id === this.selectedChannelId) this.showChannelInspector(channel);
+        this.saveHistory();
+      };
+      el.querySelectorAll(".cx-mixer-slider").forEach(input => {
+        const label = input.closest("label")?.querySelector("span")?.textContent || "";
+        input.title = `${label} - ${this.t("double_click_reset", "Double click to reset")}`;
+        input.addEventListener("dblclick", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          resetMixerInput(input);
+        });
+      });
+      el.querySelector('[data-mix-control="volume"]')?.addEventListener("input", event => {
+        channel.volume = this.clamp(Number(event.target.value), 0, 100);
         if (pack?.volume) pack.volume.volume.value = this.volumeToDb(channel.volume);
-        el.querySelectorAll(".cx-meter-bar").forEach(bar => bar.style.setProperty("--level", `${Math.max(8, channel.volume * 0.8)}%`));
-        const value = el.querySelector(".cx-fader-value");
-        if (value) value.textContent = `${channel.volume}%`;
+        updateMixerReadout();
       });
-      el.querySelector(".cx-fader")?.addEventListener("change", () => this.saveHistory());
-      el.querySelector(".cx-pan")?.addEventListener("input", event => {
-        channel.pan = Number(event.target.value);
+      el.querySelector('[data-mix-control="volume"]')?.addEventListener("change", () => this.saveHistory());
+      el.querySelector('[data-mix-control="pan"]')?.addEventListener("input", event => {
+        channel.pan = this.clamp(Number(event.target.value), -100, 100);
         if (pack?.pan) pack.pan.pan.value = channel.pan / 100;
+        updateMixerReadout();
       });
-      el.querySelector(".cx-pan")?.addEventListener("change", () => this.saveHistory());
+      el.querySelector('[data-mix-control="pan"]')?.addEventListener("change", () => this.saveHistory());
       el.querySelectorAll("[data-fx]").forEach(input => {
         input.addEventListener("input", event => {
           const key = event.target.dataset.fx;
-          channel.fx[key] = Number(event.target.value);
+          const min = key === "highpass" ? 20 : 200;
+          const max = key === "highpass" ? 8000 : 20000;
+          channel.fx[key] = this.clamp(Number(event.target.value), min, max);
           this.applyChannelFx(channel);
+          updateMixerReadout();
         });
         input.addEventListener("change", () => this.saveHistory());
       });
       el.querySelectorAll("[data-send]").forEach(input => {
         input.addEventListener("input", event => {
           const key = event.target.dataset.send;
-          channel.send[key] = Number(event.target.value);
+          channel.send[key] = this.clamp(Number(event.target.value), 0, 100);
           this.applyChannelFx(channel);
+          updateMixerReadout();
         });
         input.addEventListener("change", () => this.saveHistory());
       });
@@ -1394,19 +2544,78 @@ class CherryXMusicStudio {
         channel.muted = !channel.muted;
         this.renderMixer();
         this.renderChannels();
+        if (channel.id === this.selectedChannelId) this.showChannelInspector(channel);
         this.saveHistory();
       });
       el.querySelector("[data-solo]")?.addEventListener("click", event => {
         event.stopPropagation();
         channel.solo = !channel.solo;
         this.renderMixer();
+        this.renderChannels();
+        if (channel.id === this.selectedChannelId) this.showChannelInspector(channel);
         this.saveHistory();
+      });
+      el.querySelector("[data-duplicate-channel]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        this.duplicateChannel(channel.id);
+      });
+      el.querySelector("[data-delete-channel]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        this.deleteChannel(channel.id);
+      });
+      el.querySelectorAll("[data-mixer-jump]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.stopPropagation();
+          this.selectedChannelId = channel.id;
+          const target = button.dataset.mixerJump;
+          const pattern = channelPatterns[0] || this.getActivePattern();
+          if (pattern) this.selectedPatternId = pattern.id;
+          if (target === "playlist") {
+            const clip = this.clips.find(item => item.type === "pattern" && channelPatternIds.has(item.patternId));
+            if (clip) this.selectedClipId = clip.id;
+          }
+          this.renderAll();
+          this.switchView(target, this.container.querySelector(`[data-view="${target}"]`));
+          this.showChannelInspector(channel);
+          this.saveUiPrefs();
+        });
       });
       el.addEventListener("click", () => {
         this.selectedChannelId = channel.id;
         this.renderChannels();
         this.renderMixer();
         this.showChannelInspector(channel);
+      });
+      const dragHandle = el.querySelector("[data-mixer-drag]");
+      dragHandle?.addEventListener("pointerdown", event => this.startChannelReorderDrag(event, channel.id));
+      if (dragHandle) dragHandle.draggable = false;
+      dragHandle?.addEventListener("dragstart", event => {
+        event.dataTransfer?.setData("text/cx-channel-id", channel.id);
+        event.dataTransfer?.setData("text/plain", channel.id);
+        event.dataTransfer.effectAllowed = "move";
+        el.classList.add("dragging");
+      });
+      dragHandle?.addEventListener("dragend", () => {
+        this.elements.mixer?.querySelectorAll(".cx-mixer-channel").forEach(item => item.classList.remove("dragging", "drop-before", "drop-after"));
+      });
+      el.addEventListener("dragover", event => {
+        const sourceId = event.dataTransfer?.getData("text/cx-channel-id") || event.dataTransfer?.getData("text/plain");
+        if (!sourceId || sourceId === channel.id) return;
+        event.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const before = event.clientX < rect.left + rect.width / 2;
+        el.classList.toggle("drop-before", before);
+        el.classList.toggle("drop-after", !before);
+      });
+      el.addEventListener("dragleave", () => {
+        el.classList.remove("drop-before", "drop-after");
+      });
+      el.addEventListener("drop", event => {
+        const sourceId = event.dataTransfer?.getData("text/cx-channel-id") || event.dataTransfer?.getData("text/plain");
+        if (!sourceId || sourceId === channel.id) return;
+        event.preventDefault();
+        const rect = el.getBoundingClientRect();
+        this.reorderChannel(sourceId, channel.id, event.clientX >= rect.left + rect.width / 2);
       });
       this.elements.mixer.appendChild(el);
     });
@@ -1469,7 +2678,15 @@ class CherryXMusicStudio {
       this.elements.assetList.innerHTML = `<p>${this.escapeHtml(this.t("no_audio_uploaded", "No audio uploaded yet"))}</p>`;
       return;
     }
-    this.assets.forEach(asset => {
+    const query = String(this.elements.assetSearch?.value || "").trim().toLowerCase();
+    const visibleAssets = query
+      ? this.assets.filter(asset => String(asset.name || "").toLowerCase().includes(query))
+      : this.assets;
+    if (!visibleAssets.length) {
+      this.elements.assetList.innerHTML = `<p>${this.escapeHtml(this.t("no_audio_matches", "No audio matches this search"))}</p>`;
+      return;
+    }
+    visibleAssets.forEach(asset => {
       const item = document.createElement("div");
       item.className = "cx-asset-item";
       item.draggable = true;
@@ -1529,6 +2746,122 @@ class CherryXMusicStudio {
     this.renderMixer();
     this.showChannelInspector(channel);
     this.saveHistory();
+  }
+
+  duplicateChannel(channelId) {
+    const source = this.channels.find(channel => channel.id === channelId);
+    if (!source) return;
+    const copy = this.createChannel(`${source.name} Copy`, source.type, source.color, source.preset);
+    copy.volume = source.volume;
+    copy.pan = source.pan;
+    copy.muted = false;
+    copy.solo = false;
+    copy.fx = JSON.parse(JSON.stringify(source.fx || {}));
+    copy.send = JSON.parse(JSON.stringify(source.send || {}));
+    const index = this.channels.findIndex(channel => channel.id === channelId);
+    this.channels.splice(index + 1, 0, copy);
+    this.selectedChannelId = copy.id;
+    this.ensureSynth(copy);
+    this.renderChannels();
+    this.renderStepSequencer();
+    this.renderMixer();
+    this.showChannelInspector(copy);
+    this.toast(this.t("channel_duplicated", "Channel duplicated"), "success");
+    this.saveHistory();
+  }
+
+  deleteChannel(channelId) {
+    if (this.channels.length <= 1) {
+      this.toast(this.t("cannot_delete_last_channel", "Cannot delete the last channel"), "info");
+      return;
+    }
+    const channel = this.channels.find(item => item.id === channelId);
+    if (!channel) return;
+    const hasContent = this.patterns.some(pattern =>
+      (pattern.notes || []).some(note => note.channelId === channelId) ||
+      (pattern.stepsByChannel?.[channelId] || []).some(Boolean)
+    );
+    if (hasContent && !window.confirm(this.t("delete_channel_with_content", "Delete this channel and its notes/steps?"))) return;
+    this.patterns.forEach(pattern => {
+      pattern.notes = (pattern.notes || []).filter(note => note.channelId !== channelId);
+      if (pattern.stepsByChannel) delete pattern.stepsByChannel[channelId];
+      if (pattern.stepVelocity) delete pattern.stepVelocity[channelId];
+    });
+    this.channels = this.channels.filter(item => item.id !== channelId);
+    const pack = this.synths[channelId];
+    if (pack) {
+      try { pack.synth.dispose(); } catch (_) {}
+      delete this.synths[channelId];
+    }
+    if (this.selectedChannelId === channelId) this.selectedChannelId = this.channels[0]?.id || null;
+    this.selectedNoteIds.clear();
+    this.selectedNoteId = null;
+    this.renderChannels();
+    this.renderStepSequencer();
+    this.renderMixer();
+    this.renderNotes();
+    this.renderPlaylist();
+    const selected = this.getSelectedChannel();
+    selected ? this.showChannelInspector(selected) : this.updateInspectorDefault();
+    this.toast(this.t("channel_deleted", "Channel deleted"), "info");
+    this.saveHistory();
+  }
+
+  reorderChannel(sourceId, targetId, after = false) {
+    const fromIndex = this.channels.findIndex(channel => channel.id === sourceId);
+    const targetIndex = this.channels.findIndex(channel => channel.id === targetId);
+    if (fromIndex < 0 || targetIndex < 0 || fromIndex === targetIndex) return;
+    const [channel] = this.channels.splice(fromIndex, 1);
+    let insertIndex = this.channels.findIndex(item => item.id === targetId);
+    if (after) insertIndex += 1;
+    this.channels.splice(insertIndex, 0, channel);
+    this.selectedChannelId = sourceId;
+    this.renderChannels();
+    this.renderStepSequencer();
+    this.renderMixer();
+    this.showChannelInspector(channel);
+    this.toast(this.t("channel_reordered", "Channel reordered"), "success");
+    this.saveHistory();
+  }
+
+  startChannelReorderDrag(event, channelId) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceEl = event.currentTarget.closest(".cx-mixer-channel");
+    sourceEl?.classList.add("dragging");
+    const clearMarkers = () => {
+      this.elements.mixer?.querySelectorAll(".cx-mixer-channel").forEach(item => item.classList.remove("drop-before", "drop-after"));
+    };
+    const pickTarget = pointerEvent => {
+      const element = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY);
+      const target = element?.closest?.(".cx-mixer-channel");
+      if (!target || target.dataset.channelId === channelId || !this.elements.mixer?.contains(target)) return null;
+      const rect = target.getBoundingClientRect();
+      return {
+        element: target,
+        id: target.dataset.channelId,
+        after: pointerEvent.clientX >= rect.left + rect.width / 2
+      };
+    };
+    const onMove = moveEvent => {
+      moveEvent.preventDefault();
+      clearMarkers();
+      const target = pickTarget(moveEvent);
+      if (!target) return;
+      target.element.classList.toggle("drop-before", !target.after);
+      target.element.classList.toggle("drop-after", target.after);
+    };
+    const onUp = upEvent => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      sourceEl?.classList.remove("dragging");
+      const target = pickTarget(upEvent);
+      clearMarkers();
+      if (target) this.reorderChannel(channelId, target.id, target.after);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
   }
 
   applyPreset(preset) {
@@ -1607,9 +2940,12 @@ class CherryXMusicStudio {
   quantizeActivePatternNotes() {
     const pattern = this.getActivePattern();
     if (!pattern) return;
-    (pattern.notes || []).forEach(note => {
+    const notes = this.selectedNoteIds.size
+      ? (pattern.notes || []).filter(note => this.selectedNoteIds.has(note.id))
+      : (pattern.notes || []);
+    notes.forEach(note => {
       note.x = this.snapX(note.x || 0);
-      note.y = Number(note.row || 0) * this.rowHeight;
+      note.y = this.pianoRowAt(Number(note.row || 0)).top;
       note.width = Math.max(this.cellWidth / 2, this.snapX(note.width || this.cellWidth) || this.cellWidth / 2);
     });
     this.renderNotes();
@@ -1618,14 +2954,50 @@ class CherryXMusicStudio {
     this.toast(this.t("notes_quantized", "Notes quantized"), "success");
   }
 
+  selectedNotes() {
+    const pattern = this.getActivePattern();
+    if (!pattern) return [];
+    if (this.selectedNoteIds.size) return pattern.notes.filter(note => this.selectedNoteIds.has(note.id));
+    return this.selectedNoteId ? pattern.notes.filter(note => note.id === this.selectedNoteId) : [];
+  }
+
+  nudgeSelectedNotes(deltaX = 0, deltaRow = 0) {
+    const notes = this.selectedNotes();
+    if (!notes.length) return;
+    const maxRow = Math.max(0, (this.pianoRows?.length || this.elements.pianoKeys?.children.length || 1) - 1);
+    notes.forEach(note => {
+      note.x = Math.max(0, this.snapX((Number(note.x) || 0) + deltaX));
+      const row = this.clamp(Number(note.row || 0) + deltaRow, 0, maxRow);
+      note.row = row;
+      note.y = this.pianoRowAt(row).top;
+      note.note = this.noteFromRow(row) || note.note;
+    });
+    this.renderNotes();
+    if (notes.length === 1) this.showNoteInspector(notes[0]);
+    this.saveHistory();
+  }
+
+  resizeSelectedNotes(deltaWidth = 0) {
+    const notes = this.selectedNotes();
+    if (!notes.length) return;
+    notes.forEach(note => {
+      note.width = Math.max(this.cellWidth / 2, this.snapX((Number(note.width) || this.cellWidth) + deltaWidth));
+    });
+    this.renderNotes();
+    if (notes.length === 1) this.showNoteInspector(notes[0]);
+    this.saveHistory();
+  }
+
   moveSelectedNotesOctave(deltaRows) {
     const pattern = this.getActivePattern();
     if (!pattern) return;
-    const notes = this.selectedNoteId ? pattern.notes.filter(note => note.id === this.selectedNoteId) : pattern.notes;
+    const notes = this.selectedNoteIds.size
+      ? pattern.notes.filter(note => this.selectedNoteIds.has(note.id))
+      : this.selectedNoteId ? pattern.notes.filter(note => note.id === this.selectedNoteId) : pattern.notes;
     const maxRow = Math.max(0, (this.elements.pianoKeys?.children.length || 1) - 1);
     notes.forEach(note => {
       note.row = this.clamp(Number(note.row || 0) + deltaRows, 0, maxRow);
-      note.y = note.row * this.rowHeight;
+      note.y = this.pianoRowAt(note.row).top;
       note.note = this.noteFromRow(note.row) || note.note;
     });
     this.renderNotes();
@@ -1716,44 +3088,211 @@ class CherryXMusicStudio {
     this.toast(this.t("copied_row_to", `Copied row to ${target.name}`, { name: target.name }), "success");
   }
 
+  inspectorHeader(kind, title, subtitle = "", color = "#36d399") {
+    return `
+      <section class="cx-inspector-hero" style="--inspector-color:${this.escapeHtml(color)}">
+        <span class="cx-inspector-icon" data-kind="${this.escapeHtml(kind)}"></span>
+        <div>
+          <small>${this.escapeHtml(kind)}</small>
+          <strong>${this.escapeHtml(title)}</strong>
+          ${subtitle ? `<em>${this.escapeHtml(subtitle)}</em>` : ""}
+        </div>
+      </section>
+    `;
+  }
+
+  inspectorSection(title, body, extraClass = "") {
+    return `
+      <section class="cx-inspector-section ${extraClass}">
+        <h3>${this.escapeHtml(title)}</h3>
+        ${body}
+      </section>
+    `;
+  }
+
+  inspectorStats(items) {
+    return `<div class="cx-inspector-stats">${items.map(item => `
+      <span><b>${this.escapeHtml(item.value)}</b><small>${this.escapeHtml(item.label)}</small></span>
+    `).join("")}</div>`;
+  }
+
+  controlPercent(value, min, max) {
+    return `${this.clamp(((Number(value) - min) / (max - min)) * 100, 0, 100)}%`;
+  }
+
+  formatPanValue(value) {
+    const pan = Number(value) || 0;
+    return pan === 0 ? "C" : pan < 0 ? `L ${Math.abs(pan)}` : `R ${pan}`;
+  }
+
+  formatFreqValue(value) {
+    const freq = Number(value) || 0;
+    return freq >= 1000 ? `${(freq / 1000).toFixed(1)}kHz` : `${freq}Hz`;
+  }
+
+  inspectorRange(label, selector, value, min, max, unit = "") {
+    const cleanValue = Number(value) || 0;
+    return `
+      <div class="cx-field cx-range-field">
+        <label><span>${this.escapeHtml(label)}</span><output data-value-for="${this.escapeHtml(selector)}">${this.escapeHtml(`${cleanValue}${unit}`)}</output></label>
+        <input type="range" min="${min}" max="${max}" data-edit-${this.escapeHtml(selector)} value="${cleanValue}" style="--control-value:${this.controlPercent(cleanValue, min, max)}">
+      </div>
+    `;
+  }
+
+  updateInspectorOutput(selector, value, unit = "") {
+    const output = this.elements.inspector?.querySelector(`[data-value-for="${selector}"]`);
+    if (output) output.textContent = `${value}${unit}`;
+  }
+
   showNoteInspector(note) {
     if (!this.elements.inspector) return;
+    const beats = ((note.x || 0) / this.cellWidth).toFixed(2);
+    const length = ((note.width || this.cellWidth) / this.cellWidth).toFixed(2);
     this.elements.inspector.innerHTML = `
-      <div class="cx-field"><label>${this.escapeHtml(this.t("note", "Note"))}</label><input data-edit-note-name value="${this.escapeHtml(note.note)}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("velocity", "Velocity"))}</label><input type="number" min="1" max="100" data-edit-note-velocity value="${note.velocity || 85}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("length_beats", "Length beats"))}</label><input type="number" min="0.25" max="16" step="0.25" data-edit-note-width value="${((note.width || this.cellWidth) / this.cellWidth).toFixed(2)}"></div>
-      <div class="cx-inspector-row"><strong>${this.escapeHtml(this.t("position", "Position"))}</strong>${this.escapeHtml(this.t("beat", "Beat"))} ${((note.x || 0) / this.cellWidth).toFixed(2)} / ${this.escapeHtml(this.t("row", "Row"))} ${note.row}</div>
+      ${this.inspectorHeader("note", note.note, `${this.t("beat", "Beat")} ${beats}`, "#60a5fa")}
+      ${this.inspectorStats([
+        { label: this.t("velocity", "Velocity"), value: String(note.velocity || 85) },
+        { label: this.t("length_beats", "Length beats"), value: length },
+        { label: this.t("row", "Row"), value: String(note.row) }
+      ])}
+      ${this.inspectorSection(this.t("edit", "Редактирование"), `
+        <div class="cx-field"><label>${this.escapeHtml(this.t("note", "Note"))}</label><input data-edit-note-name value="${this.escapeHtml(note.note)}"></div>
+        ${this.inspectorRange(this.t("velocity", "Velocity"), "note-velocity", note.velocity || 85, 1, 100)}
+        <div class="cx-field"><label>${this.escapeHtml(this.t("length_beats", "Length beats"))}</label><input type="number" min="0.25" max="16" step="0.25" data-edit-note-width value="${length}"></div>
+      `)}
+      <div class="cx-inspector-actions">
+        <button type="button" data-inspector-action="quantize">${this.escapeHtml(this.t("quantize", "Quantize"))}</button>
+        <button type="button" class="is-danger" data-inspector-action="delete-note">${this.escapeHtml(this.t("delete", "Delete"))}</button>
+      </div>
     `;
     this.elements.inspector.querySelector("[data-edit-note-name]")?.addEventListener("change", event => {
       note.note = event.target.value.trim() || note.note;
       this.renderNotes();
       this.saveHistory();
+      this.showNoteInspector(note);
     });
-    this.elements.inspector.querySelector("[data-edit-note-velocity]")?.addEventListener("change", event => {
+    this.elements.inspector.querySelector("[data-edit-note-velocity]")?.addEventListener("input", event => {
       note.velocity = this.clamp(Number(event.target.value) || 85, 1, 100);
-      this.saveHistory();
+      this.updateInspectorOutput("note-velocity", note.velocity);
     });
+    this.elements.inspector.querySelector("[data-edit-note-velocity]")?.addEventListener("change", () => this.saveHistory());
     this.elements.inspector.querySelector("[data-edit-note-width]")?.addEventListener("change", event => {
       note.width = Math.max(this.cellWidth / 2, (Number(event.target.value) || 1) * this.cellWidth);
       this.renderNotes();
       this.saveHistory();
+      this.showNoteInspector(note);
     });
+    this.elements.inspector.querySelector('[data-inspector-action="quantize"]')?.addEventListener("click", () => this.quantizeActivePatternNotes());
+    this.elements.inspector.querySelector('[data-inspector-action="delete-note"]')?.addEventListener("click", () => this.deleteSelected());
+  }
+
+  showNoteInspector(note) {
+    if (!this.elements.inspector) return;
+    const beats = ((note.x || 0) / this.cellWidth).toFixed(2);
+    const length = Number(((note.width || this.cellWidth) / this.cellWidth).toFixed(2));
+    const channel = this.channels.find(item => item.id === note.channelId) || this.getSelectedChannel();
+    this.elements.inspector.innerHTML = `
+      ${this.inspectorHeader("note", note.note, `${this.t("beat", "Beat")} ${beats}`, channel?.color || "#60a5fa")}
+      ${this.inspectorStats([
+        { label: "VEL", value: String(note.velocity || 85) },
+        { label: "LEN", value: String(length) },
+        { label: "CH", value: channel?.name || "-" }
+      ])}
+      <div class="cx-inspector-actions cx-note-quick-actions">
+        <button type="button" data-inspector-action="play-note" data-icon="play">${this.escapeHtml(this.t("play", "Play"))}</button>
+        <button type="button" data-inspector-action="duplicate-note" data-icon="copy-plus">${this.escapeHtml(this.t("duplicate", "Duplicate"))}</button>
+        <button type="button" data-inspector-action="quantize" data-icon="magnet">${this.escapeHtml(this.t("quantize", "Quantize"))}</button>
+      </div>
+      ${this.inspectorSection(this.t("edit", "Редактирование"), `
+        <div class="cx-field"><label>${this.escapeHtml(this.t("note", "Note"))}</label><input data-edit-note-name value="${this.escapeHtml(note.note)}"></div>
+        ${this.inspectorRange(this.t("velocity", "Velocity"), "note-velocity", note.velocity || 85, 1, 100)}
+        ${this.inspectorRange(this.t("length_beats", "Length beats"), "note-length", length, 0.25, 16)}
+      `)}
+      <div class="cx-inspector-actions">
+        <button type="button" data-inspector-action="octave-up" data-icon="arrow-up">${this.escapeHtml(this.t("octave_up", "Octave up"))}</button>
+        <button type="button" data-inspector-action="octave-down" data-icon="arrow-down">${this.escapeHtml(this.t("octave_down", "Octave down"))}</button>
+        <button type="button" class="is-danger" data-inspector-action="delete-note" data-icon="trash-2">${this.escapeHtml(this.t("delete", "Delete"))}</button>
+      </div>
+    `;
+    this.elements.inspector.querySelector("[data-edit-note-name]")?.addEventListener("change", event => {
+      note.note = event.target.value.trim() || note.note;
+      this.renderNotes();
+      this.saveHistory();
+      this.showNoteInspector(note);
+    });
+    this.elements.inspector.querySelector("[data-edit-note-velocity]")?.addEventListener("input", event => {
+      note.velocity = this.clamp(Number(event.target.value) || 85, 1, 100);
+      event.target.style.setProperty("--control-value", this.controlPercent(note.velocity, 1, 100));
+      this.updateInspectorOutput("note-velocity", note.velocity);
+    });
+    this.elements.inspector.querySelector("[data-edit-note-velocity]")?.addEventListener("change", () => this.saveHistory());
+    this.elements.inspector.querySelector("[data-edit-note-length]")?.addEventListener("input", event => {
+      const nextLength = this.clamp(Number(event.target.value) || 1, 0.25, 16);
+      note.width = Math.max(this.cellWidth / 2, nextLength * this.cellWidth);
+      event.target.style.setProperty("--control-value", this.controlPercent(nextLength, 0.25, 16));
+      this.updateInspectorOutput("note-length", nextLength);
+      this.renderNotes();
+    });
+    this.elements.inspector.querySelector("[data-edit-note-length]")?.addEventListener("change", () => {
+      this.saveHistory();
+      this.showNoteInspector(note);
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="play-note"]')?.addEventListener("click", () => this.triggerNote(channel, note));
+    this.elements.inspector.querySelector('[data-inspector-action="duplicate-note"]')?.addEventListener("click", () => this.duplicateSelected());
+    this.elements.inspector.querySelector('[data-inspector-action="quantize"]')?.addEventListener("click", () => this.quantizeActivePatternNotes());
+    this.elements.inspector.querySelector('[data-inspector-action="octave-up"]')?.addEventListener("click", () => this.moveSelectedNotesOctave(-12));
+    this.elements.inspector.querySelector('[data-inspector-action="octave-down"]')?.addEventListener("click", () => this.moveSelectedNotesOctave(12));
+    this.elements.inspector.querySelector('[data-inspector-action="delete-note"]')?.addEventListener("click", () => this.deleteSelected());
   }
 
   showChannelInspector(channel) {
     if (!this.elements.inspector) return;
     this.normalizeChannel(channel);
+    const presetOptions = [
+      ["piano", "Grand Piano"],
+      ["bass", "Deep Bass"],
+      ["lead", "Soft Lead"],
+      ["pluck", "Pluck"],
+      ["pad", "Warm Pad"],
+      ["kick", "Kick"],
+      ["snare", "Snare"],
+      ["hat", "Hi-Hat"],
+      ["clap", "Clap"]
+    ];
     this.elements.inspector.innerHTML = `
-      <div class="cx-field"><label>${this.escapeHtml(this.t("project_name", "Name"))}</label><input data-edit-channel-name value="${this.escapeHtml(channel.name)}"></div>
-      <div class="cx-inspector-row"><strong>${this.escapeHtml(this.t("type", "Type"))}</strong>${this.escapeHtml(channel.type)}</div>
-      <div class="cx-inspector-row"><strong>${this.escapeHtml(this.t("preset", "Preset"))}</strong>${this.escapeHtml(channel.preset)}</div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("color", "Color"))}</label><input type="color" data-edit-channel-color value="${channel.color || "#ff7a18"}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("volume", "Volume"))}</label><input type="range" min="0" max="100" data-edit-channel-volume value="${channel.volume}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("pan", "Pan"))}</label><input type="range" min="-100" max="100" data-edit-channel-pan value="${channel.pan}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("highpass", "Highpass"))}</label><input type="range" min="20" max="8000" data-edit-channel-highpass value="${channel.fx.highpass}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("lowpass", "Lowpass"))}</label><input type="range" min="200" max="20000" data-edit-channel-lowpass value="${channel.fx.lowpass}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("reverb_send", "Reverb send"))}</label><input type="range" min="0" max="100" data-edit-channel-reverb value="${channel.send.reverb}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("delay_send", "Delay send"))}</label><input type="range" min="0" max="100" data-edit-channel-delay value="${channel.send.delay}"></div>
+      ${this.inspectorHeader("channel", channel.name, `${channel.type} - ${channel.preset}`, channel.color || "#ff7a18")}
+      ${this.inspectorStats([
+        { label: this.t("volume", "Volume"), value: `${channel.volume}%` },
+        { label: this.t("pan", "Pan"), value: this.formatPanValue(channel.pan) },
+        { label: this.t("status", "Status"), value: channel.muted ? "Muted" : channel.solo ? "Solo" : "Live" }
+      ])}
+      <div class="cx-inspector-actions cx-channel-quick-actions">
+        <button type="button" data-inspector-action="audition-channel" data-icon="play">${this.escapeHtml(this.t("play", "Play"))}</button>
+        <button type="button" class="${channel.muted ? "active" : ""}" data-inspector-action="toggle-channel-mute" data-icon="volume-x">${this.escapeHtml(channel.muted ? this.t("unmute", "Unmute") : this.t("mute", "Mute"))}</button>
+        <button type="button" class="${channel.solo ? "active" : ""}" data-inspector-action="toggle-channel-solo" data-icon="headphones">Solo</button>
+      </div>
+      ${this.inspectorSection(this.t("identity", "Основное"), `
+        <div class="cx-field"><label>${this.escapeHtml(this.t("project_name", "Name"))}</label><input data-edit-channel-name value="${this.escapeHtml(channel.name)}"></div>
+        <div class="cx-field cx-color-field"><label>${this.escapeHtml(this.t("color", "Color"))}</label><input type="color" data-edit-channel-color value="${channel.color || "#ff7a18"}"></div>
+        <div class="cx-field"><label>${this.escapeHtml(this.t("preset", "Preset"))}</label><select data-edit-channel-preset>${presetOptions.map(([value, label]) => `<option value="${value}" ${channel.preset === value ? "selected" : ""}>${this.escapeHtml(label)}</option>`).join("")}</select></div>
+      `)}
+      ${this.inspectorSection(this.t("mix", "Микс"), `
+        ${this.inspectorRange(this.t("volume", "Volume"), "channel-volume", channel.volume, 0, 100, "%")}
+        ${this.inspectorRange(this.t("pan", "Pan"), "channel-pan", channel.pan, -100, 100)}
+      `)}
+      ${this.inspectorSection("FX", `
+        ${this.inspectorRange(this.t("highpass", "Highpass"), "channel-highpass", channel.fx.highpass, 20, 8000, "Hz")}
+        ${this.inspectorRange(this.t("lowpass", "Lowpass"), "channel-lowpass", channel.fx.lowpass, 200, 20000, "Hz")}
+        ${this.inspectorRange(this.t("reverb_send", "Reverb send"), "channel-reverb", channel.send.reverb, 0, 100, "%")}
+        ${this.inspectorRange(this.t("delay_send", "Delay send"), "channel-delay", channel.send.delay, 0, 100, "%")}
+      `)}
+      <div class="cx-inspector-actions">
+        <button type="button" data-inspector-action="reset-channel" data-icon="rotate-ccw">${this.escapeHtml(this.t("reset", "Reset"))}</button>
+        <button type="button" data-inspector-action="duplicate-channel" data-icon="copy-plus">${this.escapeHtml(this.t("duplicate", "Duplicate"))}</button>
+        <button type="button" data-inspector-action="open-step-seq" data-icon="rows-3">${this.escapeHtml(this.t("channel_rack", "Channel Rack"))}</button>
+        <button type="button" data-inspector-action="open-mixer" data-icon="sliders-horizontal">${this.escapeHtml(this.t("mixer", "Mixer"))}</button>
+      </div>
     `;
     this.elements.inspector.querySelector("[data-edit-channel-name]")?.addEventListener("input", event => {
       channel.name = event.target.value.trim() || channel.name;
@@ -1761,7 +3300,10 @@ class CherryXMusicStudio {
       this.renderMixer();
       this.renderStepSequencer();
     });
-    this.elements.inspector.querySelector("[data-edit-channel-name]")?.addEventListener("change", () => this.saveHistory());
+    this.elements.inspector.querySelector("[data-edit-channel-name]")?.addEventListener("change", () => {
+      this.saveHistory();
+      this.showChannelInspector(channel);
+    });
     this.elements.inspector.querySelector("[data-edit-channel-color]")?.addEventListener("input", event => {
       channel.color = event.target.value;
       this.renderChannels();
@@ -1769,40 +3311,164 @@ class CherryXMusicStudio {
       this.renderStepSequencer();
       this.renderPlaylist();
     });
-    this.elements.inspector.querySelector("[data-edit-channel-color]")?.addEventListener("change", () => this.saveHistory());
-    const bindRange = (selector, apply) => {
-      const input = this.elements.inspector.querySelector(selector);
+    this.elements.inspector.querySelector("[data-edit-channel-color]")?.addEventListener("change", () => {
+      this.saveHistory();
+      this.showChannelInspector(channel);
+    });
+    this.elements.inspector.querySelector("[data-edit-channel-preset]")?.addEventListener("change", event => {
+      this.selectedChannelId = channel.id;
+      channel.preset = event.target.value;
+      channel.type = ["kick", "snare", "hat", "clap"].includes(channel.preset) ? "drum" : "instrument";
+      if (!channel.name || ["Piano", "Bass", "Kick", "Snare", "Hi-Hat", "Clap"].includes(channel.name)) {
+        channel.name = this.prettyPresetName(channel.preset);
+      }
+      if (this.synths[channel.id]) {
+        try { this.synths[channel.id].synth.dispose(); } catch (_) {}
+        delete this.synths[channel.id];
+      }
+      this.ensureSynth(channel);
+      this.renderChannels();
+      this.renderMixer();
+      this.renderStepSequencer();
+      this.showChannelInspector(channel);
+      this.saveHistory();
+    });
+    const bindRange = (selector, apply, unit = "") => {
+      const input = this.elements.inspector.querySelector(`[data-edit-${selector}]`);
       input?.addEventListener("input", event => {
-        apply(Number(event.target.value));
+        const value = Number(event.target.value);
+        apply(value);
+        const min = Number(event.target.min);
+        const max = Number(event.target.max);
+        event.target.style.setProperty("--control-value", this.controlPercent(value, min, max));
+        const displayValue = selector === "channel-pan"
+          ? this.formatPanValue(value)
+          : selector === "channel-highpass" || selector === "channel-lowpass"
+            ? this.formatFreqValue(value)
+            : event.target.value;
+        this.updateInspectorOutput(selector, displayValue, selector === "channel-pan" || selector === "channel-highpass" || selector === "channel-lowpass" ? "" : unit);
         this.applyChannelFx(channel);
         this.renderMixer();
         this.renderChannels();
       });
       input?.addEventListener("change", () => this.saveHistory());
     };
-    bindRange("[data-edit-channel-volume]", value => { channel.volume = this.clamp(value, 0, 100); });
-    bindRange("[data-edit-channel-pan]", value => { channel.pan = this.clamp(value, -100, 100); });
-    bindRange("[data-edit-channel-highpass]", value => { channel.fx.highpass = this.clamp(value, 20, 8000); });
-    bindRange("[data-edit-channel-lowpass]", value => { channel.fx.lowpass = this.clamp(value, 200, 20000); });
-    bindRange("[data-edit-channel-reverb]", value => { channel.send.reverb = this.clamp(value, 0, 100); });
-    bindRange("[data-edit-channel-delay]", value => { channel.send.delay = this.clamp(value, 0, 100); });
+    bindRange("channel-volume", value => { channel.volume = this.clamp(value, 0, 100); }, "%");
+    bindRange("channel-pan", value => { channel.pan = this.clamp(value, -100, 100); });
+    bindRange("channel-highpass", value => { channel.fx.highpass = this.clamp(value, 20, 8000); }, "Hz");
+    bindRange("channel-lowpass", value => { channel.fx.lowpass = this.clamp(value, 200, 20000); }, "Hz");
+    bindRange("channel-reverb", value => { channel.send.reverb = this.clamp(value, 0, 100); }, "%");
+    bindRange("channel-delay", value => { channel.send.delay = this.clamp(value, 0, 100); }, "%");
+    this.updateInspectorOutput("channel-pan", this.formatPanValue(channel.pan));
+    this.updateInspectorOutput("channel-highpass", this.formatFreqValue(channel.fx.highpass));
+    this.updateInspectorOutput("channel-lowpass", this.formatFreqValue(channel.fx.lowpass));
+    this.elements.inspector.querySelector('[data-inspector-action="audition-channel"]')?.addEventListener("click", () => this.triggerChannel(channel, 96));
+    this.elements.inspector.querySelector('[data-inspector-action="toggle-channel-mute"]')?.addEventListener("click", () => {
+      channel.muted = !channel.muted;
+      this.renderChannels();
+      this.renderMixer();
+      this.showChannelInspector(channel);
+      this.saveHistory();
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="toggle-channel-solo"]')?.addEventListener("click", () => {
+      channel.solo = !channel.solo;
+      this.renderChannels();
+      this.renderMixer();
+      this.showChannelInspector(channel);
+      this.saveHistory();
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="reset-channel"]')?.addEventListener("click", () => {
+      channel.volume = 80;
+      channel.pan = 0;
+      channel.fx.highpass = 20;
+      channel.fx.lowpass = 20000;
+      channel.send.reverb = 0;
+      channel.send.delay = 0;
+      this.applyChannelFx(channel);
+      this.renderChannels();
+      this.renderMixer();
+      this.showChannelInspector(channel);
+      this.saveHistory();
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="duplicate-channel"]')?.addEventListener("click", () => this.duplicateChannel(channel.id));
+    this.elements.inspector.querySelector('[data-inspector-action="open-step-seq"]')?.addEventListener("click", () => this.switchView("step-seq", this.container.querySelector('[data-view="step-seq"]')));
+    this.elements.inspector.querySelector('[data-inspector-action="open-mixer"]')?.addEventListener("click", () => this.switchView("mixer", this.container.querySelector('[data-view="mixer"]')));
   }
 
   showClipInspector(clip) {
     if (!this.elements.inspector) return;
-    const audioControls = clip.type === "audio" ? `
-      <div class="cx-field"><label>${this.escapeHtml(this.t("volume", "Volume"))}</label><input type="range" min="0" max="120" data-edit-clip-volume value="${clip.volume ?? 85}"></div>
+    const beats = Number((clip.width / this.cellWidth).toFixed(2));
+    const startBeat = Number((clip.x / this.cellWidth).toFixed(2));
+    const endBeat = Number(((clip.x + clip.width) / this.cellWidth).toFixed(2));
+    const trackName = this.trackNames?.[clip.track] || `${this.t("track", "Track")} ${clip.track + 1}`;
+    const pattern = clip.type === "pattern" ? this.patterns.find(item => item.id === clip.patternId) : null;
+    const patternNotes = pattern ? (pattern.notes || []).length : 0;
+    const patternSteps = pattern ? Object.values(pattern.stepsByChannel || {}).reduce((sum, steps) => sum + steps.filter(Boolean).length, 0) : 0;
+    const color = this.clipColor(clip);
+    const audioControls = clip.type === "audio" ? this.inspectorSection(this.t("audio", "Аудио"), `
+      ${this.inspectorRange(this.t("volume", "Volume"), "clip-volume", clip.volume ?? 85, 0, 120, "%")}
       <div class="cx-field"><label>${this.escapeHtml(this.t("fade_in_seconds", "Fade in seconds"))}</label><input type="number" min="0" max="12" step="0.1" data-edit-clip-fade-in value="${clip.fadeIn || 0}"></div>
       <div class="cx-field"><label>${this.escapeHtml(this.t("fade_out_seconds", "Fade out seconds"))}</label><input type="number" min="0" max="12" step="0.1" data-edit-clip-fade-out value="${clip.fadeOut || 0}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("trim_start_seconds", "Trim start seconds"))}</label><input type="number" min="0" max="600" step="0.1" data-edit-clip-trim-start value="${clip.trimStart || 0}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("trim_end_seconds", "Trim end seconds"))}</label><input type="number" min="0" max="600" step="0.1" data-edit-clip-trim-end value="${clip.trimEnd || 0}"></div>
-    ` : "";
+      <div class="cx-inspector-two">
+        <div class="cx-field"><label>${this.escapeHtml(this.t("trim_start_seconds", "Trim start seconds"))}</label><input type="number" min="0" max="600" step="0.1" data-edit-clip-trim-start value="${clip.trimStart || 0}"></div>
+        <div class="cx-field"><label>${this.escapeHtml(this.t("trim_end_seconds", "Trim end seconds"))}</label><input type="number" min="0" max="600" step="0.1" data-edit-clip-trim-end value="${clip.trimEnd || 0}"></div>
+      </div>
+    `) : "";
+    const patternControls = clip.type === "pattern" ? this.inspectorSection(this.t("pattern", "Pattern"), `
+      <div class="cx-clip-micro-grid">
+        <span><b>${patternNotes}</b><small>${this.escapeHtml(this.t("note", "Note"))}</small></span>
+        <span><b>${patternSteps}</b><small>Steps</small></span>
+        <span><b>${this.patternStepCount(pattern)}</b><small>16/32</small></span>
+      </div>
+      <div class="cx-inspector-actions cx-compact-actions">
+        <button type="button" data-inspector-action="open-pattern">${this.escapeHtml(this.t("piano_roll", "Piano Roll"))}</button>
+        <button type="button" data-inspector-action="open-step-seq">${this.escapeHtml(this.t("channel_rack", "Channel Rack"))}</button>
+        <button type="button" data-inspector-action="quantize-pattern">${this.escapeHtml(this.t("quantize", "Quantize"))}</button>
+        <button type="button" data-inspector-action="clear-pattern">${this.escapeHtml(this.t("clear", "Clear"))}</button>
+      </div>
+    `, "cx-pattern-inspector-section") : "";
     this.elements.inspector.innerHTML = `
-      <div class="cx-field"><label>${this.escapeHtml(this.t("clip_name", "Clip name"))}</label><input data-edit-clip-name value="${this.escapeHtml(clip.name)}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("track", "Track"))}</label><input type="number" min="1" max="${this.tracks}" data-edit-clip-track value="${clip.track + 1}"></div>
-      <div class="cx-field"><label>${this.escapeHtml(this.t("length_beats", "Length beats"))}</label><input type="number" min="1" max="64" data-edit-clip-width value="${Math.round(clip.width / this.cellWidth)}"></div>
+      ${this.inspectorHeader("clip", clip.name || "Clip", `${clip.type} - ${trackName}`, color)}
+      ${this.inspectorStats([
+        { label: this.t("track", "Track"), value: String(clip.track + 1) },
+        { label: this.t("beat", "Beat"), value: String(startBeat) },
+        { label: this.t("length_beats", "Length beats"), value: String(beats) }
+      ])}
+      ${this.inspectorSection(this.t("edit", "Редактирование"), `
+        <div class="cx-field"><label>${this.escapeHtml(this.t("clip_name", "Clip name"))}</label><input data-edit-clip-name value="${this.escapeHtml(clip.name)}"></div>
+        <div class="cx-inspector-two">
+          <div class="cx-field"><label>${this.escapeHtml(this.t("track", "Track"))}</label><input type="number" min="1" max="${this.tracks}" data-edit-clip-track value="${clip.track + 1}"></div>
+          <div class="cx-field"><label>${this.escapeHtml(this.t("start", "Start"))}</label><input type="number" min="0" max="256" step="0.25" data-edit-clip-start value="${startBeat}"></div>
+        </div>
+        <div class="cx-inspector-two">
+          <div class="cx-field"><label>${this.escapeHtml(this.t("length_beats", "Length beats"))}</label><input type="number" min="0.25" max="256" step="0.25" data-edit-clip-width value="${beats}"></div>
+          <div class="cx-field"><label>${this.escapeHtml(this.t("end", "End"))}</label><input type="number" min="0.25" max="256" step="0.25" data-edit-clip-end value="${endBeat}"></div>
+        </div>
+        <div class="cx-clip-nudge-row">
+          <button type="button" data-clip-nudge="-1">-1</button>
+          <button type="button" data-clip-nudge="-0.25">-1/4</button>
+          <button type="button" data-clip-nudge="0.25">+1/4</button>
+          <button type="button" data-clip-nudge="1">+1</button>
+        </div>
+        <div class="cx-clip-nudge-row">
+          <button type="button" data-clip-length="0.5">1/2</button>
+          <button type="button" data-clip-length="2">x2</button>
+          <button type="button" data-clip-fit-pattern>${this.escapeHtml(this.t("fit_to_pattern", "Fit"))}</button>
+          <button type="button" data-clip-align-grid>${this.escapeHtml(this.t("align_to_grid", "Grid"))}</button>
+        </div>
+        <div class="cx-field cx-color-field"><label>${this.escapeHtml(this.t("color", "Color"))}</label><input type="color" data-edit-clip-color value="${color}"></div>
+        <div class="cx-clip-nudge-row">
+          <button type="button" data-clip-color-source="channel">${this.escapeHtml(this.t("color_from_channel", "Color from channel"))}</button>
+          ${clip.type === "pattern" ? `<button type="button" data-clip-color-source="pattern">${this.escapeHtml(this.t("pattern", "Pattern"))}</button>` : ""}
+        </div>
+      `)}
+      ${patternControls}
       ${audioControls}
-      <div class="cx-inspector-row"><strong>${this.escapeHtml(this.t("type", "Type"))}</strong>${this.escapeHtml(clip.type)}</div>
+      <div class="cx-inspector-actions">
+        <button type="button" data-inspector-action="duplicate-clip">${this.escapeHtml(this.t("duplicate", "Duplicate"))}</button>
+        <button type="button" data-inspector-action="mute-clip">${this.escapeHtml(clip.muted ? this.t("unmute", "Unmute") : this.t("mute", "Mute"))}</button>
+        <button type="button" class="is-danger" data-inspector-action="delete-clip">${this.escapeHtml(this.t("delete", "Delete"))}</button>
+      </div>
     `;
     this.elements.inspector.querySelector("[data-edit-clip-name]")?.addEventListener("input", event => {
       clip.name = event.target.value.trim() || clip.name;
@@ -1813,18 +3479,79 @@ class CherryXMusicStudio {
       this.renderPlaylist();
       this.updateActivePatternLabel();
     });
+    this.elements.inspector.querySelector("[data-edit-clip-name]")?.addEventListener("change", () => this.saveHistory());
     this.elements.inspector.querySelector("[data-edit-clip-track]")?.addEventListener("change", event => {
       clip.track = this.clamp(Number(event.target.value) - 1, 0, this.tracks - 1);
       this.renderPlaylist();
       this.saveHistory();
+      this.showClipInspector(clip);
     });
-    this.elements.inspector.querySelector("[data-edit-clip-width]")?.addEventListener("change", event => {
-      clip.width = Math.max(this.cellWidth, (Number(event.target.value) || 4) * this.cellWidth);
+    this.elements.inspector.querySelector("[data-edit-clip-start]")?.addEventListener("change", event => {
+      clip.x = Math.max(0, (Number(event.target.value) || 0) * this.cellWidth);
       this.renderPlaylist();
       this.saveHistory();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector("[data-edit-clip-width]")?.addEventListener("change", event => {
+      clip.width = Math.max(this.cellWidth / 4, (Number(event.target.value) || 4) * this.cellWidth);
+      this.renderPlaylist();
+      this.saveHistory();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector("[data-edit-clip-end]")?.addEventListener("change", event => {
+      const end = Math.max(0.25, Number(event.target.value) || endBeat);
+      clip.width = Math.max(this.cellWidth / 4, end * this.cellWidth - clip.x);
+      this.renderPlaylist();
+      this.saveHistory();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector("[data-edit-clip-color]")?.addEventListener("input", event => {
+      clip.color = event.target.value;
+      this.renderPlaylist();
+    });
+    this.elements.inspector.querySelector("[data-edit-clip-color]")?.addEventListener("change", () => this.saveHistory());
+    this.elements.inspector.querySelectorAll("[data-clip-nudge]").forEach(button => {
+      button.addEventListener("click", () => {
+        clip.x = Math.max(0, this.snapX(clip.x + Number(button.dataset.clipNudge) * this.cellWidth));
+        this.renderPlaylist();
+        this.saveHistory();
+        this.showClipInspector(clip);
+      });
+    });
+    this.elements.inspector.querySelectorAll("[data-clip-length]").forEach(button => {
+      button.addEventListener("click", () => {
+        clip.width = Math.max(this.cellWidth / 4, this.snapX(clip.width * Number(button.dataset.clipLength)));
+        this.renderPlaylist();
+        this.saveHistory();
+        this.showClipInspector(clip);
+      });
+    });
+    this.elements.inspector.querySelector("[data-clip-fit-pattern]")?.addEventListener("click", () => {
+      const patternLength = clip.type === "pattern" ? this.patternStepCount(pattern) / 4 : 4;
+      clip.width = Math.max(this.cellWidth, patternLength * this.cellWidth);
+      this.renderPlaylist();
+      this.saveHistory();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector("[data-clip-align-grid]")?.addEventListener("click", () => {
+      clip.x = this.snapX(clip.x);
+      clip.width = Math.max(this.cellWidth / 4, this.snapX(clip.width) || this.cellWidth);
+      this.renderPlaylist();
+      this.saveHistory();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelectorAll("[data-clip-color-source]").forEach(button => {
+      button.addEventListener("click", () => {
+        if (button.dataset.clipColorSource === "pattern" && pattern) clip.color = pattern.color;
+        if (button.dataset.clipColorSource === "channel") clip.color = this.getSelectedChannel()?.color || this.clipColor(clip);
+        this.renderPlaylist();
+        this.saveHistory();
+        this.showClipInspector(clip);
+      });
     });
     this.elements.inspector.querySelector("[data-edit-clip-volume]")?.addEventListener("input", event => {
       clip.volume = this.clamp(Number(event.target.value) || 0, 0, 120);
+      this.updateInspectorOutput("clip-volume", clip.volume, "%");
       this.renderPlaylist();
     });
     this.elements.inspector.querySelector("[data-edit-clip-volume]")?.addEventListener("change", () => this.saveHistory());
@@ -1846,26 +3573,74 @@ class CherryXMusicStudio {
       clip.trimEnd = this.clamp(Number(event.target.value) || 0, 0, 600);
       this.saveHistory();
     });
+    this.elements.inspector.querySelector('[data-inspector-action="open-pattern"]')?.addEventListener("click", () => this.openPatternClip(clip.id, "piano-roll"));
+    this.elements.inspector.querySelector('[data-inspector-action="open-step-seq"]')?.addEventListener("click", () => this.openPatternClip(clip.id, "step-seq"));
+    this.elements.inspector.querySelector('[data-inspector-action="quantize-pattern"]')?.addEventListener("click", () => {
+      this.selectedPatternId = clip.patternId;
+      this.quantizeActivePatternNotes();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="clear-pattern"]')?.addEventListener("click", () => {
+      this.selectedPatternId = clip.patternId;
+      this.clearActivePattern();
+      this.showClipInspector(clip);
+    });
+    this.elements.inspector.querySelector('[data-inspector-action="duplicate-clip"]')?.addEventListener("click", () => this.duplicateClip(clip.id));
+    this.elements.inspector.querySelector('[data-inspector-action="mute-clip"]')?.addEventListener("click", () => this.toggleClipMute(clip.id));
+    this.elements.inspector.querySelector('[data-inspector-action="delete-clip"]')?.addEventListener("click", () => this.removeClip(clip.id));
   }
 
   updateInspectorDefault() {
     if (!this.elements.inspector) return;
     this.elements.inspector.innerHTML = `
-      <p>${this.escapeHtml(this.t("select_item_hint", "Select a note, pattern, clip or channel."))}</p>
-      <div class="cx-inspector-row">
-        <strong>Hotkeys</strong>
-        Space - ${this.escapeHtml(this.t("play", "Play"))} / ${this.escapeHtml(this.t("pause", "Pause"))}<br>
-        Delete - ${this.escapeHtml(this.t("delete", "Delete"))}<br>
-        Ctrl+S - ${this.escapeHtml(this.t("save", "Save"))}<br>
-        Ctrl+D - ${this.escapeHtml(this.t("duplicate", "Duplicate"))}<br>
-        Ctrl+Z - Undo<br>
-        Ctrl+Shift+Z - Redo
-      </div>
+      ${this.inspectorHeader("ready", this.t("inspector", "Inspector"), this.t("select_item_hint", "Select a note, pattern, clip or channel."), "#36d399")}
+      ${this.inspectorSection("Hotkeys", `
+        <div class="cx-hotkey-list">
+          <span><kbd>Space</kbd><b>${this.escapeHtml(this.t("play", "Play"))} / ${this.escapeHtml(this.t("pause", "Pause"))}</b></span>
+          <span><kbd>Delete</kbd><b>${this.escapeHtml(this.t("delete", "Delete"))}</b></span>
+          <span><kbd>Ctrl</kbd><kbd>S</kbd><b>${this.escapeHtml(this.t("save", "Save"))}</b></span>
+          <span><kbd>Ctrl</kbd><kbd>D</kbd><b>${this.escapeHtml(this.t("duplicate", "Duplicate"))}</b></span>
+          <span><kbd>Ctrl</kbd><kbd>Z</kbd><b>Undo</b></span>
+        </div>
+      `)}
+      ${this.inspectorSection(this.t("quick_start", "Быстрый старт"), `
+        <div class="cx-inspector-actions">
+          <button type="button" data-inspector-action="new-pattern">${this.escapeHtml(this.t("pattern", "Pattern"))}</button>
+          <button type="button" data-inspector-action="open-mixer">${this.escapeHtml(this.t("mixer", "Mixer"))}</button>
+        </div>
+      `)}
     `;
+    this.elements.inspector.querySelector('[data-inspector-action="new-pattern"]')?.addEventListener("click", () => this.addPatternClip());
+    this.elements.inspector.querySelector('[data-inspector-action="open-mixer"]')?.addEventListener("click", () => this.switchView("mixer", this.container.querySelector('[data-view="mixer"]')));
   }
 
   deleteSelected() {
     const pattern = this.getActivePattern();
+    if (this.selectedNoteIds.size && pattern) {
+      pattern.notes = pattern.notes.filter(note => !this.selectedNoteIds.has(note.id));
+      this.selectedNoteIds.clear();
+      this.selectedNoteId = null;
+      this.renderNotes();
+      this.updateInspectorDefault();
+      this.saveHistory();
+      return;
+    }
+    if (this.selectedClipIds.size) {
+      const deletedPatternIds = new Set(this.clips.filter(item => this.selectedClipIds.has(item.id) && item.type === "pattern").map(item => item.patternId));
+      this.clips = this.clips.filter(item => !this.selectedClipIds.has(item.id));
+      deletedPatternIds.forEach(patternId => {
+        if (!this.clips.some(item => item.patternId === patternId)) this.patterns = this.patterns.filter(item => item.id !== patternId);
+      });
+      this.selectedClipIds.clear();
+      this.selectedClipId = null;
+      this.selectedPatternId = this.patterns[0]?.id || null;
+      this.renderPlaylist();
+      this.renderNotes();
+      this.renderStepSequencer();
+      this.updateInspectorDefault();
+      this.saveHistory();
+      return;
+    }
     if (this.selectedNoteId && pattern) {
       pattern.notes = pattern.notes.filter(note => note.id !== this.selectedNoteId);
       this.selectedNoteId = null;
@@ -1892,6 +3667,43 @@ class CherryXMusicStudio {
 
   duplicateSelected() {
     const pattern = this.getActivePattern();
+    if (this.selectedNoteIds.size && pattern) {
+      const copies = pattern.notes
+        .filter(note => this.selectedNoteIds.has(note.id))
+        .map(note => ({ ...note, id: this.uuid(), x: note.x + this.cellWidth }));
+      pattern.notes.push(...copies);
+      this.selectedNoteIds = new Set(copies.map(note => note.id));
+      this.selectedNoteId = null;
+      this.renderNotes();
+      this.saveHistory();
+      return;
+    }
+    if (this.selectedClipIds.size) {
+      const copies = [];
+      this.clips.filter(clip => this.selectedClipIds.has(clip.id)).forEach(clip => {
+        const copy = { ...clip, id: this.uuid(), name: `${clip.name} Copy`, x: clip.x + this.cellWidth };
+        if (clip.type === "pattern") {
+          const original = this.patterns.find(item => item.id === clip.patternId);
+          if (original) {
+            const newPattern = this.createPattern(`${original.name} Copy`);
+            newPattern.notes = JSON.parse(JSON.stringify(original.notes || []));
+            newPattern.stepsByChannel = JSON.parse(JSON.stringify(original.stepsByChannel || {}));
+            newPattern.stepVelocity = JSON.parse(JSON.stringify(original.stepVelocity || {}));
+            newPattern.lengthSteps = original.lengthSteps || this.steps;
+            newPattern.color = original.color || newPattern.color;
+            this.patterns.push(newPattern);
+            copy.patternId = newPattern.id;
+          }
+        }
+        copies.push(copy);
+      });
+      this.clips.push(...copies);
+      this.selectedClipIds = new Set(copies.map(clip => clip.id));
+      this.selectedClipId = null;
+      this.renderPlaylist();
+      this.saveHistory();
+      return;
+    }
     if (this.selectedNoteId && pattern) {
       const note = pattern.notes.find(item => item.id === this.selectedNoteId);
       if (!note) return;
@@ -1926,12 +3738,24 @@ class CherryXMusicStudio {
 
   saveHistory() {
     const snapshot = JSON.stringify({
+      title: this.projectTitle,
+      bpm: this.bpm,
+      tracks: this.tracks,
+      trackNames: this.trackNames,
       channels: this.channels,
       patterns: this.patterns,
       clips: this.clips,
       assets: this.assets,
+      activeView: this.activeView,
+      arrangeTool: this.arrangeTool,
+      tool: this.tool,
+      noteLengthBeats: this.noteLengthBeats,
       selectedPatternId: this.selectedPatternId,
-      selectedChannelId: this.selectedChannelId
+      selectedChannelId: this.selectedChannelId,
+      selectedClipId: this.selectedClipId,
+      selectedNoteId: this.selectedNoteId,
+      selectedClipIds: [...this.selectedClipIds],
+      selectedNoteIds: [...this.selectedNoteIds]
     });
     if (snapshot === this.history[this.historyIndex]) return;
     this.history = this.history.slice(0, this.historyIndex + 1);
@@ -2004,37 +3828,94 @@ class CherryXMusicStudio {
   }
 
   undo() {
-    if (this.historyIndex <= 0) return;
+    if (this.historyIndex <= 0) {
+      this.toast(this.t("nothing_to_undo", "Nothing to undo"), "info");
+      return;
+    }
     this.historyIndex -= 1;
     this.restoreHistory(this.history[this.historyIndex]);
     this.markDirty();
+    this.toast(this.t("undo_applied", "Undo"), "info");
   }
 
   redo() {
-    if (this.historyIndex >= this.history.length - 1) return;
+    if (this.historyIndex >= this.history.length - 1) {
+      this.toast(this.t("nothing_to_redo", "Nothing to redo"), "info");
+      return;
+    }
     this.historyIndex += 1;
     this.restoreHistory(this.history[this.historyIndex]);
     this.markDirty();
+    this.toast(this.t("redo_applied", "Redo"), "info");
   }
 
   restoreHistory(snapshot) {
     try {
       const state = JSON.parse(snapshot);
+      this.projectTitle = state.title || this.projectTitle;
+      this.bpm = Number(state.bpm || this.bpm);
       this.channels = state.channels || this.channels;
       this.patterns = state.patterns || this.patterns;
       this.clips = state.clips || this.clips;
       this.assets = state.assets || this.assets;
+      this.tracks = this.clamp(Number(state.tracks || this.tracks), 1, 24);
+      this.trackNames = Array.isArray(state.trackNames) ? state.trackNames : this.trackNames;
+      this.activeView = state.activeView || this.activeView;
+      this.arrangeTool = state.arrangeTool || this.arrangeTool;
+      this.tool = state.tool || this.tool;
+      this.noteLengthBeats = Number(state.noteLengthBeats || this.noteLengthBeats);
       this.selectedPatternId = state.selectedPatternId || this.patterns[0]?.id || null;
       this.selectedChannelId = state.selectedChannelId || this.channels[0]?.id || null;
+      this.selectedClipId = state.selectedClipId || null;
+      this.selectedNoteId = state.selectedNoteId || null;
+      this.selectedClipIds = new Set(Array.isArray(state.selectedClipIds) ? state.selectedClipIds : []);
+      this.selectedNoteIds = new Set(Array.isArray(state.selectedNoteIds) ? state.selectedNoteIds : []);
+      if (!this.clips.some(clip => clip.id === this.selectedClipId)) this.selectedClipId = null;
+      if (!this.patterns.some(pattern => pattern.id === this.selectedPatternId)) this.selectedPatternId = this.patterns[0]?.id || null;
+      const activePattern = this.getActivePattern();
+      if (!activePattern?.notes?.some(note => note.id === this.selectedNoteId)) this.selectedNoteId = null;
+      this.selectedClipIds = new Set([...this.selectedClipIds].filter(id => this.clips.some(clip => clip.id === id)));
+      this.selectedNoteIds = new Set([...this.selectedNoteIds].filter(id => activePattern?.notes?.some(note => note.id === id)));
       Object.values(this.synths).forEach(pack => {
         try { pack.synth.dispose(); } catch (_) {}
       });
       this.synths = {};
       this.channels.forEach(channel => this.ensureSynth(channel));
+      if (this.audioReady && window.Tone) Tone.Transport.bpm.value = this.bpm;
       this.renderAll();
+      this.restoreViewAfterHistory();
+      this.updateInspectorAfterHistory();
+      this.saveUiPrefs();
     } catch (error) {
       console.warn(error);
     }
+  }
+
+  restoreViewAfterHistory() {
+    const viewButton = this.container.querySelector(`[data-view="${this.activeView}"]`);
+    if (viewButton) this.switchView(this.activeView, viewButton);
+    this.container.querySelectorAll("[data-arrange-tool]").forEach(button => button.classList.toggle("active", button.dataset.arrangeTool === this.arrangeTool));
+    this.container.querySelectorAll("[data-tool]").forEach(button => button.classList.toggle("active", button.dataset.tool === this.tool));
+  }
+
+  updateInspectorAfterHistory() {
+    const clip = this.selectedClipId ? this.clips.find(item => item.id === this.selectedClipId) : null;
+    if (clip) {
+      this.showClipInspector(clip);
+      return;
+    }
+    const pattern = this.getActivePattern();
+    const note = this.selectedNoteId && pattern ? pattern.notes.find(item => item.id === this.selectedNoteId) : null;
+    if (note) {
+      this.showNoteInspector(note);
+      return;
+    }
+    const channel = this.getSelectedChannel();
+    if (channel && this.activeView === "mixer") {
+      this.showChannelInspector(channel);
+      return;
+    }
+    this.updateInspectorDefault();
   }
 
   loadInitialState() {
@@ -2052,6 +3933,8 @@ class CherryXMusicStudio {
     if (!state || typeof state !== "object") return;
     this.projectTitle = state.title || payload.title || this.projectTitle;
     this.bpm = Number(state.bpm || this.bpm);
+    this.tracks = this.clamp(Number(state.tracks || this.tracks), 1, 24);
+    this.trackNames = Array.isArray(state.trackNames) ? state.trackNames : this.trackNames;
     if (Array.isArray(state.channels) && state.channels.length) this.channels = state.channels;
     if (Array.isArray(state.patterns) && state.patterns.length) this.patterns = state.patterns;
     if (Array.isArray(state.clips)) this.clips = state.clips;
@@ -2102,7 +3985,7 @@ class CherryXMusicStudio {
       notes: (pattern.notes || []).map(note => ({
         ...note,
         x: Math.round((note.x || 0) * ratio),
-        y: Number(note.row || 0) * this.rowHeight,
+        y: this.pianoRowAt(Number(note.row || 0)).top,
         width: Math.max(this.baseCellWidth / 2, Math.round((note.width || this.cellWidth) * ratio))
       }))
     }));
@@ -2110,6 +3993,8 @@ class CherryXMusicStudio {
     return {
       title: this.projectTitle,
       bpm: this.bpm,
+      tracks: this.tracks,
+      trackNames: this.trackNames,
       channels: this.channels,
       patterns,
       clips,
@@ -2211,28 +4096,79 @@ class CherryXMusicStudio {
   }
 
   updatePlayhead() {
-    if (!this.elements.playhead) return;
-    const x = this.currentTime * (this.bpm / 60) * this.cellWidth;
-    this.elements.playhead.style.transform = `translateX(${x}px)`;
+    const scrollLeft = this.elements.playlistGrid?.scrollLeft || 0;
+    if (this.elements.playhead) {
+      const x = this.secondsToPixels(this.currentTime) - scrollLeft - 1;
+      const viewport = this.elements.playlistGrid ? Math.max(0, this.elements.playlistGrid.clientWidth - this.getTrackHeaderWidth()) : Infinity;
+      const visible = x >= 0 && x <= viewport;
+      this.elements.playhead.style.opacity = visible ? "1" : "0";
+      this.elements.playhead.style.pointerEvents = visible ? "auto" : "none";
+      this.elements.playhead.style.transform = `translateX(${this.clamp(x, 0, viewport)}px)`;
+    }
+    this.updatePianoPlayhead();
+  }
+
+  updatePianoPlayhead() {
+    if (!this.elements.pianoPlayhead || !this.elements.pianoRoll) return;
+    const time = this.transportPlaysPattern() ? this.patternPlaybackTime() : this.currentTime;
+    const x = this.secondsToPixels(time) - this.elements.pianoRoll.scrollLeft - 1;
+    const viewport = this.elements.pianoRoll.clientWidth;
+    const visible = x >= 0 && x <= viewport;
+    this.elements.pianoPlayhead.style.opacity = visible ? "1" : "0";
+    this.elements.pianoPlayhead.style.transform = `translateX(${this.clamp(x, 0, viewport)}px)`;
   }
 
   syncTimelineScroll() {
     if (this.elements.ruler && this.elements.playlistGrid) this.elements.ruler.style.transform = `translateX(${-this.elements.playlistGrid.scrollLeft}px)`;
+    this.updatePlayhead();
   }
 
   syncPianoScroll() {
     if (this.elements.pianoKeys && this.elements.pianoRoll) this.elements.pianoKeys.scrollTop = this.elements.pianoRoll.scrollTop;
+    this.updatePianoPlayhead();
   }
 
   snapX(x) {
-    const snap = this.elements.snap?.value || "1/8";
-    const multiplier = snap === "1/4" ? 1 : snap === "1/16" ? 0.25 : 0.5;
-    const grid = this.cellWidth * multiplier;
+    const grid = this.snapGridSize();
     return Math.round(x / grid) * grid;
+  }
+
+  snapGridSize() {
+    return this.cellWidth * this.snapMultiplier();
+  }
+
+  snapMultiplier() {
+    const denominator = Number(String(this.elements.snap?.value || "1/32").split("/")[1]) || 32;
+    return this.clamp(4 / denominator, 1 / 64, 1);
   }
 
   noteFromRow(row) {
     return this.elements.pianoKeys?.children[row]?.dataset?.note || null;
+  }
+
+  pianoRowAt(row) {
+    return this.pianoRows[row] || {
+      note: this.noteFromRow(row),
+      top: Number(row || 0) * this.rowHeight,
+      height: this.rowHeight,
+      isBlack: false
+    };
+  }
+
+  pianoRowFromY(y) {
+    const value = Math.max(0, Number(y) || 0);
+    const rows = this.pianoRows || [];
+    if (!rows.length) return 0;
+    let low = 0;
+    let high = rows.length - 1;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const row = rows[mid];
+      if (value < row.top) high = mid - 1;
+      else if (value >= row.top + row.height) low = mid + 1;
+      else return mid;
+    }
+    return this.clamp(low, 0, rows.length - 1);
   }
 
   relativePoint(event, el) {

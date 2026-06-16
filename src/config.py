@@ -28,6 +28,7 @@ class Settings:
     video_export_workers: int
     job_max_workers: int
     account_concurrent_jobs: int
+    persistent_job_queue: bool
     session_ttl_minutes: int
     cleanup_interval_seconds: int
     youtube_max_duration_minutes: int
@@ -84,6 +85,7 @@ def get_settings() -> Settings:
         video_export_workers=parse_env_int("VIDEO_EXPORT_WORKERS", max(2, (os.cpu_count() or 2) // 2), min_value=1),
         job_max_workers=parse_env_int("JOB_MAX_WORKERS", max(32, (os.cpu_count() or 2) * 4), min_value=1),
         account_concurrent_jobs=parse_env_int("ACCOUNT_CONCURRENT_JOBS", 10, min_value=1),
+        persistent_job_queue=os.getenv("PERSISTENT_JOB_QUEUE", "false").lower() in {"1", "true", "yes", "on"},
         session_ttl_minutes=parse_env_int("SESSION_TTL_MINUTES", 60, min_value=1),
         cleanup_interval_seconds=parse_env_int("CLEANUP_INTERVAL_SECONDS", 600, min_value=1),
         youtube_max_duration_minutes=parse_env_int("YOUTUBE_MAX_DURATION_MINUTES", 360, min_value=1),

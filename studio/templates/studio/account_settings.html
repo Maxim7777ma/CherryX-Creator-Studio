@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "settings" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="auth-page theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <main class="auth-shell settings-shell">
@@ -169,102 +169,6 @@
         </div>
       </div>
     </div>
-    <script>
-      (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          button.addEventListener("click", () => {
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-          });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
-        });
-
-        const input = document.querySelector("input[name='avatar_file']");
-        const hidden = document.querySelector("input[name='avatar_crop_data']");
-        const modal = document.getElementById("avatar-crop-modal");
-        const canvas = document.getElementById("avatar-crop-canvas");
-        const zoom = document.getElementById("avatar-crop-zoom");
-        const apply = document.getElementById("avatar-crop-apply");
-        const cancel = document.getElementById("avatar-crop-cancel");
-        const previews = document.querySelectorAll(".profile-preview-avatar, .photo-upload-surface img");
-        if (!input || !hidden || !modal || !canvas || !zoom || !apply || !cancel) return;
-
-        const ctx = canvas.getContext("2d");
-        const image = new Image();
-        let offsetX = 0;
-        let offsetY = 0;
-        let dragging = false;
-        let lastX = 0;
-        let lastY = 0;
-
-        const draw = () => {
-          const scale = Number(zoom.value || 1);
-          const base = Math.max(canvas.width / image.width, canvas.height / image.height);
-          const width = image.width * base * scale;
-          const height = image.height * base * scale;
-          const x = (canvas.width - width) / 2 + offsetX;
-          const y = (canvas.height - height) / 2 + offsetY;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = "#0b1220";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(image, x, y, width, height);
-        };
-
-        input.addEventListener("change", () => {
-          const file = input.files && input.files[0];
-          if (!file || !file.type.startsWith("image/")) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            image.onload = () => {
-              offsetX = 0;
-              offsetY = 0;
-              zoom.value = "1";
-              modal.hidden = false;
-              draw();
-            };
-            image.src = reader.result;
-          };
-          reader.readAsDataURL(file);
-        });
-
-        zoom.addEventListener("input", draw);
-        canvas.addEventListener("pointerdown", (event) => {
-          dragging = true;
-          lastX = event.clientX;
-          lastY = event.clientY;
-          canvas.setPointerCapture(event.pointerId);
-        });
-        canvas.addEventListener("pointermove", (event) => {
-          if (!dragging) return;
-          offsetX += event.clientX - lastX;
-          offsetY += event.clientY - lastY;
-          lastX = event.clientX;
-          lastY = event.clientY;
-          draw();
-        });
-        canvas.addEventListener("pointerup", () => {
-          dragging = false;
-        });
-        cancel.addEventListener("click", () => {
-          modal.hidden = true;
-          input.value = "";
-        });
-        apply.addEventListener("click", () => {
-          const data = canvas.toDataURL("image/jpeg", 0.92);
-          hidden.value = data;
-          previews.forEach((preview) => {
-            preview.src = data;
-          });
-          modal.hidden = true;
-        });
-      })();
-    </script>
+    <script defer src="{% static 'studio/account_settings.js' %}"></script>
   </body>
 </html>

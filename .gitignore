@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 data/
 tmp/
+tmp_screens/
 logs/
 .tmp/
 .pytest_cache/

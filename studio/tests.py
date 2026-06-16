@@ -24,7 +24,9 @@ from src import openai_ai
 from src import web_actions as actions
 from src.youtube_tools import SubtitleCue
 from . import views
+from .localization import app_messages, language_options, translate
 from .models import DesignerAsset, DesignerProject, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .views import _job_record_params
 
 
 class SiteSmokeTests(TransactionTestCase):
@@ -34,6 +36,7 @@ class SiteSmokeTests(TransactionTestCase):
             reverse("studio:index"),
             reverse("studio:dashboard_detail", args=["files"]),
             reverse("studio:design_project_list"),
+            reverse("studio:cherryx_pay"),
             reverse("studio:video_project_list"),
             reverse("studio:designer"),
             reverse("studio:video_editor"),
@@ -49,7 +52,15 @@ class SiteSmokeTests(TransactionTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/app/design-projects/"')
+        self.assertContains(response, 'href="/app/cherryx-pay/"')
         self.assertContains(response, "data-designer-launch")
+
+    def test_designer_page_exposes_mobile_palette_and_drawer_hooks(self) -> None:
+        response = self.client.get(reverse("studio:designer"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-designer-mobile-palette")
+        self.assertContains(response, "data-designer-mobile-drawer")
 
     def test_files_stats_ajax_partial_contains_controls(self) -> None:
         response = self.client.get(
@@ -64,6 +75,96 @@ class SiteSmokeTests(TransactionTestCase):
         self.assertIn("html", payload)
         self.assertIn("stats-type-picker", payload["html"])
         self.assertIn("stats-files-table-head", payload["html"])
+
+    def test_localized_ui_text_repairs_mojibake_at_output_boundary(self) -> None:
+        self.assertEqual(translate("pricing", "ru"), "Тарифы")
+        self.assertEqual(translate("login", "uk"), "Увійти")
+        self.assertEqual(translate("edit_design", "uk"), "Редагувати дизайн")
+        self.assertEqual(translate("canvas", "ru"), "Холст")
+        self.assertEqual(translate("local_draft", "uk"), "Локальна чернетка")
+        self.assertEqual(translate("ai_clip_planner", "ru"), "План клипов")
+        self.assertEqual(app_messages("ru")["canvas"], "Холст")
+        self.assertEqual(app_messages("en")["ai_fallback"], "AI fallback")
+        options = {item["code"]: item for item in language_options("ru")}
+        self.assertEqual(options["ru"]["native"], "Русский")
+        self.assertEqual(options["fr"]["native"], "Français")
+
+    def test_subtitle_style_picker_and_detail_pages_render(self) -> None:
+        response = self.client.get(reverse("studio:index"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-subtitle-style-picker")
+        self.assertContains(response, "target=\"_blank\"")
+        for style in actions.SUBTITLE_STYLE_CHOICES:
+            detail = self.client.get(reverse("studio:subtitle_style_detail", args=[style[0]]))
+            self.assertEqual(detail.status_code, 200)
+            self.assertContains(detail, "subtitle-style-demo-line")
+
+    def test_originality_tool_renders_and_accepts_text(self) -> None:
+        response = self.client.get(reverse("studio:index"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-originality-form")
+        self.assertContains(response, reverse("studio:start_originality"))
+
+        repeated = "Данная работа в современном мире показывает важную роль образовательных технологий согласно статистике."
+        text = f"{repeated} {repeated} Автор добавляет собственный пример и сравнивает несколько подходов к проверке текста."
+        result = self.client.post(reverse("studio:start_originality"), {"text": text})
+
+        self.assertEqual(result.status_code, 200)
+        payload = result.json()["analysis"]
+        self.assertIn("overall", payload)
+        self.assertEqual(len(payload["metrics"]), 6)
+        self.assertTrue(any(segment["severity"] != "none" for segment in payload["segments"]))
+        self.assertIn("job", result.json())
+        self.assertEqual(result.json()["job"]["kind"], "originality")
+        self.assertEqual(len(result.json()["job"]["outputs"]), 2)
+        self.assertEqual(payload["check"]["mode"], "local")
+        self.assertEqual(payload["check"]["price_cherryx"], 5)
+
+        send = self.client.post(reverse("studio:send_originality_report", args=[result.json()["job"]["id"]]), {"email": "teacher@example.com"})
+        self.assertEqual(send.status_code, 200)
+        self.assertEqual(send.json()["ok"], True)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("teacher@example.com", mail.outbox[0].to)
+
+    def test_originality_web_mode_prepares_share_report(self) -> None:
+        text = "It is important to note that academic work needs sources and clear structure. " * 4
+        response = self.client.post(reverse("studio:start_originality"), {"text": text, "mode": "web"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["analysis"]["check"]["mode"], "web")
+        self.assertEqual(payload["analysis"]["check"]["price_cherryx"], 25)
+        self.assertEqual(payload["analysis"]["check"]["web_queries_limit"], 5)
+        self.assertTrue(payload["analysis"]["check"]["web_probes"])
+        record = JobRecord.objects.get(job_id=payload["job"]["id"])
+        token = _job_record_params(record)["originality"]["share_token"]
+        shared = self.client.get(reverse("studio:originality_shared_report", args=[token]))
+        self.assertEqual(shared.status_code, 200)
+        self.assertContains(shared, "Verified by CherryX Originality")
+
+    def test_originality_tool_reads_docx_upload(self) -> None:
+        from docx import Document
+
+        document = Document()
+        document.add_paragraph("It is important to note that academic work needs sources and clear structure.")
+        document.add_paragraph("It is important to note that academic work needs sources and clear structure.")
+        buffer = BytesIO()
+        document.save(buffer)
+        upload = SimpleUploadedFile(
+            "paper.docx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        response = self.client.post(reverse("studio:start_originality"), {"file": upload})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["analysis"]
+        self.assertGreater(payload["source"]["words"], 10)
+        self.assertTrue(any(metric["key"] == "ai_risk" for metric in payload["metrics"]))
+        self.assertEqual(response.json()["job"]["status"], "completed")
 
 
 class QueryOptimizationTests(TransactionTestCase):
@@ -132,6 +233,127 @@ class QueryOptimizationTests(TransactionTestCase):
         self.assertEqual(stats["output_count"], 3)
         self.assertEqual(stats["total_output_size"], 600)
 
+    def test_dashboard_files_reads_paginated_outputs_from_database(self) -> None:
+        for index in range(205):
+            record = JobRecord.objects.create(
+                owner=self.user,
+                job_id=f"filedash{index:04d}",
+                kind="cover",
+                title=f"Archive job {index}",
+                status="completed",
+                progress=100,
+            )
+            JobOutputRecord.objects.create(
+                job=record,
+                label=f"Archive {index}",
+                path=f"/tmp/archive-{index}.png",
+                media_type="image/png",
+                size=100 + index,
+            )
+
+        response = self.client.get(reverse("studio:dashboard_detail", args=["files"]), {"page": "11"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_outputs"], 205)
+        self.assertEqual(response.context["page"], 11)
+        self.assertEqual(response.context["pages"], 11)
+        self.assertContains(response, "Archive 0")
+        self.assertNotContains(response, "Archive 204")
+
+    def test_dashboard_jobs_are_paginated_from_database(self) -> None:
+        for index in range(205):
+            JobRecord.objects.create(
+                owner=self.user,
+                job_id=f"jobdash{index:04d}",
+                kind="cover",
+                title=f"Dashboard job {index}",
+                status="completed",
+                progress=100,
+            )
+
+        response = self.client.get(reverse("studio:dashboard_detail", args=["all"]), {"page": "11"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_jobs"], 205)
+        self.assertEqual(response.context["page"], 11)
+        self.assertEqual(response.context["pages"], 11)
+        self.assertContains(response, "Dashboard job 0")
+        self.assertNotContains(response, "Dashboard job 204")
+
+    def test_queued_job_can_be_cancelled(self) -> None:
+        record = JobRecord.objects.create(
+            owner=self.user,
+            job_id="cancelqueued01",
+            kind="cover",
+            title="Queued job",
+            status="queued",
+            progress=1,
+            params_json=json.dumps({"action": "cover"}),
+        )
+
+        response = self.client.post(reverse("studio:cancel_job", args=[record.job_id]), HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        record.refresh_from_db()
+        self.assertEqual(payload["job"]["status"], "cancelled")
+        self.assertEqual(record.status, "cancelled")
+        self.assertTrue(record.events.filter(status="cancelled").exists())
+
+    def test_dashboard_job_actions_follow_status(self) -> None:
+        JobRecord.objects.create(owner=self.user, job_id="queuedaction01", kind="cover", title="Queued action", status="queued", progress=1, params_json=json.dumps({"action": "cover"}))
+        JobRecord.objects.create(owner=self.user, job_id="runningaction1", kind="cover", title="Running action", status="running", progress=40, params_json=json.dumps({"action": "cover"}))
+        completed = JobRecord.objects.create(owner=self.user, job_id="completeaction", kind="cover", title="Complete action", status="completed", progress=100, params_json=json.dumps({"action": "cover"}))
+        JobOutputRecord.objects.create(job=completed, label="Output", path="/tmp/complete-action.png", media_type="image/png", size=10)
+        JobRecord.objects.create(owner=self.user, job_id="failedaction01", kind="cover", title="Failed action", status="failed", progress=100, error="Render failed", params_json=json.dumps({"action": "cover"}))
+        JobRecord.objects.create(owner=self.user, job_id="cancelaction01", kind="cover", title="Cancel action", status="cancelled", progress=100, params_json=json.dumps({"action": "cover"}))
+
+        response = self.client.get(reverse("studio:dashboard_detail", args=["all"]))
+
+        self.assertContains(response, 'action="/api/jobs/queuedaction01/cancel/"')
+        self.assertNotContains(response, 'action="/api/jobs/runningaction1/cancel/"')
+        self.assertContains(response, 'action="/api/jobs/failedaction01/repeat/"')
+        self.assertContains(response, 'action="/api/jobs/cancelaction01/repeat/"')
+        self.assertContains(response, 'href="/download/completeaction/all/"')
+
+    def test_dashboard_tasks_ajax_returns_task_panel(self) -> None:
+        JobRecord.objects.create(owner=self.user, job_id="ajaxtask0001", kind="cover", title="Ajax task", status="completed", progress=100)
+
+        response = self.client.get(reverse("studio:dashboard_detail", args=["all"]), HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn('data-section="all"', payload["html"])
+        self.assertIn("Ajax task", payload["html"])
+        self.assertNotIn("stats-files-panel", payload["html"])
+
+    def test_dashboard_tasks_show_ai_fallback_summary(self) -> None:
+        JobRecord.objects.create(
+            owner=self.user,
+            job_id="aitasksummary1",
+            kind="youtube",
+            title="AI task",
+            status="failed",
+            progress=100,
+            params_json=json.dumps(
+                {
+                    "ai": {
+                        "clip_planner": {
+                            "status": "fallback",
+                            "fallback_reason": "OpenAI is not configured",
+                            "selected_outputs": [],
+                        }
+                    }
+                }
+            ),
+        )
+
+        response = self.client.get(reverse("studio:dashboard_detail", args=["all"]))
+
+        self.assertContains(response, "AI fallback")
+        self.assertContains(response, "Clip planner")
+        self.assertContains(response, "OpenAI is not configured")
+
     def test_share_roles_are_attached_in_one_batch_for_mixed_resources(self) -> None:
         owner = get_user_model().objects.create_user("owner-perf@example.com", email="owner-perf@example.com", password="pass12345")
         design = DesignerProject.objects.create(owner=owner, title="Design")
@@ -165,6 +387,70 @@ class QueryOptimizationTests(TransactionTestCase):
         self.assertEqual(design._access_role, WorkspaceShare.ROLE_EDITOR)
         self.assertEqual(video._access_role, WorkspaceShare.ROLE_EDITOR)
         self.assertEqual(music._access_role, WorkspaceShare.ROLE_EDITOR)
+
+    def test_project_list_api_supports_pagination_search_and_sort_metadata(self) -> None:
+        for index in range(5):
+            VideoEditorProject.objects.create(owner=self.user, title=f"Launch cut {index}", asset_count=index)
+        VideoEditorProject.objects.create(owner=self.user, title="Archived draft")
+
+        response = self.client.get(
+            reverse("studio:video_projects"),
+            {"q": "Launch", "page": "2", "per_page": "2", "sort": "title"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["page"], 2)
+        self.assertEqual(payload["per_page"], 2)
+        self.assertTrue(payload["has_more"])
+        self.assertEqual(payload["total"], 5)
+        self.assertEqual(payload["query"], "Launch")
+        self.assertEqual(payload["sort"], "title")
+        self.assertEqual(len(payload["projects"]), 2)
+        self.assertTrue(all("Launch" in project["title"] for project in payload["projects"]))
+
+    def test_project_list_page_renders_search_controls_and_filtered_results(self) -> None:
+        VideoEditorProject.objects.create(owner=self.user, title="Launch teaser")
+        VideoEditorProject.objects.create(owner=self.user, title="Archived draft")
+
+        response = self.client.get(reverse("studio:video_project_list"), {"q": "Launch", "sort": "title"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="project-filter-bar"')
+        self.assertContains(response, "Launch teaser")
+        self.assertNotContains(response, "Archived draft")
+
+    def test_project_list_page_wires_live_pagination_hooks(self) -> None:
+        VideoEditorProject.objects.create(owner=self.user, title="Launch teaser")
+        VideoEditorProject.objects.create(owner=self.user, title="Launch final")
+
+        response = self.client.get(reverse("studio:video_project_list"), {"q": "Launch", "per_page": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-project-list")
+        self.assertContains(response, 'data-project-page="next"')
+        self.assertContains(response, "studio/project_lists.js")
+
+    def test_video_editor_exposes_expanded_export_presets(self) -> None:
+        response = self.client.get(reverse("studio:video_editor"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-export-preset="feed"')
+        self.assertContains(response, 'data-export-preset="pinterest"')
+        self.assertContains(response, 'data-export-preset="cinema"')
+        self.assertContains(response, 'data-aspect="21/9"')
+
+    def test_video_export_size_respects_wide_and_portrait_aspects(self) -> None:
+        self.assertEqual(views._video_export_size({"aspect": "4 / 5"}, "1080p"), (1080, 1350))
+        self.assertEqual(views._video_export_size({"aspect": "3 / 4"}, "720p"), (720, 960))
+        self.assertEqual(views._video_export_size({"aspect": "21 / 9"}, "1080p"), (2520, 1080))
+        self.assertEqual(views._video_export_size({"aspect": "4 / 3"}, "720p"), (960, 720))
+
+    def test_all_subtitle_languages_have_picker_flags(self) -> None:
+        languages = views._localized_subtitle_languages("ru")
+        missing = [item["code"] for item in languages if item["code"] != "auto" and not item.get("flag")]
+
+        self.assertEqual(missing, [])
 
 
 class JobSchedulerTests(TransactionTestCase):
@@ -238,6 +524,8 @@ class WebOpenAIUpgradeTests(TransactionTestCase):
 
         self.assertEqual(starts, [10, 40, 80])
         self.assertEqual(job.params["ai"]["clip_planner"]["status"], "fallback")
+        self.assertEqual(job.params["ai"]["clip_planner"]["fallback_reason"], "OpenAI is not configured")
+        self.assertEqual(job.params["ai"]["clip_planner"]["selected_outputs"], [])
 
     def test_ai_clip_planner_uses_valid_returned_starts(self) -> None:
         job = actions.WebJob(id="aitest02", kind="youtube", title="AI test", params={})
@@ -717,6 +1005,10 @@ class DesignerProjectTests(TransactionTestCase):
 
         self.assertEqual(response.status_code, 200)
         job = response.json()["job"]
+        deadline = time.time() + 8
+        while job["status"] not in {"done", "failed"} and time.time() < deadline:
+            time.sleep(0.2)
+            job = self.client.get(reverse("studio:video_project_export_status", args=[project.id, job["id"]])).json()["job"]
         self.assertEqual(job["status"], "done")
         download = self.client.get(job["download_url"])
         self.assertEqual(download.status_code, 200)

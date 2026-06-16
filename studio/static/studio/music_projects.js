@@ -2,12 +2,31 @@
   document.querySelectorAll(".language-switcher").forEach((switcher) => {
     const button = switcher.querySelector(".language-current");
     if (!button) return;
+    const positionMenu = () => {
+      const rect = button.getBoundingClientRect();
+      const safeGap = 14;
+      const menuWidth = 230;
+      const right = Math.max(safeGap, window.innerWidth - rect.right);
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+      switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+      switcher.style.setProperty(
+        "--language-menu-right",
+        `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+      );
+    };
     switcher.addEventListener("click", (event) => event.stopPropagation());
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const open = switcher.classList.toggle("is-open");
       button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) positionMenu();
     });
+    window.addEventListener("resize", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    });
+    window.addEventListener("scroll", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    }, { passive: true });
     document.addEventListener("click", (event) => {
       if (!switcher.contains(event.target)) {
         switcher.classList.remove("is-open");
@@ -44,6 +63,9 @@
   const modalConfirm = modal?.querySelector("[data-modal-confirm]");
   const modalCancel = modal?.querySelectorAll("[data-modal-cancel]") || [];
   let pendingDelete = null;
+  let knownTotal = Number(totalCount?.textContent || 0) || 0;
+  let previewAudio = null;
+  let activePreviewPlayer = null;
 
   const csrfToken = (() => {
     const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
@@ -84,7 +106,7 @@
 
   const updateEmptyState = () => {
     const count = cards().length;
-    if (totalCount) totalCount.textContent = String(count);
+    if (totalCount) totalCount.textContent = String(Math.max(knownTotal, count));
     if (emptyState) emptyState.hidden = count > 0;
     if (grid) grid.hidden = count === 0;
   };
@@ -127,6 +149,7 @@
   };
 
   const removeDeletedCards = (ids) => {
+    knownTotal = Math.max(0, knownTotal - ids.length);
     ids.forEach((id) => {
       const card = root.querySelector(`[data-project-id="${id}"]`);
       if (!card) return;
@@ -223,6 +246,96 @@
       if (card) openModal([projectInfo(card)]);
     });
   });
+
+  const previewTitle = (player) => {
+    const card = player?.closest?.("[data-project-id]");
+    return card ? projectInfo(card).title : t("untitled_project", "Untitled project");
+  };
+
+  const resetPreviewPlayer = (player = activePreviewPlayer) => {
+    if (!player) return;
+    player.classList.remove("is-playing", "is-loading");
+    player.setAttribute("aria-pressed", "false");
+    player.setAttribute("aria-label", `${t("play", "Play")}: ${previewTitle(player)}`);
+  };
+
+  const stopPreview = () => {
+    if (previewAudio) {
+      previewAudio.pause();
+      previewAudio.currentTime = 0;
+    }
+    resetPreviewPlayer();
+    activePreviewPlayer = null;
+  };
+
+  const playPreview = async (player) => {
+    const url = player.dataset.previewUrl || "";
+    if (!url) {
+      player.classList.add("is-empty");
+      player.title = t("no_audio_preview", "No audio files in this project");
+      return;
+    }
+    if (activePreviewPlayer === player && previewAudio && !previewAudio.paused) {
+      previewAudio.pause();
+      resetPreviewPlayer(player);
+      activePreviewPlayer = null;
+      return;
+    }
+    resetPreviewPlayer();
+    if (!previewAudio) {
+      previewAudio = new Audio();
+      previewAudio.preload = "metadata";
+      previewAudio.addEventListener("ended", stopPreview);
+      previewAudio.addEventListener("pause", () => {
+        if (previewAudio?.ended) return;
+        resetPreviewPlayer(activePreviewPlayer);
+      });
+      previewAudio.addEventListener("play", () => {
+        activePreviewPlayer?.classList.remove("is-loading");
+        activePreviewPlayer?.classList.add("is-playing");
+        activePreviewPlayer?.setAttribute("aria-pressed", "true");
+      });
+    } else {
+      previewAudio.pause();
+    }
+    activePreviewPlayer = player;
+    player.classList.add("is-loading");
+    player.setAttribute("aria-pressed", "false");
+    player.setAttribute("aria-label", `${t("pause", "Pause")}: ${previewTitle(player)}`);
+    if (previewAudio.src !== new URL(url, window.location.href).href) previewAudio.src = url;
+    try {
+      await previewAudio.play();
+    } catch (error) {
+      console.warn("Music project preview failed", error);
+      resetPreviewPlayer(player);
+      activePreviewPlayer = null;
+    }
+  };
+
+  const preparePreviewPlayer = (player) => {
+    if (!player.dataset.previewUrl) {
+      player.classList.add("is-empty");
+      player.title = t("no_audio_preview", "No audio files in this project");
+    }
+    player.setAttribute("aria-pressed", "false");
+    player.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      playPreview(player);
+    });
+  };
+
+  root.querySelectorAll("[data-project-preview-player]").forEach(preparePreviewPlayer);
+  root.addEventListener("click", (event) => {
+    const player = event.target.closest("[data-project-preview-player]");
+    if (!player || !root.contains(player)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    playPreview(player);
+  });
+
+  window.addEventListener("beforeunload", stopPreview);
   modalCancel.forEach((button) => button.addEventListener("click", closeModal));
   modalConfirm?.addEventListener("click", async () => {
     if (!pendingDelete?.length || !modalConfirm) return;

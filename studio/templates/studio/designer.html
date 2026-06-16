@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "designer_mode" %} &middot; CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
     <script defer src="{% static 'studio/app.js' %}"></script>
     <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
@@ -14,12 +14,12 @@
       <a class="designer-switch designer-workspace-switch is-active" href="{{ design_projects_url }}" aria-pressed="true">
         <span class="designer-switch-track" aria-hidden="true"><span></span></span>
         <span>
-          <b>Projects</b>
+          <b>{% ui "projects" %}</b>
         </span>
       </a>
       <div>
-        <p class="eyebrow">CherryX-Digital &middot; Design Mode</p>
-        <h1 data-design-page-title>{{ current_design_project.title|default:"New design" }}</h1>
+        <p class="eyebrow">CherryX-Digital &middot; {% ui "designer_mode" %}</p>
+        <h1 data-design-page-title>{% if current_design_project.title %}{{ current_design_project.title }}{% else %}{% ui "new_design" %}{% endif %}</h1>
       </div>
       {% include "studio/_language_switcher.html" %}
     </header>

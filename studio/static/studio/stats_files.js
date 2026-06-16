@@ -1,5 +1,5 @@
 (function () {
-  const panelSelector = ".detail-panel[data-section='files']";
+  const panelSelector = ".detail-panel[data-section]";
   let searchTimer = 0;
 
   function getQueryState() {
@@ -39,7 +39,7 @@
       if (replaceHistory && window.history.replaceState) window.history.replaceState(null, "", url);
       initStatsPanel();
     } catch (error) {
-      console.error("Failed to load stats files:", error);
+      console.error("Failed to load stats panel:", error);
       panel.classList.add("has-load-error");
     } finally {
       document.querySelector(panelSelector)?.classList.remove("is-loading");
@@ -184,7 +184,7 @@
           if (!response.ok || !data.designer_url) throw new Error(data.error || "Design import failed");
           window.location.href = data.designer_url;
         } catch (error) {
-          button.textContent = original || "Редактировать дизайн";
+          button.textContent = original || "Edit design";
           button.dataset.loading = "0";
           alert(error.message || "Design import failed");
         }
@@ -213,9 +213,10 @@
 
     pagination?.addEventListener("click", function (event) {
       const target = event.target.closest("a[data-page]");
-      if (!target || !form) return;
+      if (!target) return;
       event.preventDefault();
-      submitFilters(form, Number(target.dataset.page || 1) || 1);
+      if (form) submitFilters(form, Number(target.dataset.page || 1) || 1);
+      else loadPanel(target.href);
     });
 
     setupShare(panel);
@@ -228,12 +229,31 @@
       switcher.dataset.languageReady = "1";
       const button = switcher.querySelector(".language-current");
       if (!button) return;
+      const positionMenu = () => {
+        const rect = button.getBoundingClientRect();
+        const safeGap = 14;
+        const menuWidth = 230;
+        const right = Math.max(safeGap, window.innerWidth - rect.right);
+        const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+        switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+        switcher.style.setProperty(
+          "--language-menu-right",
+          `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+        );
+      };
       switcher.addEventListener("click", (event) => event.stopPropagation());
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         const open = switcher.classList.toggle("is-open");
         button.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) positionMenu();
       });
+      window.addEventListener("resize", () => {
+        if (switcher.classList.contains("is-open")) positionMenu();
+      });
+      window.addEventListener("scroll", () => {
+        if (switcher.classList.contains("is-open")) positionMenu();
+      }, { passive: true });
     });
     if (!window.__statsLanguageCloseBound) {
       window.__statsLanguageCloseBound = true;

@@ -2,22 +2,22 @@
 <section class="designer-mode-panel{% if designer_fullscreen %} is-open is-fullscreen{% endif %}" data-designer-mode>
   <div class="designer-head">
     <div>
-      <span class="designer-project-kicker">Design project</span>
-      <h2 class="designer-project-title" data-design-project-title title="Double-click to rename">New design</h2>
+      <span class="designer-project-kicker">{% ui "designer_project" %}</span>
+      <h2 class="designer-project-title" data-design-project-title title="{% ui "double_click_rename" %}">{% ui "new_design" %}</h2>
       <div class="designer-save-row">
-        <small data-design-save-status>Local draft</small>
-        <button type="button" data-design-save-retry hidden>Retry</button>
+        <small data-design-save-status>{% ui "local_draft" %}</small>
+        <button type="button" data-design-save-retry hidden>{% ui "retry" %}</button>
         <b data-design-storage-badge>0 B</b>
       </div>
     </div>
     <div class="designer-head-actions">
-      <a class="designer-ghost" href="{% url 'studio:design_project_list' %}">Projects</a>
+      <a class="designer-ghost" href="{% url 'studio:design_project_list' %}">{% ui "projects" %}</a>
       {% if current_design_project.can_share %}
-        <button class="designer-ghost" type="button" data-share-open>Share</button>
+        <button class="designer-ghost" type="button" data-share-open>{% ui "share" %}</button>
       {% elif current_design_project and not current_design_project.is_owner %}
-        <span class="designer-shared-badge">Shared &middot; {{ current_design_project.access_role }}</span>
+        <span class="designer-shared-badge">{% ui "shared" %} &middot; {{ current_design_project.access_role }}</span>
       {% endif %}
-      <button class="designer-ghost" type="button" data-design-import-draft hidden>Import local draft</button>
+      <button class="designer-ghost" type="button" data-design-import-draft hidden>{% ui "import_local_draft" %}</button>
       <button class="designer-ghost" type="button" data-design-action="clear">{% ui "clear" %}</button>
       {% if designer_fullscreen %}
         <a class="designer-icon-button" href="{% url 'studio:index' %}" title="{% ui "workspace" %}" aria-label="{% ui "workspace" %}" data-icon="workspace"></a>
@@ -29,7 +29,7 @@
   </div>
 
   <div class="designer-studio">
-    <div class="designer-toolbar" role="toolbar" aria-label="{% ui "designer_tools" %}">
+    <div class="designer-toolbar" role="toolbar" aria-label="{% ui "designer_tools" %}" data-designer-mobile-palette>
       <button class="design-tool is-active" type="button" data-design-tool="select" title="{% ui "select" %}" aria-label="{% ui "select" %}"></button>
       <button class="design-tool" type="button" data-design-tool="pan" title="{% ui "pan" %}" aria-label="{% ui "pan" %}"></button>
       <button class="design-tool" type="button" data-design-tool="frame" title="{% ui "frame" %}" aria-label="{% ui "frame" %}"></button>
@@ -60,13 +60,13 @@
       </div>
     </div>
 
-    <aside class="designer-inspector" aria-label="{% ui "properties" %}">
+    <aside class="designer-inspector" aria-label="{% ui "properties" %}" data-designer-mobile-drawer>
       <div class="designer-inspector-head">
         <strong>{% ui "properties" %}</strong>
-        <span data-design-selection-count>Canvas</span>
+        <span data-design-selection-count>{% ui "canvas" %}</span>
       </div>
       <div class="designer-context" data-design-inspector>
-        <span>Canvas</span>
+        <span>{% ui "canvas" %}</span>
       </div>
       <details class="designer-layers" data-design-layer-panel>
         <summary>

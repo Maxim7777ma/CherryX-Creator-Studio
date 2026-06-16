@@ -4,14 +4,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Design projects - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <title>{% ui "design_projects_title" %} - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page design-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
-        <h1>Design projects</h1>
+        <h1>{% ui "design_projects_title" %}</h1>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
@@ -19,31 +19,51 @@
       </div>
     </header>
 
-    <main class="video-projects-shell design-projects-shell" data-design-projects data-designer-url="{{ designer_url }}" data-api-url="{{ design_projects_api_url }}">
+    <main class="video-projects-shell design-projects-shell" data-project-list data-design-projects data-designer-url="{{ designer_url }}" data-api-url="{{ design_projects_api_url }}">
       <section class="video-projects-head">
         <div>
-          <span>Design workspace</span>
-          <strong>Projects</strong>
-          <small><b data-project-total>{{ design_projects|length }}</b> in workspace</small>
+          <span>{% ui "design_workspace" %}</span>
+          <strong>{% ui "projects" %}</strong>
+          <small><b data-project-total>{{ project_listing.total|default:design_projects|length }}</b> {% ui "in_workspace" %}</small>
         </div>
-        <button type="button" data-create-project>New design</button>
+        <button type="button" data-create-project>{% ui "new_design" %}</button>
       </section>
+
+      <form class="project-filter-bar" method="get" data-project-filters>
+        <label>
+          <span>{% ui "project_search" %}</span>
+          <input type="search" name="q" value="{{ project_listing.query }}" placeholder="{% ui "project_search_placeholder" %}">
+        </label>
+        <label>
+          <span>{% ui "sort" %}</span>
+          <select name="sort">
+            <option value="updated" {% if project_listing.sort == "updated" %}selected{% endif %}>{% ui "recent" %}</option>
+            <option value="title" {% if project_listing.sort == "title" %}selected{% endif %}>{% ui "title" %}</option>
+            <option value="created" {% if project_listing.sort == "created" %}selected{% endif %}>{% ui "created" %}</option>
+            <option value="oldest" {% if project_listing.sort == "oldest" %}selected{% endif %}>{% ui "oldest" %}</option>
+          </select>
+        </label>
+        <button type="submit">{% ui "apply" %}</button>
+        {% if project_listing.query or project_listing.sort != "updated" %}
+          <a href="{% url 'studio:design_project_list' %}">{% ui "clear_filters" %}</a>
+        {% endif %}
+      </form>
 
       <section class="video-project-bulk" data-project-bulk hidden>
         <div>
-          <span data-selected-count>0 selected</span>
-          <strong>Manage selected designs</strong>
+          <span data-selected-count>0 {% ui "selected" %}</span>
+          <strong>{% ui "manage_selected_projects" %}</strong>
         </div>
         <div>
-          <button type="button" data-clear-selection>Clear</button>
-          <button class="is-danger" type="button" data-delete-selected>Delete selected</button>
+          <button type="button" data-clear-selection>{% ui "clear" %}</button>
+          <button class="is-danger" type="button" data-delete-selected>{% ui "delete_selected" %}</button>
         </div>
       </section>
 
       <section class="video-projects-grid" data-project-grid>
         {% for project in design_projects %}
           <article class="video-project-card design-project-card" data-project-id="{{ project.id }}" data-project-title="{{ project.title }}">
-            <label class="video-project-select" aria-label="Select project">
+            <label class="video-project-select" aria-label="{% ui "select_project" %}">
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
@@ -59,18 +79,18 @@
                   </span>
                 {% endif %}
               </span>
-              <span class="design-project-thumb-badge">{% if not project.is_owner %}Shared &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} frames{% endif %}</span>
+              <span class="design-project-thumb-badge">{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} {% ui "frames" %}{% endif %}</span>
               <b>{{ project.object_count }} layers &middot; {{ project.storage_text }}</b>
             </a>
             <div class="video-project-body">
-              <strong class="video-project-title" data-project-title-text title="Double-click to rename">{{ project.title }}</strong>
+              <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
               <span>{{ project.vector_count }} vectors &middot; {{ project.storage_text }}</span>
             </div>
             <div class="video-project-actions">
-              <a href="{{ designer_url }}?project={{ project.id }}">Open</a>
+              <a href="{{ designer_url }}?project={{ project.id }}">{% ui "open" %}</a>
               {% if project.is_owner %}
-                <button type="button" data-duplicate-project="{{ project.id }}">Duplicate</button>
-                <button type="button" data-delete-project="{{ project.id }}">Delete</button>
+                <button type="button" data-duplicate-project="{{ project.id }}">{% ui "duplicate" %}</button>
+                <button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>
               {% endif %}
             </div>
           </article>
@@ -79,196 +99,39 @@
 
       <article class="video-project-empty design-project-empty" data-project-empty {% if design_projects %}hidden{% endif %}>
         <div>
-          <strong>No design projects yet</strong>
-          <span>Create a canvas, upload images, and your saved design previews will appear here.</span>
+          <strong>{% ui "no_design_projects" %}</strong>
+          <span>{% ui "design_empty_copy" %}</span>
         </div>
-        <button type="button" data-create-project>New design</button>
+        <button type="button" data-create-project>{% ui "new_design" %}</button>
       </article>
+
+      {% if project_listing.has_more or project_listing.page > 1 %}
+        <nav class="project-pagination" data-project-pagination aria-label="{% ui "projects" %}">
+          {% if project_listing.page > 1 %}
+            <a data-project-page="prev" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'-1' }}">{% ui "back" %}</a>
+          {% endif %}
+          <span>{{ project_listing.page }}</span>
+          {% if project_listing.has_more %}
+            <a data-project-page="next" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'1' }}">{% ui "load_more" %}</a>
+          {% endif %}
+        </nav>
+      {% endif %}
     </main>
 
     <div class="project-delete-modal" data-delete-modal hidden>
       <div class="project-delete-backdrop" data-modal-cancel></div>
       <section class="project-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="project-delete-title">
-        <span>Delete confirmation</span>
-        <h2 id="project-delete-title" data-modal-title>Delete this design?</h2>
-        <p data-modal-copy>This will remove the design and its uploaded images from the server.</p>
+        <span>{% ui "delete_confirmation" %}</span>
+        <h2 id="project-delete-title" data-modal-title>{% ui "delete_project_question" %}</h2>
+        <p data-modal-copy>{% ui "delete_uploaded_files_copy" %}</p>
         <div class="project-delete-list" data-modal-list></div>
         <footer>
-          <button type="button" data-modal-cancel>Cancel</button>
-          <button class="is-danger" type="button" data-modal-confirm>Delete</button>
+          <button type="button" data-modal-cancel>{% ui "cancel" %}</button>
+          <button class="is-danger" type="button" data-modal-confirm>{% ui "delete" %}</button>
         </footer>
       </section>
     </div>
-
-    <script>
-      (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          switcher.addEventListener("click", (event) => event.stopPropagation());
-          button.addEventListener("click", (event) => {
-            event.stopPropagation();
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-          });
-          document.addEventListener("click", () => {
-            switcher.classList.remove("is-open");
-            button.setAttribute("aria-expanded", "false");
-          });
-        });
-
-        const root = document.querySelector("[data-design-projects]");
-        if (!root) return;
-        const apiUrl = root.dataset.apiUrl;
-        const designerUrl = root.dataset.designerUrl;
-        const bulkBar = root.querySelector("[data-project-bulk]");
-        const selectedCount = root.querySelector("[data-selected-count]");
-        const totalCount = root.querySelector("[data-project-total]");
-        const grid = root.querySelector("[data-project-grid]");
-        const emptyState = root.querySelector("[data-project-empty]");
-        const modal = document.querySelector("[data-delete-modal]");
-        const modalTitle = modal?.querySelector("[data-modal-title]");
-        const modalCopy = modal?.querySelector("[data-modal-copy]");
-        const modalList = modal?.querySelector("[data-modal-list]");
-        const modalConfirm = modal?.querySelector("[data-modal-confirm]");
-        const modalCancel = modal?.querySelectorAll("[data-modal-cancel]") || [];
-        let pendingDelete = null;
-        const csrf = (document.cookie.match(/(?:^|; )csrftoken=([^;]+)/) || [])[1] || "";
-        const requestJson = async (url, options = {}) => {
-          const response = await fetch(url, {
-            ...options,
-            headers: {"Accept": "application/json", ...(options.body ? {"Content-Type": "application/json", "X-CSRFToken": decodeURIComponent(csrf)} : {}), ...(options.headers || {})},
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json();
-        };
-        const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-        const cards = () => [...root.querySelectorAll("[data-project-id]")];
-        const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
-        const projectInfo = (card) => ({id: Number(card.dataset.projectId), title: card.dataset.projectTitle || "Untitled design"});
-        const updateEmptyState = () => {
-          const count = cards().length;
-          if (totalCount) totalCount.textContent = String(count);
-          if (emptyState) emptyState.hidden = count > 0;
-          if (grid) grid.hidden = count === 0;
-        };
-        const updateBulkBar = () => {
-          const count = selectedCards().length;
-          if (bulkBar) bulkBar.hidden = count === 0;
-          if (selectedCount) selectedCount.textContent = `${count} selected`;
-          cards().forEach((card) => card.classList.toggle("is-selected", Boolean(card.querySelector("[data-project-select]")?.checked)));
-        };
-        const closeModal = () => {
-          if (!modal || modalConfirm?.disabled) return;
-          modal.hidden = true;
-          pendingDelete = null;
-        };
-        const openModal = (items) => {
-          if (!modal || !modalTitle || !modalCopy || !modalList) return;
-          pendingDelete = items;
-          modalTitle.textContent = items.length === 1 ? "Delete this design?" : `Delete ${items.length} designs?`;
-          modalCopy.textContent = "Selected designs and uploaded images will be removed from the server.";
-          modalList.innerHTML = items.slice(0, 5).map((item) => `<span>${escapeHtml(item.title)}</span>`).join("");
-          if (items.length > 5) modalList.insertAdjacentHTML("beforeend", `<small>+${items.length - 5} more</small>`);
-          modal.hidden = false;
-          modalConfirm?.focus();
-        };
-        const removeDeletedCards = (ids) => {
-          ids.forEach((id) => {
-            const card = root.querySelector(`[data-project-id="${id}"]`);
-            if (!card) return;
-            card.classList.add("is-removing");
-            window.setTimeout(() => {
-              card.remove();
-              updateBulkBar();
-              updateEmptyState();
-            }, 180);
-          });
-        };
-        const startRename = (titleNode) => {
-          const card = titleNode.closest("[data-project-id]");
-          if (!card) return;
-          const original = titleNode.textContent.trim();
-          const input = document.createElement("input");
-          input.className = "video-project-title-input";
-          input.value = original;
-          input.maxLength = 180;
-          titleNode.replaceWith(input);
-          input.focus();
-          input.select();
-          let done = false;
-          const finish = async (save) => {
-            if (done) return;
-            done = true;
-            const next = input.value.trim() || original;
-            const restored = document.createElement("strong");
-            restored.className = "video-project-title";
-            restored.dataset.projectTitleText = "";
-            restored.title = "Double-click to rename";
-            restored.textContent = original;
-            input.replaceWith(restored);
-            restored.addEventListener("dblclick", () => startRename(restored));
-            if (!save || next === original) return;
-            const data = await requestJson(`${apiUrl}${card.dataset.projectId}/rename/`, {method: "POST", body: JSON.stringify({title: next})});
-            restored.textContent = data.project.title || next;
-            card.dataset.projectTitle = restored.textContent;
-          };
-          input.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") finish(true);
-            if (event.key === "Escape") finish(false);
-          });
-          input.addEventListener("blur", () => finish(true));
-        };
-
-        root.querySelectorAll("[data-create-project]").forEach((button) => button.addEventListener("click", async () => {
-          const data = await requestJson(`${apiUrl}create/`, {method: "POST", body: JSON.stringify({title: "New design", state: {version: 2, objects: [], vectors: []}})});
-          window.location.href = `${designerUrl}?project=${data.project.id}`;
-        }));
-        root.querySelectorAll("[data-project-select]").forEach((input) => input.addEventListener("change", updateBulkBar));
-        root.querySelectorAll("[data-project-title-text]").forEach((titleNode) => titleNode.addEventListener("dblclick", () => startRename(titleNode)));
-        root.querySelector("[data-clear-selection]")?.addEventListener("click", () => {
-          cards().forEach((card) => {
-            const input = card.querySelector("[data-project-select]");
-            if (input) input.checked = false;
-          });
-          updateBulkBar();
-        });
-        root.querySelector("[data-delete-selected]")?.addEventListener("click", () => {
-          const items = selectedCards().map(projectInfo);
-          if (items.length) openModal(items);
-        });
-        root.querySelectorAll("[data-delete-project]").forEach((button) => button.addEventListener("click", () => {
-          const card = button.closest("[data-project-id]");
-          if (card) openModal([projectInfo(card)]);
-        }));
-        root.querySelectorAll("[data-duplicate-project]").forEach((button) => button.addEventListener("click", async () => {
-          const data = await requestJson(`${apiUrl}${button.dataset.duplicateProject}/duplicate/`, {method: "POST", body: "{}"});
-          window.location.href = `${designerUrl}?project=${data.project.id}`;
-        }));
-        modalCancel.forEach((button) => button.addEventListener("click", closeModal));
-        modalConfirm?.addEventListener("click", async () => {
-          if (!pendingDelete?.length || !modalConfirm) return;
-          const items = pendingDelete;
-          modalConfirm.disabled = true;
-          modalConfirm.textContent = "Deleting...";
-          try {
-            const data = items.length === 1
-              ? await requestJson(`${apiUrl}${items[0].id}/delete/`, {method: "POST", body: "{}"})
-              : await requestJson(`${apiUrl}delete/`, {method: "POST", body: JSON.stringify({ids: items.map((item) => item.id)})});
-            modal.hidden = true;
-            pendingDelete = null;
-            removeDeletedCards(data.deleted_ids || items.map((item) => item.id));
-          } finally {
-            modalConfirm.disabled = false;
-            modalConfirm.textContent = "Delete";
-          }
-        });
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && modal && !modal.hidden) closeModal();
-        });
-        updateBulkBar();
-        updateEmptyState();
-      })();
-    </script>
+    <script defer src="{% static 'studio/project_lists.js' %}"></script>
   </body>
 </html>
+

@@ -1,0 +1,88 @@
+{% load ui_i18n %}
+<section class="detail-panel" data-section="{{ section }}">
+  <div class="section-title">
+    <h2>{% ui "tasks" %}</h2>
+    <span>{{ total_jobs }}</span>
+  </div>
+  <div class="stats-list">
+    {% for job in jobs %}
+      <article class="stats-row stats-job-row is-{{ job.status }}">
+        <span>
+          <b>{{ job.title }}</b>
+          {% if job.ai_summary %}
+            <div class="ai-meta-row is-compact">
+              {% for meta in job.ai_summary %}
+                <span class="ai-meta-chip is-{{ meta.status|default:'unknown' }}" title="{{ meta.reason }}">
+                  <b>{{ meta.label }}</b>
+                  <small>{{ meta.detail }}</small>
+                </span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          <small>{{ job.message }}{% if job.error %} · {{ job.error }}{% endif %}</small>
+        </span>
+        <strong>
+          <span class="job-status">{{ job.status_label }}</span>
+          <small>{{ job.progress }}%</small>
+        </strong>
+        <div class="stats-actions">
+          <a href="{{ job.detail_url }}">{% ui "open" %}</a>
+          {% if job.status == "queued" %}
+            <form method="post" action="{{ job.cancel_url }}">
+              {% csrf_token %}
+              <button type="submit">{% ui "cancel" %}</button>
+            </form>
+          {% endif %}
+          {% if job.status == "completed" and job.outputs %}
+            <a href="{{ job.download_all_url }}">{% ui "download_all" %}</a>
+          {% endif %}
+          {% if job.status == "completed" and job.repeatable %}
+            <form method="post" action="{{ job.repeat_url }}">
+              {% csrf_token %}
+              <button type="submit">{% ui "repeat" %}</button>
+            </form>
+          {% endif %}
+          {% if job.status == "failed" or job.status == "cancelled" %}
+            {% if job.repeatable %}
+              <form method="post" action="{{ job.repeat_url }}">
+                {% csrf_token %}
+                <button type="submit">{% ui "retry" %}</button>
+              </form>
+            {% endif %}
+            <form method="post" action="{{ job.delete_url }}">
+              {% csrf_token %}
+              <button class="is-danger" type="submit">{% ui "delete" %}</button>
+            </form>
+          {% elif job.status == "completed" %}
+            <form method="post" action="{{ job.delete_url }}">
+              {% csrf_token %}
+              <button class="is-danger" type="submit">{% ui "delete" %}</button>
+            </form>
+          {% endif %}
+        </div>
+      </article>
+    {% empty %}
+      <div class="empty-jobs">{% ui "empty_tasks" %}</div>
+    {% endfor %}
+  </div>
+  {% if pages > 1 %}
+    <div class="stats-files-footer">
+      <div class="stats-files-meta">{% ui "page" %} {{ page }}/{{ pages }}</div>
+      <nav class="stats-files-pagination stats-task-pagination" aria-label="Pagination">
+        {% if page > 1 %}
+          <a href="?page={{ page|add:-1 }}" data-page="{{ page|add:-1 }}" class="pagination-button pagination-previous" aria-label="{% ui "previous_page" %}"></a>
+        {% endif %}
+        {% for p in page_range %}
+          {% if p %}
+            <a href="?page={{ p }}" data-page="{{ p }}" class="pagination-button{% if p == page %} is-active{% endif %}">{{ p }}</a>
+          {% else %}
+            <span class="page-ellipsis">...</span>
+          {% endif %}
+        {% endfor %}
+        {% if page < pages %}
+          <a href="?page={{ page|add:1 }}" data-page="{{ page|add:1 }}" class="pagination-button pagination-next" aria-label="{% ui "next_page" %}"></a>
+        {% endif %}
+      </nav>
+    </div>
+  {% endif %}
+</section>

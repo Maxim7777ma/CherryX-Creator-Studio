@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from base64 import b64decode
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlencode
 import json
+import html
 import mimetypes
 import re
 import secrets
 import shutil
+import statistics
 import subprocess
 import threading
 import time
@@ -17,7 +20,9 @@ import uuid
 
 from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
+from django.core.validators import validate_email
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import redirect, render
@@ -29,6 +34,8 @@ from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from PIL import Image, ImageOps
+from docx import Document
+from pypdf import PdfReader
 
 from billing.plans import PLANS, get_plan
 from billing.services import active_access_until, prorated_due_cents, transfer_guest_workspace, user_has_active_access
@@ -36,8 +43,9 @@ from src.config import get_settings
 from src.image_tools import clean_base_name, human_size
 from src.job_service import job_service as actions
 from src.video_tools import ffmpeg_path, inspect_video
+from src.youtube_tools import SubtitleUnavailableError, normalize_subtitle_language, transcribe_subtitle_cues
 from .forms import AccountSettingsForm, EmailLoginForm, RegisterForm
-from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, translate
+from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, repair_mojibake, translate
 from .models import AccountProfile, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 
 
@@ -58,6 +66,34 @@ RESUME_FIELDS = [
     "achievements",
     "additional",
 ]
+ORIGINALITY_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+ORIGINALITY_MAX_ANALYSIS_CHARS = 120_000
+ORIGINALITY_MODES = {
+    "local": {
+        "label": "Local",
+        "price": 5,
+        "max_chars": 20_000,
+        "max_web_queries": 0,
+        "summary": "Fast local AI risk, repetition, sources and structure scan.",
+    },
+    "web": {
+        "label": "Web",
+        "price": 25,
+        "max_chars": 45_000,
+        "max_web_queries": 5,
+        "summary": "Prepared for web originality search with selected quote checks.",
+    },
+    "deep": {
+        "label": "Deep Web",
+        "price": 60,
+        "max_chars": 120_000,
+        "max_web_queries": 20,
+        "summary": "Prepared for deep web search, source matching and citation review.",
+    },
+}
+ORIGINALITY_VISIBLE_SEGMENTS = 240
+ORIGINALITY_WORD_RE = re.compile(r"[\wА-Яа-яЁёІіЇїЄєҐґ’'-]+", re.UNICODE)
+ORIGINALITY_SENTENCE_RE = re.compile(r"[^.!?…\n]+(?:[.!?…]+|$)", re.UNICODE)
 
 
 @require_GET
@@ -65,6 +101,20 @@ def landing(request: HttpRequest):
     if request.user.is_authenticated:
         return redirect("studio:index")
     return render(request, "studio/landing.html")
+
+
+@require_GET
+def favicon(request: HttpRequest) -> HttpResponse:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+        '<rect width="64" height="64" rx="16" fill="#0f172a"/>'
+        '<path d="M18 38c0 5 4 9 10 9 9 0 18-8 18-22V15h-8v10c0 7-4 14-10 14-2 0-3-1-3-3 0-3 3-5 8-5h5v-7h-6c-9 0-14 6-14 14z" fill="#ff4d6d"/>'
+        '<path d="M40 15h10v10H40z" fill="#22c55e"/>'
+        "</svg>"
+    )
+    response = HttpResponse(svg, content_type="image/svg+xml")
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 @require_http_methods(["GET", "POST"])
@@ -185,6 +235,7 @@ def index(request: HttpRequest):
     native_status = actions.native_status()
     has_access = user_has_active_access(request.user)
     language = getattr(request, "interface_language", "en")
+    cherryx_seed = request.user.id if request.user.is_authenticated else len(_guest_key(request))
     return render(
         request,
         "studio/index.html",
@@ -193,7 +244,7 @@ def index(request: HttpRequest):
             "video_formats": actions.VIDEO_FORMAT_CHOICES,
             "image_modes": _localized_image_modes(language),
             "youtube_modes": _localized_youtube_modes(language),
-            "subtitle_styles": actions.SUBTITLE_STYLE_CHOICES,
+            "subtitle_styles": _localized_subtitle_styles(request),
             "subtitle_languages": _localized_subtitle_languages(language),
             "resume_templates": _localized_resume_templates(language),
             "max_image_mb": settings.max_image_mb,
@@ -213,14 +264,39 @@ def index(request: HttpRequest):
             "settings_url": reverse("studio:account_settings"),
             "designer_url": reverse("studio:designer"),
             "design_projects_url": reverse("studio:design_project_list"),
+            "cherryx_pay_url": reverse("studio:cherryx_pay"),
             "video_editor_url": reverse("studio:video_project_list"),
             "music_projects_url": reverse("studio:music_project_list"),
+            "cherryx_balance": 1200 + (cherryx_seed % 7) * 150,
             "avatar_url": _avatar_url(request),
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "subscription_meter": _subscription_meter(request),
             "subscription_panel": _subscription_panel(request, account_stats, language),
+            "app_messages": app_messages(language),
+        },
+    )
+
+
+@require_GET
+def subtitle_style_detail(request: HttpRequest, style: str):
+    language = getattr(request, "interface_language", "en")
+    detail = _subtitle_style_detail(style, language)
+    if not detail:
+        raise Http404("Subtitle style not found")
+    back_url = request.GET.get("next") or f"{reverse('studio:index')}#tab-subtitles"
+    if not url_has_allowed_host_and_scheme(back_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        back_url = f"{reverse('studio:index')}#tab-subtitles"
+    return render(
+        request,
+        "studio/subtitle_style_detail.html",
+        {
+            "style_detail": detail,
+            "back_url": back_url,
+            "accent_color": _accent_color(request),
+            "ui_accent_color": _ui_accent_color(request),
+            "theme_mode": _theme_mode(request),
             "app_messages": app_messages(language),
         },
     )
@@ -248,6 +324,7 @@ def designer_mode(request: HttpRequest):
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "app_messages": app_messages(language),
+            "subtitle_languages": _localized_subtitle_languages(language),
         },
     )
 
@@ -256,14 +333,21 @@ def designer_mode(request: HttpRequest):
 @ensure_csrf_cookie
 def design_project_list(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    queryset = _design_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_DESIGN, owner_id, guest_key)
-    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
+    listing = _project_listing_payload(
+        request,
+        _design_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_DESIGN,
+        owner_id,
+        guest_key,
+        lambda project: _design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+        per_page_default=120,
+    )
     return render(
         request,
         "studio/design_projects.html",
         {
-            "design_projects": projects,
+            "design_projects": listing["projects"],
+            "project_listing": listing,
             "designer_url": reverse("studio:designer"),
             "design_projects_api_url": reverse("studio:design_projects"),
             "accent_color": _accent_color(request),
@@ -276,12 +360,38 @@ def design_project_list(request: HttpRequest):
 
 
 @require_GET
+def cherryx_pay(request: HttpRequest):
+    seed = request.user.id if request.user.is_authenticated else len(_guest_key(request))
+    demo_balance = 1200 + (seed % 7) * 150
+    return render(
+        request,
+        "studio/cherryx_pay.html",
+        {
+            "balance": demo_balance,
+            "usd_rate": 100,
+            "display_name": _display_name(request),
+            "checkout_url": _checkout_url(request),
+            "pricing_url": reverse("billing:pricing"),
+            "accent_color": _accent_color(request),
+            "ui_accent_color": _ui_accent_color(request),
+            "theme_mode": _theme_mode(request),
+            "app_messages": app_messages(getattr(request, "interface_language", "en")),
+        },
+    )
+
+
+@require_GET
 def design_projects(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    queryset = _design_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_DESIGN, owner_id, guest_key)
-    projects = [_design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
-    return JsonResponse({"projects": projects})
+    listing = _project_listing_payload(
+        request,
+        _design_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_DESIGN,
+        owner_id,
+        guest_key,
+        lambda project: _design_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+    )
+    return JsonResponse(listing)
 
 
 @require_POST
@@ -631,6 +741,7 @@ def video_editor(request: HttpRequest):
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "app_messages": app_messages(language),
+            "subtitle_languages": _localized_subtitle_languages(language),
         },
     )
 
@@ -666,14 +777,21 @@ def music_editor(request: HttpRequest):
 @require_GET
 def music_project_list(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    queryset = _music_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_MUSIC, owner_id, guest_key)
-    projects = [_music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
+    listing = _project_listing_payload(
+        request,
+        _music_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_MUSIC,
+        owner_id,
+        guest_key,
+        lambda project: _music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+        per_page_default=120,
+    )
     return render(
         request,
         "studio/music_projects.html",
         {
-            "music_projects": projects,
+            "music_projects": listing["projects"],
+            "project_listing": listing,
             "music_editor_url": reverse("studio:music_editor"),
             "music_messages_json": json.dumps(music_messages(getattr(request, "interface_language", "en")), ensure_ascii=False),
             "music_projects_api_url": reverse("studio:music_projects"),
@@ -690,14 +808,15 @@ def music_project_list(request: HttpRequest):
 def music_projects(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
 
-    queryset = _music_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_MUSIC, owner_id, guest_key)
-    projects = [
-        _music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key)
-        for project in project_rows
-    ]
-
-    return JsonResponse({"projects": projects})
+    listing = _project_listing_payload(
+        request,
+        _music_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_MUSIC,
+        owner_id,
+        guest_key,
+        lambda project: _music_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+    )
+    return JsonResponse(listing)
 
 
 @require_POST
@@ -973,14 +1092,21 @@ def delete_music_project_asset(request: HttpRequest, project_id: int, asset_id: 
 @ensure_csrf_cookie
 def video_project_list(request: HttpRequest):
     owner_id, guest_key = _workspace_identity(request)
-    queryset = _video_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:120]), WorkspaceShare.RESOURCE_VIDEO, owner_id, guest_key)
-    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
+    listing = _project_listing_payload(
+        request,
+        _video_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_VIDEO,
+        owner_id,
+        guest_key,
+        lambda project: _video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+        per_page_default=120,
+    )
     return render(
         request,
         "studio/video_projects.html",
         {
-            "video_projects": projects,
+            "video_projects": listing["projects"],
+            "project_listing": listing,
             "video_editor_url": reverse("studio:video_editor"),
             "video_projects_api_url": reverse("studio:video_projects"),
             "accent_color": _accent_color(request),
@@ -994,10 +1120,15 @@ def video_project_list(request: HttpRequest):
 @require_GET
 def video_projects(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
-    queryset = _video_project_queryset(owner_id, guest_key).prefetch_related("assets")
-    project_rows = _attach_access_roles(list(queryset[:80]), WorkspaceShare.RESOURCE_VIDEO, owner_id, guest_key)
-    projects = [_video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key) for project in project_rows]
-    return JsonResponse({"projects": projects})
+    listing = _project_listing_payload(
+        request,
+        _video_project_queryset(owner_id, guest_key).prefetch_related("assets"),
+        WorkspaceShare.RESOURCE_VIDEO,
+        owner_id,
+        guest_key,
+        lambda project: _video_project_payload(project, include_state=False, owner_id=owner_id, guest_key=guest_key),
+    )
+    return JsonResponse(listing)
 
 
 @require_POST
@@ -1005,7 +1136,7 @@ def create_video_project(request: HttpRequest) -> JsonResponse:
     owner_id, guest_key = _workspace_identity(request)
     data = _json_body(request)
     state = data.get("state") if isinstance(data.get("state"), dict) else {}
-    title = _clean_project_title(str(data.get("title") or state.get("title") or "Новый проект"))
+    title = _clean_project_title(str(data.get("title") or state.get("title") or "New project"))
     project = VideoEditorProject.objects.create(
         owner=request.user if request.user.is_authenticated else None,
         guest_key="" if owner_id else guest_key,
@@ -1102,7 +1233,8 @@ def start_video_project_export(request: HttpRequest, project_id: int) -> JsonRes
             "preset": preset,
             "created_at": time.time(),
         }
-    _video_export_executor.submit(_run_video_project_export, job_id, project.id, quality, output)
+    if not settings.persistent_job_queue:
+        _video_export_executor.submit(_run_video_project_export, job_id, project.id, quality, output)
     return JsonResponse({"job": _video_export_payload(request, project, job_id)})
 
 
@@ -1192,28 +1324,29 @@ def export_video_project_cover(request: HttpRequest, project_id: int) -> JsonRes
         job_id=job_id,
         kind="video_cover",
         title=f"Cover {project.title}",
-        status="running",
-        progress=20,
-        message="Rendering cover",
+        status="queued",
+        progress=2,
+        message="Queued",
         params_json=json.dumps({"project_id": project.id, "path": str(output), "time": time_seconds}, ensure_ascii=False),
     )
-    try:
-        _render_video_project_cover(project, output, time_seconds)
-        JobOutputRecord.objects.create(job=job_record, label="Cover frame", path=str(output), media_type="image/jpeg", size=output.stat().st_size)
-        _refresh_job_output_summary(job_record)
-        job_record.status = "completed"
-        job_record.progress = 100
-        job_record.message = "Ready"
-        job_record.save(update_fields=["status", "progress", "message", "output_count", "total_output_size", "primary_output_type", "updated_at"])
-        JobEventRecord.objects.create(job=job_record, status="completed", progress=100, message="Ready")
-    except Exception as exc:
-        job_record.status = "failed"
-        job_record.progress = 100
-        job_record.error = str(exc)
-        job_record.message = "Cover failed"
-        job_record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
-        JobEventRecord.objects.create(job=job_record, status="failed", progress=100, message=str(exc))
-    return JsonResponse({"job": _video_export_record_payload(request, project, job_record)})
+    JobEventRecord.objects.create(job=job_record, status="queued", progress=2, message="Queued")
+    with _video_export_lock:
+        _video_export_jobs[job_id] = {
+            "id": job_id,
+            "project_id": project.id,
+            "owner_id": owner_id,
+            "guest_key": guest_key,
+            "kind": "video_cover",
+            "status": "queued",
+            "progress": 2,
+            "message": "Queued",
+            "error": "",
+            "path": str(output),
+            "created_at": time.time(),
+        }
+    if not settings.persistent_job_queue:
+        _video_export_executor.submit(_run_video_project_cover, job_id, project.id, output, time_seconds)
+    return JsonResponse({"job": _video_export_payload(request, project, job_id)})
 
 
 @require_POST
@@ -1231,6 +1364,82 @@ def import_video_project_subtitles(request: HttpRequest, project_id: int) -> Jso
     text = _decode_subtitle_bytes(raw)
     cues = _parse_subtitle_cues(text, upload.name or "")
     return JsonResponse({"cues": cues, "count": len(cues)})
+
+
+@require_POST
+def auto_video_project_subtitles(request: HttpRequest, project_id: int) -> JsonResponse:
+    owner_id, guest_key = _workspace_identity(request)
+    project = _video_project_queryset(owner_id, guest_key).filter(id=project_id).first()
+    if not project:
+        raise Http404("Project not found")
+    if not _resource_can_edit(WorkspaceShare.RESOURCE_VIDEO, project, owner_id, guest_key):
+        raise Http404("Project not found")
+
+    data = _json_body(request)
+    try:
+        asset_id = int(data.get("asset_id") or 0)
+    except (TypeError, ValueError):
+        asset_id = 0
+    asset_query = VideoEditorAsset.objects.filter(project=project, kind__in=["audio", "video"])
+    asset = asset_query.filter(id=asset_id).first() if asset_id else asset_query.first()
+    if not asset:
+        return JsonResponse({"error": "Select a video or audio clip first"}, status=400)
+
+    source = Path(asset.file_path)
+    if not source.exists() or not source.is_file():
+        return JsonResponse({"error": "Source media file is missing"}, status=404)
+
+    allowed_languages = {key for key, _label in actions.SUBTITLE_LANGUAGE_CHOICES if key != "auto"}
+    language = normalize_subtitle_language(str(data.get("language") or "auto"))
+    language = language if language in allowed_languages else None
+    timeline_start = _subtitle_seconds(data.get("timeline_start"))
+    source_start = _subtitle_seconds(data.get("source_start"))
+    source_end = _subtitle_seconds(data.get("source_end"))
+    clip_duration = _subtitle_seconds(data.get("clip_duration"))
+    if source_end <= source_start and clip_duration > 0:
+        source_end = source_start + clip_duration
+    clip_end = timeline_start + max(0.0, source_end - source_start) if source_end > source_start else None
+
+    job_id = uuid.uuid4().hex[:16]
+    params = {
+        "project_id": project.id,
+        "asset_id": asset.id,
+        "asset_name": asset.original_name,
+        "language": language or "auto",
+        "timeline_start": timeline_start,
+        "source_start": source_start,
+        "source_end": source_end,
+        "clip_duration": clip_duration,
+        "clip_end": clip_end,
+    }
+    job_record = JobRecord.objects.create(
+        owner=project.owner,
+        guest_key=project.guest_key,
+        job_id=job_id,
+        kind="video_subtitles",
+        title=f"Auto subtitles {project.title}",
+        status="queued",
+        progress=2,
+        message="Queued",
+        params_json=json.dumps(params, ensure_ascii=False),
+    )
+    JobEventRecord.objects.create(job=job_record, status="queued", progress=2, message="Queued")
+    with _video_export_lock:
+        _video_export_jobs[job_id] = {
+            "id": job_id,
+            "project_id": project.id,
+            "owner_id": owner_id,
+            "guest_key": guest_key,
+            "kind": "video_subtitles",
+            "status": "queued",
+            "progress": 2,
+            "message": "Queued",
+            "error": "",
+            "created_at": time.time(),
+        }
+    if not settings.persistent_job_queue:
+        _video_export_executor.submit(_run_video_project_subtitles, job_id, project.id, asset.id, params)
+    return JsonResponse({"job": _video_export_payload(request, project, job_id)})
 
 
 @require_GET
@@ -1464,26 +1673,143 @@ def delete_video_project_asset(request: HttpRequest, project_id: int, asset_id: 
     project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return JsonResponse({"ok": True, "project": _video_project_payload(project, owner_id=owner_id, guest_key=guest_key)})
 
+def _dashboard_output_queryset(owner_id: int | None, guest_key: str, query: str = "", file_type: str = ""):
+    queryset = JobOutputRecord.objects.select_related("job").only(
+        "id",
+        "job_id",
+        "label",
+        "path",
+        "media_type",
+        "size",
+        "created_at",
+        "job__job_id",
+        "job__kind",
+        "job__title",
+        "job__params_json",
+        "job__created_at",
+    )
+    if owner_id is not None:
+        queryset = queryset.filter(job__owner_id=owner_id)
+    else:
+        queryset = queryset.filter(job__owner__isnull=True, job__guest_key=guest_key)
+    if query:
+        queryset = queryset.filter(Q(label__icontains=query) | Q(path__icontains=query) | Q(job__title__icontains=query))
+    if file_type in {"image", "video", "pdf", "text", "audio", "other"}:
+        image_q = Q(media_type__istartswith="image/")
+        video_q = Q(media_type__istartswith="video/")
+        pdf_q = Q(media_type="application/pdf") | Q(path__iendswith=".pdf")
+        text_q = Q(media_type__istartswith="text/")
+        for extension in (".txt", ".ass", ".srt", ".json", ".csv", ".rtf"):
+            text_q |= Q(path__iendswith=extension)
+        audio_q = Q(media_type__istartswith="audio/")
+        if file_type == "image":
+            queryset = queryset.filter(image_q)
+        elif file_type == "video":
+            queryset = queryset.filter(video_q)
+        elif file_type == "pdf":
+            queryset = queryset.filter(pdf_q)
+        elif file_type == "text":
+            queryset = queryset.filter(text_q)
+        elif file_type == "audio":
+            queryset = queryset.filter(audio_q)
+        else:
+            queryset = queryset.exclude(image_q | video_q | pdf_q | text_q | audio_q)
+    return queryset.order_by("-job__created_at", "-created_at", "-id")
+
+
+def _dashboard_output_indexes(outputs: list[JobOutputRecord]) -> dict[int, int]:
+    job_ids = [output.job_id for output in outputs]
+    if not job_ids:
+        return {}
+    indexes: dict[int, int] = {}
+    current_job_id = None
+    current_index = -1
+    queryset = JobOutputRecord.objects.filter(job_id__in=job_ids).only("id", "job_id").order_by("job_id", "id")
+    for output in queryset:
+        if output.job_id != current_job_id:
+            current_job_id = output.job_id
+            current_index = 0
+        else:
+            current_index += 1
+        indexes[output.id] = current_index
+    return indexes
+
+
+def _dashboard_output_payloads(outputs: list[JobOutputRecord]) -> list[dict[str, object]]:
+    indexes = _dashboard_output_indexes(outputs)
+    cache = _job_url_cache([output.job.job_id for output in outputs])
+    payloads: list[dict[str, object]] = []
+    for output in outputs:
+        job = output.job
+        job_id = job.job_id
+        index = indexes.get(output.id, 0)
+        name = Path(output.path).name or output.label
+        item: dict[str, object] = {
+            "index": index,
+            "label": output.label,
+            "name": name,
+            "media_type": output.media_type,
+            "size": output.size,
+            "size_text": human_size(output.size or _path_size(output.path)),
+            "job_title": job.title,
+            "job_id": job_id,
+            "detail_url": reverse("studio:job_detail", args=[job_id]),
+            "url": reverse("studio:download_output", args=[job_id, index]),
+            "preview_url": reverse("studio:preview_output", args=[job_id, index]),
+        }
+        item["preview_kind"] = _preview_kind(item)
+        job_payload = {"id": job_id, "kind": job.kind}
+        item["can_edit_design"] = _output_can_edit_design(item, job_payload)
+        cached = cache.get(job_id, {})
+        output_key = str(Path(output.path).resolve())
+        if item["can_edit_design"]:
+            item["edit_design_url"] = reverse("studio:edit_output_design", args=[job_id, index])
+            design_map = cached.get("design_projects") if isinstance(cached.get("design_projects"), dict) else {}
+            design_project_id = design_map.get(output_key) if output_key else None
+            item["design_project_url"] = f"{reverse('studio:designer')}?{urlencode({'project': design_project_id})}" if design_project_id else ""
+        item["can_edit_video"] = _output_can_edit_video(item, job_payload)
+        if item["can_edit_video"]:
+            item["edit_video_url"] = reverse("studio:edit_output_video", args=[job_id, index])
+            video_map = cached.get("video_projects") if isinstance(cached.get("video_projects"), dict) else {}
+            video_project_id = video_map.get(output_key) if output_key else None
+            item["video_project_url"] = f"{reverse('studio:video_editor')}?{urlencode({'project': video_project_id})}" if video_project_id else ""
+        payloads.append(item)
+    return payloads
+
+
+def _dashboard_page_range(page: int, pages: int) -> list[int | None]:
+    if pages > 9:
+        if page <= 5:
+            return list(range(1, 7)) + [None, pages]
+        if page >= pages - 4:
+            return [1, None] + list(range(pages - 5, pages + 1))
+        return [1, None] + list(range(page - 2, page + 3)) + [None, pages]
+    return list(range(1, pages + 1))
+
+
+def _dashboard_job_queryset(owner_id: int | None, guest_key: str, section: str):
+    queryset = _owned_job_records(owner_id, guest_key).prefetch_related("outputs")
+    if section == "active":
+        queryset = queryset.filter(status__in=["queued", "running"])
+    elif section == "completed":
+        queryset = queryset.filter(status="completed")
+    return queryset.order_by("-created_at", "-id")
+
+
+def _dashboard_job_payloads(records: list[JobRecord], request: HttpRequest) -> list[dict]:
+    language = getattr(request, "interface_language", "en")
+    jobs = _attach_output_urls_many([actions._serialize_job_record(record) for record in records])
+    return [_localize_job(job, language) for job in jobs]
+
 
 @require_GET
 def dashboard_detail(request: HttpRequest, section: str):
     owner_id, guest_key = _workspace_identity(request)
-    jobs = _attach_output_urls_many(actions.get_recent_jobs(200, owner_id, guest_key))
     stats = actions.get_account_stats(owner_id, guest_key)
     stats.update(_storage_quota(request, stats))
     normalized = section if section in {"all", "active", "completed", "files", "storage"} else "all"
-    if normalized == "active":
-        visible_jobs = [job for job in jobs if job.get("status") in {"queued", "running"}]
-    elif normalized == "completed":
-        visible_jobs = [job for job in jobs if job.get("status") == "completed"]
-    else:
-        visible_jobs = jobs
-
-    outputs = [
-        dict(output, job_title=job.get("title"), job_id=job.get("id"), detail_url=job.get("detail_url"))
-        for job in jobs
-        for output in job.get("outputs", [])
-    ]
+    visible_jobs: list[dict] = []
+    total_jobs = 0
 
     query = str(request.GET.get("q") or "").strip()
     file_type = str(request.GET.get("type") or "").strip().lower()
@@ -1492,62 +1818,37 @@ def dashboard_detail(request: HttpRequest, section: str):
     except (TypeError, ValueError):
         page = 1
     page = max(1, page)
-    total_outputs = len(outputs)
+    outputs = []
+    total_outputs = 0
     pages = 1
     page_range = [1]
     per_page = 20
+    has_access = user_has_active_access(request.user)
 
-    if normalized == "files":
-        def _output_score(output: dict) -> int:
-            text = " ".join(
-                str(output.get(key) or "") for key in ("label", "name", "job_title")
-            ).lower()
-            if not query:
-                return 1
-            if query.lower() in text:
-                return 2
-            return 0
-
-        def _output_type(output: dict) -> str:
-            media_type = str(output.get("media_type") or "").lower()
-            if media_type.startswith("image/"):
-                return "image"
-            if media_type.startswith("video/"):
-                return "video"
-            if media_type == "application/pdf":
-                return "pdf"
-            if media_type.startswith("text/"):
-                return "text"
-            if media_type.startswith("audio/"):
-                return "audio"
-            return "other"
-
-        filtered_outputs = [output for output in outputs if _output_score(output) > 0] if query else outputs
-        if file_type and file_type in {"image", "video", "pdf", "text", "audio", "other"}:
-            filtered_outputs = [output for output in filtered_outputs if _output_type(output) == file_type]
-        total_outputs = len(filtered_outputs)
+    if normalized in {"files", "storage"}:
+        output_queryset = _dashboard_output_queryset(owner_id, guest_key, query, file_type)
+        total_outputs = output_queryset.count()
         pages = max(1, (total_outputs + per_page - 1) // per_page)
         if page > pages:
             page = pages
         start = (page - 1) * per_page
-        outputs = filtered_outputs[start : start + per_page]
+        outputs = _dashboard_output_payloads(list(output_queryset[start : start + per_page]))
 
-        if pages > 9:
-            if page <= 5:
-                page_range = list(range(1, 7)) + [None, pages]
-            elif page >= pages - 4:
-                page_range = [1, None] + list(range(pages - 5, pages + 1))
-            else:
-                page_range = [1, None] + list(range(page - 2, page + 3)) + [None, pages]
-        else:
-            page_range = list(range(1, pages + 1))
+        page_range = _dashboard_page_range(page, pages)
     else:
-        outputs = outputs
-        page_range = [1] if pages == 1 else list(range(1, pages + 1))
+        job_queryset = _dashboard_job_queryset(owner_id, guest_key, normalized)
+        total_jobs = job_queryset.count()
+        pages = max(1, (total_jobs + per_page - 1) // per_page)
+        if page > pages:
+            page = pages
+        start = (page - 1) * per_page
+        visible_jobs = _dashboard_job_payloads(list(job_queryset[start : start + per_page]), request)
+        page_range = _dashboard_page_range(page, pages)
 
     context = {
         "section": normalized,
         "jobs": visible_jobs,
+        "total_jobs": total_jobs,
         "outputs": outputs,
         "total_outputs": total_outputs,
         "page": page,
@@ -1555,7 +1856,8 @@ def dashboard_detail(request: HttpRequest, section: str):
         "page_range": page_range,
         "query": query,
         "file_type": file_type,
-        "show_file_filters": normalized == "files",
+        "show_file_filters": normalized in {"files", "storage"},
+        "has_access": has_access,
         "account_stats": stats,
         "is_guest": not request.user.is_authenticated,
         "checkout_url": _checkout_url(request),
@@ -1569,7 +1871,8 @@ def dashboard_detail(request: HttpRequest, section: str):
     }
 
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
-        html = render_to_string("studio/dashboard_files_section.html", context, request=request)
+        template = "studio/dashboard_files_section.html" if normalized in {"files", "storage"} else "studio/dashboard_tasks_section.html"
+        html = render_to_string(template, context, request=request)
         return JsonResponse({"html": html, "total_outputs": total_outputs, "page": page, "pages": pages, "query": query})
 
     return render(request, "studio/dashboard_detail.html", context)
@@ -1694,6 +1997,63 @@ def start_resume(request: HttpRequest) -> JsonResponse:
         return _error_json(exc)
 
 
+@require_POST
+def start_originality(request: HttpRequest) -> JsonResponse:
+    try:
+        owner_id, guest_key = _workspace_identity(request)
+        language = getattr(request, "interface_language", "en")
+        mode_code = _originality_mode_code(request.POST.get("mode"))
+        mode = ORIGINALITY_MODES[mode_code]
+        text = str(request.POST.get("text", "") or "")
+        upload = request.FILES.get("file")
+        source_name = ""
+        if upload:
+            source_name = upload.name or "document"
+            if int(getattr(upload, "size", 0) or 0) > ORIGINALITY_MAX_UPLOAD_BYTES:
+                raise ValueError(_originality_runtime_text("file_too_large", language))
+            extracted = _extract_originality_upload(upload, language)
+            text = f"{text}\n\n{extracted}" if text.strip() else extracted
+        text = _clean_originality_text(text)
+        if len(text) < 40:
+            raise ValueError(translate("originality_empty", language))
+        max_chars = int(mode["max_chars"])
+        truncated = len(text) > max_chars
+        analysis_text = text[:max_chars]
+        analysis = _analyze_originality_text(analysis_text, language, source_name, truncated)
+        analysis["check"] = _originality_check_metadata(mode_code, analysis_text)
+        record = _create_originality_record(analysis, analysis_text, owner_id, guest_key, language, source_name)
+        return JsonResponse({"analysis": analysis, "job": _attach_output_urls(actions._serialize_job_record(record))})
+    except Exception as exc:
+        return _error_json(exc)
+
+
+@require_POST
+def originality_document_preview(request: HttpRequest) -> JsonResponse:
+    try:
+        language = getattr(request, "interface_language", "en")
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValueError(translate("file_missing", language))
+        if int(getattr(upload, "size", 0) or 0) > ORIGINALITY_MAX_UPLOAD_BYTES:
+            raise ValueError(_originality_runtime_text("file_too_large", language))
+        extracted = _extract_originality_upload(upload, language)
+        text = _clean_originality_text(extracted)
+        preview_text = re.sub(r"\n{3,}", "\n\n", str(extracted or "").strip())
+        words = len(_originality_words(text))
+        return JsonResponse(
+            {
+                "ok": True,
+                "name": upload.name or "document",
+                "size": int(getattr(upload, "size", 0) or 0),
+                "text": (preview_text or text)[:12_000],
+                "truncated": len(preview_text or text) > 12_000,
+                "words": words,
+            }
+        )
+    except Exception as exc:
+        return _error_json(exc)
+
+
 @require_GET
 def job_detail(request: HttpRequest, job_id: str):
     owner_id, guest_key = _workspace_identity(request)
@@ -1701,11 +2061,17 @@ def job_detail(request: HttpRequest, job_id: str):
     if not job:
         raise Http404("Job not found")
     language = getattr(request, "interface_language", "en")
+    prepared_job = _localize_job(_attach_output_urls(job), language)
+    originality_context = _originality_detail_context(request, prepared_job, owner_id, guest_key, language)
+    display_outputs = originality_context.get("display_outputs")
+    if not isinstance(display_outputs, list):
+        display_outputs = prepared_job.get("outputs", [])
     return render(
         request,
         "studio/job_detail.html",
         {
-            "job": _localize_job(_attach_output_urls(job), language),
+            "job": prepared_job,
+            "display_outputs": display_outputs,
             "events": _localize_events(actions.get_job_events(job_id, owner_id, guest_key), language),
             "has_access": user_has_active_access(request.user),
             "active_until": active_access_until(request.user),
@@ -1719,6 +2085,7 @@ def job_detail(request: HttpRequest, job_id: str):
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
+            **originality_context,
         },
     )
 
@@ -1730,6 +2097,64 @@ def job_status(request: HttpRequest, job_id: str) -> JsonResponse:
     if not job:
         raise Http404("Job not found")
     return _job_json(job)
+
+
+@require_POST
+def send_originality_report(request: HttpRequest, job_id: str) -> JsonResponse:
+    try:
+        owner_id, guest_key = _workspace_identity(request)
+        language = getattr(request, "interface_language", "en")
+        record = _job_record_for_workspace(job_id, owner_id, guest_key)
+        if not record or record.kind != "originality":
+            raise Http404("Report not found")
+        email = _clean_email(request.POST.get("email") or (request.user.email if request.user.is_authenticated else ""))
+        try:
+            validate_email(email)
+        except ValidationError as exc:
+            raise ValueError(translate("checkout_email_invalid", language)) from exc
+        output = _originality_html_output(record)
+        if not output:
+            raise ValueError(translate("file_missing", language))
+        analysis = _load_originality_analysis(record)
+        if analysis:
+            _refresh_originality_html_report(record, analysis, language, output)
+        _send_originality_email(request, record, output, email, language)
+        return JsonResponse({"ok": True, "message": translate("originality_email_sent", language)})
+    except Http404:
+        raise
+    except Exception as exc:
+        return _error_json(exc)
+
+
+@require_GET
+def originality_shared_report(request: HttpRequest, token: str):
+    record = _originality_record_by_share_token(token)
+    if not record:
+        raise Http404("Report not found")
+    language = getattr(request, "interface_language", "en")
+    analysis = _load_originality_analysis(record)
+    if analysis:
+        _refresh_originality_html_report(record, analysis, language)
+    job = _attach_output_urls(actions._serialize_job_record(record))
+    html_output = _originality_payload_output(job, "html")
+    return render(
+        request,
+        "studio/originality_shared.html",
+        {
+            "record": record,
+            "job": job,
+            "analysis": analysis,
+            "overall": analysis.get("overall", {}) if isinstance(analysis.get("overall"), dict) else {},
+            "source": analysis.get("source", {}) if isinstance(analysis.get("source"), dict) else {},
+            "metrics": analysis.get("metrics", []) if isinstance(analysis.get("metrics"), list) else [],
+            "check": analysis.get("check", {}) if isinstance(analysis.get("check"), dict) else {},
+            "score_degrees": round(max(0, min(100, int((analysis.get("overall", {}) if isinstance(analysis.get("overall"), dict) else {}).get("score") or 0))) * 3.6, 1),
+            "report_url": html_output.get("preview_url", "") if html_output else "",
+            "accent_color": _accent_color(request),
+            "ui_accent_color": _ui_accent_color(request),
+            "theme_mode": _theme_mode(request),
+        },
+    )
 
 
 @require_POST
@@ -1804,6 +2229,18 @@ def repeat_job(request: HttpRequest, job_id: str) -> JsonResponse:
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
         return _job_json(job)
     return redirect("studio:job_detail", job_id=job["id"])
+
+
+@require_POST
+def cancel_job(request: HttpRequest, job_id: str):
+    try:
+        owner_id, guest_key = _workspace_identity(request)
+        job = actions.cancel_job(job_id, owner_id, guest_key)
+    except Exception as exc:
+        return _error_json(exc)
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return _job_json(job)
+    return redirect("studio:dashboard_detail", section="active")
 
 
 @require_POST
@@ -1921,6 +2358,7 @@ def health(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "status": "ok",
         "native_acceleration": actions.native_status(),
+        "persistent_job_queue": bool(settings.persistent_job_queue),
         "queue": actions.queue_status(owner_id, guest_key),
     })
 
@@ -2087,12 +2525,12 @@ def _share_resource_url(resource_type: str, resource_id: int) -> str:
     return reverse("studio:index")
 
 
-def _share_resource_label(resource_type: str) -> str:
+def _share_resource_label(resource_type: str, language: str | None = None) -> str:
     return {
-        WorkspaceShare.RESOURCE_DESIGN: "Design board",
-        WorkspaceShare.RESOURCE_VIDEO: "Video edit",
-        WorkspaceShare.RESOURCE_MUSIC: "Music edit",
-    }.get(resource_type, "Project")
+        WorkspaceShare.RESOURCE_DESIGN: translate("designer_project", language),
+        WorkspaceShare.RESOURCE_VIDEO: translate("video_editor_nav", language),
+        WorkspaceShare.RESOURCE_MUSIC: translate("music_editor_nav", language),
+    }.get(resource_type, translate("project_invite", language))
 
 
 def _share_resource_preview(resource_type: str, resource) -> str:
@@ -2111,6 +2549,7 @@ def _share_resource_preview(resource_type: str, resource) -> str:
 def _workspace_share_payload(request: HttpRequest, share: WorkspaceShare) -> dict[str, object]:
     expires_delta = share.expires_at - timezone.now()
     days_left = max(0, expires_delta.days + (1 if expires_delta.seconds else 0))
+    language = getattr(request, "interface_language", "en")
     return {
         "id": share.id,
         "resource_type": share.resource_type,
@@ -2120,13 +2559,14 @@ def _workspace_share_payload(request: HttpRequest, share: WorkspaceShare) -> dic
         "status": share.status,
         "invite_url": request.build_absolute_uri(reverse("studio:workspace_invite", args=[share.token])),
         "expires_at": share.expires_at.isoformat(),
-        "expires_label": f"{days_left} days left" if days_left else "Expires today",
+        "expires_label": f"{days_left} {translate('days', language)}" if days_left else translate("expires_today", language),
         "created_at": share.created_at.isoformat(),
         "updated_at": share.updated_at.isoformat(),
     }
 
 
 def _workspace_share_resource_payload(request: HttpRequest, resource_type: str, resource) -> dict[str, object]:
+    language = getattr(request, "interface_language", "en")
     preview_url = _share_resource_preview(resource_type, resource)
     if preview_url and preview_url.startswith("/"):
         preview_url = request.build_absolute_uri(preview_url)
@@ -2134,19 +2574,20 @@ def _workspace_share_resource_payload(request: HttpRequest, resource_type: str, 
         preview_url = ""
     return {
         "title": getattr(resource, "title", "Shared project"),
-        "label": _share_resource_label(resource_type),
+        "label": _share_resource_label(resource_type, language),
         "preview_url": preview_url,
     }
 
 
 def _invite_context(request: HttpRequest, share: WorkspaceShare | None, status: str) -> dict[str, object]:
+    language = getattr(request, "interface_language", "en")
     resource = _share_resource(share.resource_type, share.resource_id) if share else None
     next_url = reverse("studio:workspace_invite", args=[share.token]) if share else reverse("studio:index")
     return {
         "share": share,
         "resource": resource,
         "resource_title": getattr(resource, "title", "Shared project") if resource else "Shared project",
-        "resource_label": _share_resource_label(share.resource_type) if share else "Project",
+        "resource_label": _share_resource_label(share.resource_type, language) if share else translate("project_invite", language),
         "preview_url": _share_resource_preview(share.resource_type, resource) if share and resource else "",
         "owner_display": (share.owner.first_name or share.owner.email) if share else "CherryX user",
         "role": share.role if share else "",
@@ -2171,7 +2612,7 @@ def _send_workspace_invite(request: HttpRequest, share: WorkspaceShare) -> None:
     context = {
         "share": share,
         "resource_title": getattr(resource, "title", "Shared project"),
-        "resource_label": _share_resource_label(share.resource_type),
+        "resource_label": _share_resource_label(share.resource_type, getattr(request, "interface_language", "en")),
         "owner_display": share.owner.first_name or share.owner.email,
         "invite_url": request.build_absolute_uri(reverse("studio:workspace_invite", args=[share.token])),
         "preview_url": preview_url,
@@ -2687,6 +3128,15 @@ def _video_export_record_payload(request: HttpRequest, project: VideoEditorProje
         "created_at": record.created_at.isoformat(),
         "events": events,
     }
+    if record.kind == "video_subtitles":
+        result_cues = _job_param(record, "result_cues", [])
+        payload["cue_count"] = int(_job_param(record, "result_count", len(result_cues) if isinstance(result_cues, list) else 0) or 0)
+        if isinstance(result_cues, list):
+            payload["cues"] = result_cues
+        if status == "done":
+            fresh_project = VideoEditorProject.objects.prefetch_related("assets").filter(id=project.id).first() or project
+            owner_id, guest_key = _workspace_identity(request)
+            payload["project"] = _video_project_payload(fresh_project, owner_id=owner_id, guest_key=guest_key)
     if output and Path(output.path).exists() and status == "done":
         payload["download_url"] = reverse("studio:download_video_project_export", args=[project.id, record.job_id])
         payload["size_text"] = human_size(output.size or Path(output.path).stat().st_size)
@@ -2768,20 +3218,96 @@ def _run_video_project_export(job_id: str, project_id: int, quality: str, output
         _set_video_export_job(job_id, status="failed", progress=100, message="Export failed", error=str(exc))
 
 
+def _run_video_project_cover(job_id: str, project_id: int, output: Path, time_seconds: float) -> None:
+    try:
+        _set_video_export_job(job_id, status="running", progress=12, message="Rendering cover")
+        project = VideoEditorProject.objects.prefetch_related("assets").get(id=project_id)
+        _render_video_project_cover(project, output, time_seconds)
+        record = JobRecord.objects.filter(job_id=job_id).first()
+        if record and output.exists():
+            JobOutputRecord.objects.get_or_create(
+                job=record,
+                path=str(output),
+                label="Cover frame",
+                defaults={"media_type": "image/jpeg", "size": output.stat().st_size},
+            )
+            _refresh_job_output_summary(record)
+        _set_video_export_job(job_id, status="done", progress=100, message="Ready")
+    except Exception as exc:
+        _set_video_export_job(job_id, status="failed", progress=100, message="Cover failed", error=str(exc))
+
+
+def _run_video_project_subtitles(job_id: str, project_id: int, asset_id: int, params: dict[str, object]) -> None:
+    try:
+        _set_video_export_job(job_id, status="running", progress=10, message="Transcribing audio")
+        project = VideoEditorProject.objects.prefetch_related("assets").get(id=project_id)
+        asset = project.assets.filter(id=asset_id, kind__in=["audio", "video"]).first()
+        if not asset:
+            raise FileNotFoundError("Source media is missing")
+        source = Path(asset.file_path)
+        if not source.exists() or not source.is_file():
+            raise FileNotFoundError("Source media file is missing")
+
+        language = str(params.get("language") or "auto").strip().lower()
+        language = None if language == "auto" else language
+        transcribed = transcribe_subtitle_cues(source, settings.subtitle_model, language)
+        _set_video_export_job(job_id, progress=70, message="Saving captions")
+
+        cues = _normalize_auto_subtitle_cues(transcribed, params)
+        project = _append_video_project_caption_clips(project, cues)
+        _merge_job_params(job_id, {"result_cues": cues, "result_count": len(cues)})
+        _set_video_export_job(
+            job_id,
+            status="done",
+            progress=100,
+            message=f"Subtitles added: {len(cues)}" if cues else "No speech detected",
+        )
+    except SubtitleUnavailableError as exc:
+        _set_video_export_job(job_id, status="failed", progress=100, message="Auto subtitles unavailable", error=str(exc))
+    except Exception as exc:
+        _set_video_export_job(job_id, status="failed", progress=100, message="Auto subtitles failed", error=str(exc))
+
+
 def _video_export_size(state: dict[str, object], quality: str) -> tuple[int, int]:
     aspect = str(state.get("aspect") or "9 / 16").replace(" ", "")
     long_side = 1080 if quality == "1080p" else 720
-    if aspect == "16/9":
-        return (1920, 1080) if quality == "1080p" else (1280, 720)
-    if aspect == "1/1":
+    try:
+        left, right = (max(1, int(part)) for part in aspect.split("/", 1))
+    except (TypeError, ValueError):
+        left, right = 9, 16
+    if left == right:
         return long_side, long_side
-    return (1080, 1920) if quality == "1080p" else (720, 1280)
+    if left > right:
+        height = long_side
+        width = int(round(height * left / right))
+    else:
+        width = long_side
+        height = int(round(width * right / left))
+    return max(2, width + width % 2), max(2, height + height % 2)
 
 
 def _video_export_duration(state: dict[str, object]) -> float:
     clips = state.get("clips") if isinstance(state.get("clips"), list) else []
     duration = max((float(clip.get("start") or 0) + float(clip.get("duration") or 0) for clip in clips if isinstance(clip, dict)), default=5.0)
     return max(0.25, min(duration, 60 * 30))
+
+
+def _video_clip_base_filter(clip: dict[str, object], width: int, height: int) -> str:
+    style = clip.get("style") if isinstance(clip.get("style"), dict) else {}
+    fit = str(style.get("fit") or "contain")
+    if fit in {"cover", "crop"}:
+        zoom = max(1.0, min(3.0, float(clip.get("scale") or 100) / 100))
+        target_width = max(width, int(round(width * zoom)))
+        target_height = max(height, int(round(height * zoom)))
+        target_width += target_width % 2
+        target_height += target_height % 2
+        x_pct = max(0.0, min(1.0, float(clip.get("x") or 50) / 100))
+        y_pct = max(0.0, min(1.0, float(clip.get("y") or 50) / 100))
+        return (
+            f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-ow)*{x_pct:.6f}:(ih-oh)*{y_pct:.6f},setsar=1"
+        )
+    return f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
 
 
 def _render_video_project_from_clip(clip: dict[str, object], assets: dict[int, VideoEditorAsset], state: dict[str, object], output: Path, width: int, height: int, duration: float) -> None:
@@ -2791,11 +3317,7 @@ def _render_video_project_from_clip(clip: dict[str, object], assets: dict[int, V
         raise FileNotFoundError(asset.original_name or "Video asset not found")
     source_start = max(0, float(clip.get("sourceStart") or 0))
     clip_duration = max(0.25, min(float(clip.get("duration") or duration), duration))
-    fit = (clip.get("style") or {}).get("fit", "contain") if isinstance(clip.get("style"), dict) else "contain"
-    if fit in {"cover", "crop"}:
-        base_filter = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"
-    else:
-        base_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+    base_filter = _video_clip_base_filter(clip, width, height)
     args = [
         ffmpeg_path(),
         "-y",
@@ -3089,6 +3611,76 @@ def _normalize_subtitle_cues(raw_cues: list[dict[str, object]]) -> list[dict[str
     return cues[:5000]
 
 
+def _normalize_auto_subtitle_cues(transcribed, params: dict[str, object]) -> list[dict[str, object]]:
+    timeline_start = _subtitle_seconds(params.get("timeline_start"))
+    source_start = _subtitle_seconds(params.get("source_start"))
+    source_end = _subtitle_seconds(params.get("source_end"))
+    clip_duration = _subtitle_seconds(params.get("clip_duration"))
+    if source_end <= source_start and clip_duration > 0:
+        source_end = source_start + clip_duration
+    clip_end = timeline_start + max(0.0, source_end - source_start) if source_end > source_start else None
+
+    raw_cues: list[dict[str, object]] = []
+    for cue in transcribed:
+        start = max(0.0, float(cue.start))
+        end = max(start + 0.05, float(cue.end))
+        if end <= source_start:
+            continue
+        if source_end > source_start and start >= source_end:
+            continue
+        timeline_cue_start = timeline_start + max(0.0, start - source_start)
+        timeline_cue_end = timeline_start + max(0.05, end - source_start)
+        if clip_end is not None:
+            timeline_cue_end = min(timeline_cue_end, clip_end)
+        if timeline_cue_end <= timeline_cue_start:
+            continue
+        raw_cues.append({"start": timeline_cue_start, "end": timeline_cue_end, "text": cue.text})
+    return _normalize_subtitle_cues(raw_cues)
+
+
+def _append_video_project_caption_clips(project: VideoEditorProject, cues: list[dict[str, object]]) -> VideoEditorProject:
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    state = json.loads(json.dumps(state))
+    tracks = state.get("tracks") if isinstance(state.get("tracks"), list) else []
+    text_track = next((track for track in tracks if isinstance(track, dict) and track.get("type") == "text"), None)
+    if not text_track:
+        text_track = {"id": "text-1", "type": "text", "name": "Text", "order": 1}
+        tracks.append(text_track)
+    state["tracks"] = tracks
+    clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    for cue in cues:
+        start = max(0.0, float(cue.get("start") or 0))
+        end = max(start + 0.2, float(cue.get("end") or start + 2))
+        clips.append(
+            {
+                "id": f"caption-{uuid.uuid4().hex[:10]}",
+                "type": "caption",
+                "trackId": text_track.get("id") or "text-1",
+                "start": round(start, 3),
+                "duration": round(max(0.2, end - start), 3),
+                "x": 50,
+                "y": 84,
+                "scale": 100,
+                "text": str(cue.get("text") or "Caption"),
+                "style": {
+                    "font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    "size": 24,
+                    "color": "#ffffff",
+                    "stroke": "#000000",
+                    "strokeWidth": 1,
+                    "bg": "#000000",
+                    "bgAlpha": 42,
+                },
+            }
+        )
+    state["clips"] = clips
+    project.state_json = state
+    _update_video_project_metadata(project)
+    project.storage_bytes = _video_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
+    return project
+
+
 def _video_project_caption_cues(state: dict[str, object]) -> list[dict[str, object]]:
     raw_clips = state.get("clips") if isinstance(state.get("clips"), list) else []
     cues: list[dict[str, object]] = []
@@ -3125,7 +3717,19 @@ def _subtitle_seconds(value: object) -> float:
 def _clean_subtitle_text(value: str) -> str:
     text = re.sub(r"<[^>]+>", "", str(value or ""))
     text = re.sub(r"\{\\[^}]+\}", "", text)
-    return "\n".join(line.strip() for line in text.splitlines() if line.strip()).strip()
+    return "\n".join(_polish_subtitle_line(line) for line in text.splitlines() if line.strip()).strip()
+
+
+def _polish_subtitle_line(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+([,.;:!?…])", r"\1", text)
+    text = re.sub(r"([,.;:!?…])([^\s,.;:!?…])", r"\1 \2", text)
+    text = re.sub(r"\.{2,}", "…", text)
+    text = re.sub(r"([!?]){3,}", r"\1", text)
+    text = re.sub(r"\b(\w{2,})\s+\1\b", r"\1", text, flags=re.IGNORECASE)
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
 
 
 def _render_srt(cues: list[dict[str, object]]) -> str:
@@ -3195,6 +3799,57 @@ def _json_body(request: HttpRequest) -> dict[str, object]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _project_listing_payload(
+    request: HttpRequest,
+    queryset,
+    resource_type: str,
+    owner_id: int | None,
+    guest_key: str,
+    payload_builder,
+    *,
+    per_page_default: int = 24,
+) -> dict[str, object]:
+    query = " ".join(str(request.GET.get("q") or request.GET.get("query") or "").split())
+    sort = str(request.GET.get("sort") or "updated").strip().lower()
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.GET.get("per_page") or per_page_default)
+    except (TypeError, ValueError):
+        per_page = per_page_default
+    per_page = max(1, min(80, per_page))
+
+    if query:
+        queryset = queryset.filter(title__icontains=query)
+    ordering = {
+        "created": "-created_at",
+        "title": "title",
+        "name": "title",
+        "oldest": "updated_at",
+        "updated": "-updated_at",
+        "recent": "-updated_at",
+    }.get(sort, "-updated_at")
+    queryset = queryset.order_by(ordering, "-id" if ordering != "-id" else "id")
+
+    total = queryset.count()
+    start = (page - 1) * per_page
+    rows = list(queryset[start : start + per_page + 1])
+    has_more = len(rows) > per_page
+    rows = rows[:per_page]
+    rows = _attach_access_roles(rows, resource_type, owner_id, guest_key)
+    return {
+        "projects": [payload_builder(project) for project in rows],
+        "page": page,
+        "per_page": per_page,
+        "has_more": has_more,
+        "total": total,
+        "query": query,
+        "sort": sort,
+    }
 
 
 def _post_bool(request: HttpRequest, name: str) -> bool:
@@ -3305,6 +3960,24 @@ def _job_param(record: JobRecord, key: str, default=None):
     except Exception:
         params = {}
     return params.get(key, default) if isinstance(params, dict) else default
+
+
+def _merge_job_params(job_id: str, values: dict[str, object]) -> None:
+    try:
+        record = JobRecord.objects.filter(job_id=job_id).first()
+        if not record:
+            return
+        try:
+            params = json.loads(record.params_json or "{}")
+        except Exception:
+            params = {}
+        if not isinstance(params, dict):
+            params = {}
+        params.update(values)
+        record.params_json = json.dumps(params, ensure_ascii=False, default=str)
+        record.save(update_fields=["params_json", "updated_at"])
+    except Exception:
+        return
 
 
 def _video_asset_waveform_path(asset: VideoEditorAsset) -> Path:
@@ -3482,8 +4155,8 @@ def _delete_music_project_media(project: MusicEditorProject) -> None:
 
 
 def _clean_project_title(value: str) -> str:
-    title = " ".join(value.strip().split())
-    return (title or "Новый проект")[:180]
+    title = " ".join(repair_mojibake(value).strip().split())
+    return (title or "New project")[:180]
 
 
 def _transfer_guest_video_projects(guest_key: str, user) -> None:
@@ -3696,9 +4369,246 @@ def _localized_youtube_modes(language: str) -> list[tuple[str, str]]:
     return [(value, labels.get(value, {}).get(language, labels.get(value, {}).get("en", label))) for value, label in actions.YOUTUBE_MODE_CHOICES]
 
 
+def _localized_subtitle_styles(request: HttpRequest) -> list[dict[str, str]]:
+    language = getattr(request, "interface_language", "en")
+    current_path = request.get_full_path()
+    items: list[dict[str, str]] = []
+    for value, fallback in actions.SUBTITLE_STYLE_CHOICES:
+        detail = _subtitle_style_detail(value, language)
+        if not detail:
+            detail = {
+                "code": value,
+                "label": fallback,
+                "short": fallback,
+                "description": fallback,
+                "look": fallback,
+                "best_for": fallback,
+                "preview_text": fallback,
+                "preview_class": value,
+            }
+        items.append(
+            {
+                **detail,
+                "detail_url": f"{reverse('studio:subtitle_style_detail', args=[value])}?{urlencode({'next': current_path})}",
+            }
+        )
+    return items
+
+
+def _subtitle_style_detail(style: str, language: str) -> dict[str, str] | None:
+    code = clean_base_name(style, "pop").lower()
+    styles = _subtitle_style_catalog()
+    data = styles.get(code)
+    if not data:
+        return None
+    lang = clean_language(language)
+    detail = {
+        "code": code,
+        "label": data["label"].get(lang) or data["label"]["en"],
+        "short": data["short"].get(lang) or data["short"]["en"],
+        "description": data["description"].get(lang) or data["description"]["en"],
+        "look": data["look"].get(lang) or data["look"]["en"],
+        "best_for": data["best_for"].get(lang) or data["best_for"]["en"],
+        "preview_text": data["preview_text"].get(lang) or data["preview_text"]["en"],
+        "preview_class": code,
+    }
+    if code == "candy":
+        candy_text = {
+            "short": _style_text(
+                "Bright outline captions with candy-colored word accents.",
+                "Яркие outline-субтитры с candy-акцентами на словах.",
+                "Яскраві outline-субтитри з candy-акцентами на словах.",
+                "Sous-titres outline avec accents candy colorés.",
+                "Helle Outline-Untertitel mit Candy-Farbakzenten.",
+                "Subtítulos outline con acentos candy de color.",
+                "კაშკაშა outline სუბტიტრები candy ფერის აქცენტებით.",
+                "Վառ outline ենթագրեր candy գունային շեշտերով։",
+                "Sottotitoli outline con accenti candy colorati.",
+            ),
+            "description": _style_text(
+                "Candy renders as large mobile-first captions: white base text, purple outline and rotating pink, yellow and green highlights on key words. It stays playful without covering the video with a colored block.",
+                "Candy рендерится как крупные mobile-first субтитры: белая основа, фиолетовая обводка и розовые, жёлтые, зелёные акценты на ключевых словах. Стиль игривый, но не закрывает видео цветной плашкой.",
+                "Candy рендериться як великі mobile-first субтитри: біла основа, фіолетова обводка та рожеві, жовті, зелені акценти на ключових словах. Стиль грайливий, але не закриває відео кольоровою плашкою.",
+                "Candy affiche de grands sous-titres mobile-first : base blanche, contour violet et accents rose, jaune, vert sur les mots clés, sans bloc coloré massif.",
+                "Candy rendert große Mobile-Untertitel: weiße Basis, violette Kontur und pinke, gelbe, grüne Akzente auf Schlüsselwörtern, ohne das Video mit einer Farbfläche zu verdecken.",
+                "Candy se renderiza como subtítulos grandes para móvil: texto blanco, contorno violeta y acentos rosa, amarillo y verde en palabras clave, sin tapar el vídeo con un bloque de color.",
+                "Candy არის დიდი mobile-first სუბტიტრები: თეთრი ტექსტი, იისფერი კონტური და ვარდისფერი, ყვითელი, მწვანე აქცენტები მთავარ სიტყვებზე.",
+                "Candy-ն մեծ mobile-first ենթագրեր է՝ սպիտակ հիմք, մանուշակագույն եզրագիծ և վարդագույն, դեղին, կանաչ շեշտեր կարևոր բառերի վրա։",
+                "Candy rende sottotitoli grandi mobile-first: testo bianco, contorno viola e accenti rosa, gialli e verdi sulle parole chiave, senza coprire il video.",
+            ),
+            "look": _style_text(
+                "Uppercase, thick outline, soft pop-in motion, colored key words.",
+                "Uppercase, плотная обводка, мягкий pop-in, цветные ключевые слова.",
+                "Uppercase, щільна обводка, м'який pop-in, кольорові ключові слова.",
+                "Uppercase, contour épais, pop-in doux, mots clés colorés.",
+                "Uppercase, starke Kontur, weiches Pop-in, farbige Schlüsselwörter.",
+                "Uppercase, contorno grueso, pop-in suave, palabras clave de color.",
+                "Uppercase, მკვრივი კონტური, რბილი pop-in, ფერადი მთავარი სიტყვები.",
+                "Uppercase, հաստ եզրագիծ, մեղմ pop-in, գունավոր կարևոր բառեր։",
+                "Uppercase, contorno spesso, pop-in morbido, parole chiave colorate.",
+            ),
+        }
+        for key, values in candy_text.items():
+            detail[key] = values.get(lang) or values["en"]
+    return detail
+
+
+def _style_text(en: str, ru: str, uk: str, fr: str, de: str, es: str, ka: str, hy: str, it: str) -> dict[str, str]:
+    return {"en": en, "ru": ru, "uk": uk, "fr": fr, "de": de, "es": es, "ka": ka, "hy": hy, "it": it}
+
+
+def _subtitle_style_catalog() -> dict[str, dict[str, dict[str, str]]]:
+    shared_best = _style_text(
+        "Short clips, reels, lessons and creator videos.",
+        "Шорты, Reels, уроки и авторские видео.",
+        "Shorts, Reels, уроки та авторські відео.",
+        "Shorts, reels, tutoriels et vidéos de créateurs.",
+        "Shorts, Reels, Tutorials und Creator-Videos.",
+        "Shorts, reels, tutoriales y videos de creadores.",
+        "Shorts, Reels, გაკვეთილები და creator ვიდეოები.",
+        "Shorts, Reels, դասեր և ստեղծագործական տեսանյութեր։",
+        "Short, reels, tutorial e video creator.",
+    )
+    return {
+        "pop": {
+            "label": _style_text("Pop", "Pop", "Pop", "Pop", "Pop", "Pop", "Pop", "Pop", "Pop"),
+            "short": _style_text("Bright, punchy and easy to read.", "Яркий, ударный и легко читается.", "Яскравий, виразний і легко читається.", "Vif, percutant et lisible.", "Hell, kräftig und gut lesbar.", "Brillante, potente y legible.", "კაშკაშა, ენერგიული და ადვილად წასაკითხი.", "Վառ, ազդեցիկ և հեշտ ընթեռնելի։", "Vivace, incisivo e leggibile."),
+            "description": _style_text("Large subtitles with a strong outline and energetic color accents. They feel modern and work well on mobile screens.", "Крупные субтитры с плотной обводкой и энергичными цветными акцентами. Смотрятся современно и хорошо читаются на телефоне.", "Великі субтитри з щільною обводкою та енергійними кольоровими акцентами. Сучасні й добре читаються на телефоні.", "Sous-titres larges avec contour marqué et accents colorés. Modernes et très lisibles sur mobile.", "Große Untertitel mit starker Kontur und farbigen Akzenten. Modern und gut auf Mobilgeräten lesbar.", "Subtítulos grandes con contorno fuerte y acentos de color. Modernos y claros en móvil.", "დიდი სუბტიტრები მკვეთრი კონტურით და ფერადი აქცენტებით. კარგად იკითხება მობილურზე.", "Մեծ ենթագրեր հստակ եզրագծով և գունային շեշտերով։ Լավ ընթեռնելի է հեռախոսում։", "Sottotitoli grandi con contorno deciso e accenti colorati. Moderni e leggibili su mobile."),
+            "look": _style_text("Bold white text, dark outline, warm highlights.", "Белый жирный текст, тёмная обводка, тёплые акценты.", "Білий жирний текст, темна обводка, теплі акценти.", "Texte blanc épais, contour sombre, accents chauds.", "Fetter weißer Text, dunkle Kontur, warme Akzente.", "Texto blanco grueso, contorno oscuro, acentos cálidos.", "მსხვილი თეთრი ტექსტი, მუქი კონტური, თბილი აქცენტები.", "Հաստ սպիտակ տեքստ, մուգ եզրագիծ, տաք շեշտեր։", "Testo bianco bold, contorno scuro, accenti caldi."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Big moment!", "Главный момент!", "Головний момент!", "Moment fort !", "Starker Moment!", "¡Momento clave!", "მთავარი მომენტი!", "Գլխավոր պահը։", "Momento chiave!"),
+        },
+        "neon": {
+            "label": _style_text("Neon", "Neon", "Neon", "Néon", "Neon", "Neón", "Neon", "Neon", "Neon"),
+            "short": _style_text("Glowing, nightlife, high energy.", "Свечение, ночной вайб, высокая энергия.", "Світіння, нічний вайб, висока енергія.", "Lumineux, nocturne, énergique.", "Leuchtend, Nachtgefühl, energiegeladen.", "Brillante, nocturno y enérgico.", "ნათება, ღამის განწყობა, მაღალი ენერგია.", "Փայլող, գիշերային, էներգիկ։", "Luminoso, notturno, energico."),
+            "description": _style_text("Neon adds glow and punch. It is best when the video has music, nightlife, gaming or a tech mood.", "Neon добавляет свечение и драйв. Лучше всего подходит для музыки, ночных сцен, игр и технологичного вайба.", "Neon додає світіння й драйв. Найкраще для музики, нічних сцен, ігор та tech-настрою.", "Néon ajoute de la lumière et du rythme. Idéal pour musique, nuit, gaming et tech.", "Neon bringt Glow und Tempo. Ideal für Musik, Nacht, Gaming und Tech.", "Neón añade brillo y energía. Ideal para música, noche, gaming y tecnología.", "Neon მატებს ნათებას და ენერგიას. კარგია მუსიკის, ღამის, gaming და tech ვიდეოებისთვის.", "Neon-ը ավելացնում է փայլ և դինամիկա։ Լավ է երաժշտության, գիշերային, gaming և tech տեսանյութերի համար։", "Neon aggiunge luce ed energia. Ideale per musica, notte, gaming e tech."),
+            "look": _style_text("Bright glow with saturated color edges.", "Яркое свечение с насыщенными цветными краями.", "Яскраве світіння з насиченими кольоровими краями.", "Lueur vive avec bords colorés saturés.", "Heller Glow mit kräftigen Farbkanten.", "Brillo intenso con bordes saturados.", "კაშკაშა ნათება ფერადი კიდეებით.", "Վառ փայլ հագեցած գունային եզրերով։", "Bagliore intenso con bordi saturi."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Feel the glow", "Светится!", "Світиться!", "Ça brille", "Es leuchtet", "Brilla", "ანათებს", "Փայլում է", "Si illumina"),
+        },
+        "candy": {
+            "label": _style_text("Candy", "Candy", "Candy", "Candy", "Candy", "Candy", "Candy", "Candy", "Candy"),
+            "short": _style_text("Sweet, colorful and playful.", "Сочный, цветной и игривый.", "Соковитий, кольоровий та грайливий.", "Coloré, doux et ludique.", "Süß, bunt und verspielt.", "Dulce, colorido y juguetón.", "ტკბილი, ფერადი და მხიარული.", "Քաղցր, գունավոր և խաղային։", "Dolce, colorato e giocoso."),
+            "description": _style_text("Candy uses soft bright colors and a friendly look. It is great for lifestyle, beauty, food and upbeat clips.", "Candy даёт мягкие яркие цвета и дружелюбный вид. Хорош для lifestyle, beauty, еды и позитивных роликов.", "Candy дає м'які яскраві кольори та дружній вигляд. Добре для lifestyle, beauty, їжі й позитивних роликів.", "Candy utilise des couleurs douces et vives. Parfait pour lifestyle, beauté, food et clips positifs.", "Candy nutzt weiche helle Farben. Gut für Lifestyle, Beauty, Food und positive Clips.", "Candy usa colores suaves y vivos. Perfecto para lifestyle, belleza, comida y clips positivos.", "Candy იყენებს რბილ ნათელ ფერებს. კარგია lifestyle, beauty, food და პოზიტიური ვიდეოებისთვის.", "Candy-ն օգտագործում է մեղմ վառ գույներ։ Հարմար է lifestyle, beauty, food և դրական տեսանյութերի համար։", "Candy usa colori morbidi e vivaci. Ottimo per lifestyle, beauty, food e clip positive."),
+            "look": _style_text("Rounded, bright accents, friendly contrast.", "Округло, яркие акценты, мягкий контраст.", "Округло, яскраві акценти, м'який контраст.", "Arrondi, accents vifs, contraste doux.", "Rund, helle Akzente, weicher Kontrast.", "Redondeado, acentos vivos, contraste suave.", "მომრგვალებული, ნათელი აქცენტები, რბილი კონტრასტი.", "Կլորացված, վառ շեշտեր, մեղմ կոնտրաստ։", "Arrotondato, accenti vivaci, contrasto morbido."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Sweet cut", "Сочно!", "Соковито!", "Très doux", "Sweet cut", "Muy dulce", "ტკბილი კადრი", "Քաղցր կադր", "Dolce taglio"),
+        },
+        "kinetic": {
+            "label": _style_text("Kinetic", "Kinetic", "Kinetic", "Cinétique", "Kinetic", "Cinético", "Kinetic", "Kinetic", "Kinetic"),
+            "short": _style_text("Moving captions with impact.", "Движущиеся субтитры с акцентом.", "Рухомі субтитри з акцентом.", "Sous-titres animés avec impact.", "Bewegte Untertitel mit Wirkung.", "Subtítulos en movimiento con impacto.", "მოძრავი სუბტიტრები ძლიერი აქცენტით.", "Շարժվող ենթագրեր ուժեղ շեշտով։", "Sottotitoli in movimento con impatto."),
+            "description": _style_text("Kinetic adds subtle movement and scale. It makes speech feel dynamic without needing manual animation.", "Kinetic добавляет движение и масштаб. Речь становится динамичной без ручной анимации.", "Kinetic додає рух і масштаб. Мова виглядає динамічно без ручної анімації.", "Cinétique ajoute mouvement et échelle. La parole paraît dynamique sans animation manuelle.", "Kinetic fügt Bewegung und Skalierung hinzu. Sprache wirkt dynamisch ohne manuelle Animation.", "Cinético añade movimiento y escala. La voz se siente dinámica sin animación manual.", "Kinetic ამატებს მოძრაობას და მასშტაბს. მეტყველება დინამიკური ჩანს ხელით ანიმაციის გარეშე.", "Kinetic-ը ավելացնում է շարժում և մասշտաբ։ Խոսքը դինամիկ է թվում առանց ձեռքով անիմացիայի։", "Kinetic aggiunge movimento e scala. Il parlato sembra dinamico senza animazione manuale."),
+            "look": _style_text("Small motion, bold text, punchy entrance.", "Лёгкое движение, жирный текст, резкий вход.", "Легкий рух, жирний текст, різкий вхід.", "Léger mouvement, texte fort, entrée vive.", "Leichte Bewegung, fetter Text, starker Einstieg.", "Movimiento leve, texto fuerte, entrada marcada.", "მსუბუქი მოძრაობა, მსხვილი ტექსტი, მკვეთრი შესვლა.", "Թեթև շարժում, հաստ տեքստ, հստակ մուտք։", "Movimento leggero, testo bold, ingresso deciso."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Move fast", "Двигаемся", "Рухаємось", "Ça bouge", "Bewegung", "Muévete", "მოძრაობა", "Շարժում", "In movimento"),
+        },
+        "bounce": {
+            "label": _style_text("Bounce", "Bounce", "Bounce", "Bounce", "Bounce", "Bounce", "Bounce", "Bounce", "Bounce"),
+            "short": _style_text("Bouncy, friendly motion.", "Пружинит и выглядит дружелюбно.", "Пружинить і виглядає дружньо.", "Rebondissant et convivial.", "Federnd und freundlich.", "Rebota y se ve amable.", "ხტუნავს და მეგობრულად ჩანს.", "Ցատկոտ և ընկերական տեսք։", "Rimbalzante e amichevole."),
+            "description": _style_text("Bounce makes each phrase pop in with a soft jump. It is playful but still readable.", "Bounce выводит фразы мягким прыжком. Игриво, но всё ещё читаемо.", "Bounce виводить фрази м'яким стрибком. Грайливо, але читабельно.", "Bounce fait apparaître les phrases avec un petit saut. Ludique mais lisible.", "Bounce lässt Sätze weich einspringen. Verspielt, aber lesbar.", "Bounce muestra frases con un salto suave. Juguetón pero legible.", "Bounce ფრაზებს რბილი ნახტომით აჩენს. მხიარულია, მაგრამ იკითხება.", "Bounce-ը արտահայտությունները մեղմ ցատկով է ցույց տալիս։ Խաղային է, բայց ընթեռնելի։", "Bounce fa entrare le frasi con un piccolo salto. Giocoso ma leggibile."),
+            "look": _style_text("Soft jump, bright outline, upbeat rhythm.", "Мягкий прыжок, яркая обводка, бодрый ритм.", "М'який стрибок, яскрава обводка, бадьорий ритм.", "Petit saut, contour vif, rythme positif.", "Weicher Sprung, helle Kontur, flotter Rhythmus.", "Salto suave, contorno vivo, ritmo alegre.", "რბილი ნახტომი, ნათელი კონტური, ენერგიული რიტმი.", "Մեղմ ցատկ, վառ եզրագիծ, ուրախ ռիթմ։", "Salto morbido, contorno vivo, ritmo allegro."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Pop in", "Прыг!", "Стриб!", "Hop !", "Plopp", "Salta", "ხტომა", "Ցատկ", "Salta"),
+        },
+        "comic": {
+            "label": _style_text("Comic", "Comic", "Comic", "Comic", "Comic", "Comic", "Comic", "Comic", "Comic"),
+            "short": _style_text("Bold meme/comic energy.", "Жирная мемная энергия.", "Жирна мемна енергія.", "Énergie meme et BD.", "Meme- und Comic-Energie.", "Energía meme/cómic.", "მემისა და კომიქსის ენერგია.", "Մեմ/կոմիքս էներգիա։", "Energia meme/fumetto."),
+            "description": _style_text("Comic feels loud, fun and expressive. Use it when the video should feel humorous or dramatic.", "Comic громкий, весёлый и выразительный. Подходит для юмора, реакций и драматичных моментов.", "Comic гучний, веселий і виразний. Підходить для гумору, реакцій і драматичних моментів.", "Comic est fort, drôle et expressif. Idéal pour humour, réactions et moments dramatiques.", "Comic ist laut, lustig und ausdrucksstark. Gut für Humor, Reactions und Drama.", "Comic es fuerte, divertido y expresivo. Ideal para humor, reacciones y drama.", "Comic ხმამაღალი, მხიარული და გამომხატველია. კარგია იუმორისა და რეაქციებისთვის.", "Comic-ը բարձր, զվարճալի և արտահայտիչ է։ Հարմար է հումորի և ռեակցիաների համար։", "Comic è forte, divertente ed espressivo. Ideale per umorismo, reaction e drama."),
+            "look": _style_text("Chunky letters, strong outline, playful pop.", "Крупные буквы, мощная обводка, playful-pop.", "Великі літери, сильна обводка, playful-pop.", "Lettres épaisses, contour fort, pop ludique.", "Massive Buchstaben, starke Kontur, spielerischer Pop.", "Letras gruesas, contorno fuerte, pop divertido.", "მსხვილი ასოები, ძლიერი კონტური, მხიარული pop.", "Խոշոր տառեր, ուժեղ եզրագիծ, խաղային pop։", "Lettere grosse, contorno forte, pop giocoso."),
+            "best_for": shared_best,
+            "preview_text": _style_text("No way!", "Да ладно!", "Та ну!", "Incroyable !", "Nicht wahr!", "¡No puede ser!", "არ მჯერა!", "Չի կարող պատահել։", "Ma dai!"),
+        },
+        "clean": {
+            "label": _style_text("Clean", "Clean", "Clean", "Clean", "Clean", "Clean", "Clean", "Clean", "Clean"),
+            "short": _style_text("Simple and professional.", "Просто и профессионально.", "Просто й професійно.", "Simple et professionnel.", "Einfach und professionell.", "Simple y profesional.", "მარტივი და პროფესიული.", "Պարզ և պրոֆեսիոնալ։", "Semplice e professionale."),
+            "description": _style_text("Clean keeps attention on the message. It is readable, neutral and safe for business or education.", "Clean удерживает внимание на смысле. Нейтральный, читаемый и безопасный для бизнеса или обучения.", "Clean тримає увагу на змісті. Нейтральний, читабельний і безпечний для бізнесу чи навчання.", "Clean garde l'attention sur le message. Neutre, lisible, sûr pour business et éducation.", "Clean hält den Fokus auf der Botschaft. Neutral, lesbar, gut für Business und Bildung.", "Clean centra la atención en el mensaje. Neutral, legible, seguro para negocio o educación.", "Clean ყურადღებას აზრზე ტოვებს. ნეიტრალური და კარგი ბიზნესისთვის ან სწავლისთვის.", "Clean-ը ուշադրությունը պահում է մտքի վրա։ Չեզոք և հարմար է բիզնեսի կամ ուսուցման համար։", "Clean mantiene il focus sul messaggio. Neutro, leggibile, adatto a business e formazione."),
+            "look": _style_text("White text, subtle outline, calm layout.", "Белый текст, лёгкая обводка, спокойная раскладка.", "Білий текст, легка обводка, спокійна композиція.", "Texte blanc, contour léger, mise en page calme.", "Weißer Text, dezente Kontur, ruhiges Layout.", "Texto blanco, contorno sutil, diseño tranquilo.", "თეთრი ტექსტი, მსუბუქი კონტური, მშვიდი განლაგება.", "Սպիտակ տեքստ, մեղմ եզրագիծ, հանգիստ դասավորություն։", "Testo bianco, contorno leggero, layout calmo."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Clear message", "Ясная мысль", "Чітка думка", "Message clair", "Klare Aussage", "Mensaje claro", "გასაგები აზრი", "Հստակ միտք", "Messaggio chiaro"),
+        },
+        "minimal": {
+            "label": _style_text("Minimal", "Minimal", "Minimal", "Minimal", "Minimal", "Minimal", "Minimal", "Minimal", "Minimal"),
+            "short": _style_text("Quiet, thin and elegant.", "Тихий, тонкий и элегантный.", "Тихий, тонкий та елегантний.", "Discret, fin et élégant.", "Ruhig, fein und elegant.", "Discreto, fino y elegante.", "მშვიდი, თხელი და ელეგანტური.", "Հանգիստ, նուրբ և էլեգանտ։", "Sobrio, sottile ed elegante."),
+            "description": _style_text("Minimal is restrained and refined. Use it when subtitles should not overpower the visuals.", "Minimal сдержанный и аккуратный. Используй, когда субтитры не должны перебивать картинку.", "Minimal стриманий і акуратний. Використовуй, коли субтитри не мають перебивати картинку.", "Minimal est sobre et raffiné. À utiliser quand les sous-titres ne doivent pas dominer l'image.", "Minimal ist zurückhaltend und fein. Wenn Untertitel das Bild nicht überlagern sollen.", "Minimal es sobrio y refinado. Úsalo cuando los subtítulos no deben dominar la imagen.", "Minimal თავშეკავებული და დახვეწილია. როცა სუბტიტრებმა კადრი არ უნდა გადაფაროს.", "Minimal-ը զուսպ և նուրբ է։ Երբ ենթագրերը չպետք է գերիշխեն կադրին։", "Minimal è sobrio e raffinato. Quando i sottotitoli non devono dominare l'immagine."),
+            "look": _style_text("Small clean text with light shadow.", "Небольшой чистый текст с лёгкой тенью.", "Невеликий чистий текст з легкою тінню.", "Petit texte propre avec ombre légère.", "Kleiner sauberer Text mit leichtem Schatten.", "Texto pequeño y limpio con sombra ligera.", "პატარა სუფთა ტექსტი მსუბუქი ჩრდილით.", "Փոքր մաքուր տեքստ թեթև ստվերով։", "Testo piccolo e pulito con ombra leggera."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Less is more", "Меньше — лучше", "Менше — краще", "Moins, mieux", "Weniger ist mehr", "Menos es más", "ნაკლები უკეთესია", "Քիչն ավելի լավ է", "Meno è meglio"),
+        },
+        "editorial": {
+            "label": _style_text("Editorial", "Editorial", "Editorial", "Éditorial", "Editorial", "Editorial", "Editorial", "Editorial", "Editorial"),
+            "short": _style_text("Magazine-like and polished.", "Как журнал: аккуратно и дорого.", "Як журнал: акуратно й дорого.", "Style magazine, soigné.", "Magazinartig und hochwertig.", "Tipo revista y pulido.", "ჟურნალის სტილი, დახვეწილი.", "Ամսագրային և հղկված։", "Stile magazine, curato."),
+            "description": _style_text("Editorial feels curated and premium. It works well for interviews, brand stories and polished explainers.", "Editorial выглядит собранно и премиально. Хорош для интервью, брендов и аккуратных объясняющих видео.", "Editorial виглядає зібрано й преміально. Добре для інтерв'ю, брендів і пояснювальних відео.", "Éditorial paraît premium et maîtrisé. Bien pour interviews, marques et vidéos explicatives.", "Editorial wirkt hochwertig und kuratiert. Gut für Interviews, Marken und Erklärvideos.", "Editorial se siente premium y cuidado. Bueno para entrevistas, marcas y explicativos.", "Editorial პრემიუმ და მოწესრიგებულია. კარგია ინტერვიუებისა და ბრენდის ისტორიებისთვის.", "Editorial-ը պրեմիում և մշակված տեսք ունի։ Հարմար է հարցազրույցների և բրենդի պատմությունների համար։", "Editorial è premium e curato. Ottimo per interviste, brand story e spiegazioni."),
+            "look": _style_text("Balanced typography, refined spacing.", "Сбалансированная типографика, аккуратные интервалы.", "Збалансована типографіка, акуратні інтервали.", "Typographie équilibrée, espacements soignés.", "Ausgewogene Typografie, feine Abstände.", "Tipografía equilibrada, espaciado cuidado.", "დაბალანსებული ტიპოგრაფიკა და დახვეწილი ინტერვალები.", "Հավասարակշռված տպագրություն և նուրբ տարածություններ։", "Tipografia bilanciata, spaziatura curata."),
+            "best_for": shared_best,
+            "preview_text": _style_text("In focus", "В фокусе", "У фокусі", "En focus", "Im Fokus", "En foco", "ფოკუსში", "Ֆոկուսում", "In focus"),
+        },
+        "typewriter": {
+            "label": _style_text("Typewriter", "Typewriter", "Typewriter", "Machine", "Typewriter", "Máquina", "Typewriter", "Typewriter", "Typewriter"),
+            "short": _style_text("Documentary and typed feel.", "Документальный печатный вайб.", "Документальний друкований вайб.", "Style tapé et documentaire.", "Getippt, dokumentarisch.", "Estilo escrito/documental.", "დოკუმენტური, საბეჭდი სტილი.", "Փաստագրական, տպագրական զգացողություն։", "Effetto scritto/documentario."),
+            "description": _style_text("Typewriter is calm, focused and slightly retro. It suits diaries, documentary edits and thoughtful narration.", "Typewriter спокойный, фокусный и немного ретро. Подходит для дневников, документалок и вдумчивого рассказа.", "Typewriter спокійний, фокусний і трохи ретро. Для щоденників, документальних монтажів і вдумливої оповіді.", "Machine est calme, focalisé et un peu rétro. Pour journaux, documentaires et narration posée.", "Typewriter ist ruhig, fokussiert und leicht retro. Für Tagebücher, Dokus und nachdenkliche Erzählung.", "Máquina es calmado, enfocado y retro. Para diarios, documentales y narración reflexiva.", "Typewriter მშვიდი, ფოკუსირებული და ოდნავ რეტროა. კარგია დღიურებისა და დოკუმენტური ნარატივისთვის.", "Typewriter-ը հանգիստ, կենտրոնացած և մի փոքր ռետրո է։ Հարմար է օրագրերի և փաստագրական պատմության համար։", "Typewriter è calmo, focalizzato e un po' retro. Per diari, documentari e narrazione riflessiva."),
+            "look": _style_text("Monospace rhythm and calm contrast.", "Моноширинный ритм и спокойный контраст.", "Моноширинний ритм і спокійний контраст.", "Rythme monospace et contraste calme.", "Monospace-Rhythmus und ruhiger Kontrast.", "Ritmo monoespaciado y contraste calmado.", "მონოსივრცული რიტმი და მშვიდი კონტრასტი.", "Մոնոսփեյս ռիթմ և հանգիստ կոնտրաստ։", "Ritmo monospazio e contrasto calmo."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Typed note", "Печатная заметка", "Друкована нотатка", "Note tapée", "Getippte Notiz", "Nota escrita", "დაბეჭდილი ნოტა", "Տպված նշում", "Nota scritta"),
+        },
+        "headline": {
+            "label": _style_text("Headline", "Headline", "Headline", "Titre", "Headline", "Titular", "Headline", "Headline", "Headline"),
+            "short": _style_text("Big statement captions.", "Большие заголовочные фразы.", "Великі заголовкові фрази.", "Grandes phrases titre.", "Große Headline-Sätze.", "Frases grandes tipo titular.", "დიდი სათაურის ფრაზები.", "Մեծ վերնագրային արտահայտություններ։", "Frasi grandi da titolo."),
+            "description": _style_text("Headline makes speech feel like a strong title. Use for hooks, bold claims and key moments.", "Headline превращает речь в сильный заголовок. Для хуков, заявлений и ключевых моментов.", "Headline перетворює мову на сильний заголовок. Для хуків, заяв і ключових моментів.", "Titre transforme la parole en titre fort. Pour hooks, annonces et moments clés.", "Headline macht Sprache zur starken Überschrift. Für Hooks, Claims und Kernmomente.", "Titular convierte la voz en un gran titular. Para hooks, frases fuertes y momentos clave.", "Headline მეტყველებას ძლიერ სათაურად აქცევს. კარგია hooks და მთავარი მომენტებისთვის.", "Headline-ը խոսքը դարձնում է ուժեղ վերնագիր։ Հարմար է hooks և գլխավոր պահերի համար։", "Headline trasforma il parlato in un titolo forte. Per hook, claim e momenti chiave."),
+            "look": _style_text("Large uppercase feel, very strong contrast.", "Крупное заголовочное ощущение, очень сильный контраст.", "Велике заголовкове відчуття, дуже сильний контраст.", "Grand format titre, contraste très fort.", "Großes Headline-Gefühl, sehr starker Kontrast.", "Sensación de titular grande, contraste fuerte.", "დიდი სათაურის შეგრძნება, ძლიერი კონტრასტი.", "Մեծ վերնագրի զգացողություն, ուժեղ կոնտրաստ։", "Effetto titolo grande, contrasto forte."),
+            "best_for": shared_best,
+            "preview_text": _style_text("THE HOOK", "ГЛАВНЫЙ ХУК", "ГОЛОВНИЙ ХУК", "LE HOOK", "DER HOOK", "EL HOOK", "HOOK", "HOOK", "IL HOOK"),
+        },
+        "luxury": {
+            "label": _style_text("Luxury", "Luxury", "Luxury", "Luxury", "Luxury", "Luxury", "Luxury", "Luxury", "Luxury"),
+            "short": _style_text("Premium, elegant, soft.", "Премиально, элегантно, мягко.", "Преміально, елегантно, м'яко.", "Premium, élégant, doux.", "Premium, elegant, weich.", "Premium, elegante, suave.", "პრემიუმი, ელეგანტური, რბილი.", "Պրեմիում, էլեգանտ, մեղմ։", "Premium, elegante, morbido."),
+            "description": _style_text("Luxury is polished and calm with a premium mood. Use it for fashion, real estate, products and refined stories.", "Luxury спокойный и дорогой по ощущению. Для fashion, недвижимости, продуктов и утончённых историй.", "Luxury спокійний і дорогий за відчуттям. Для fashion, нерухомості, продуктів і витончених історій.", "Luxury est calme et premium. Pour mode, immobilier, produits et récits raffinés.", "Luxury wirkt ruhig und hochwertig. Für Fashion, Immobilien, Produkte und feine Stories.", "Luxury se siente premium y calmado. Para moda, inmuebles, productos e historias refinadas.", "Luxury მშვიდი და პრემიუმ განწყობისაა. მოდის, უძრავი ქონებისა და პროდუქტებისთვის.", "Luxury-ը հանգիստ և պրեմիում զգացողություն ունի։ Հարմար է fashion, անշարժ գույք և ապրանքների համար։", "Luxury è calmo e premium. Per moda, immobiliare, prodotti e storie raffinate."),
+            "look": _style_text("Elegant type, soft shadow, restrained color.", "Элегантный шрифт, мягкая тень, сдержанный цвет.", "Елегантний шрифт, м'яка тінь, стриманий колір.", "Typo élégante, ombre douce, couleur sobre.", "Elegante Schrift, weicher Schatten, dezente Farbe.", "Tipo elegante, sombra suave, color sobrio.", "ელეგანტური შრიფტი, რბილი ჩრდილი, თავშეკავებული ფერი.", "Էլեգանտ տառատեսակ, մեղմ ստվեր, զուսպ գույն։", "Font elegante, ombra morbida, colore sobrio."),
+            "best_for": shared_best,
+            "preview_text": _style_text("Premium detail", "Премиальная деталь", "Преміальна деталь", "Détail premium", "Premium Detail", "Detalle premium", "პრემიუმ დეტალი", "Պրեմիում դետալ", "Dettaglio premium"),
+        },
+        "mono": {
+            "label": _style_text("Mono", "Mono", "Mono", "Mono", "Mono", "Mono", "Mono", "Mono", "Mono"),
+            "short": _style_text("Tech, code and structured.", "Техно, код и структура.", "Техно, код і структура.", "Tech, code et structuré.", "Tech, Code und Struktur.", "Tech, código y estructura.", "ტექნო, კოდი და სტრუქტურა.", "Տեխնո, կոդ և կառուցվածք։", "Tech, codice e struttura."),
+            "description": _style_text("Mono uses a technical monospace feel. It is great for software, finance, analytics and explainers.", "Mono даёт технический моноширинный характер. Хорош для софта, финансов, аналитики и объяснений.", "Mono дає технічний моноширинний характер. Добре для софту, фінансів, аналітики й пояснень.", "Mono donne une sensation technique monospace. Idéal pour logiciel, finance, analyse et explications.", "Mono nutzt technische Monospace-Optik. Gut für Software, Finanzen, Analyse und Erklärvideos.", "Mono usa estilo monoespaciado técnico. Bueno para software, finanzas, análisis y explicativos.", "Mono ტექნიკურ monospace სტილს იყენებს. კარგია software, finance, analytics და ახსნებისთვის.", "Mono-ն տեխնիկական monospace տեսք ունի։ Հարմար է software, finance, analytics և բացատրությունների համար։", "Mono usa un look monospazio tecnico. Ottimo per software, finanza, analisi e spiegazioni."),
+            "look": _style_text("Monospace, green accents, precise rhythm.", "Моноширинный, зелёные акценты, точный ритм.", "Моноширинний, зелені акценти, точний ритм.", "Monospace, accents verts, rythme précis.", "Monospace, grüne Akzente, präziser Rhythmus.", "Monoespaciado, acentos verdes, ritmo preciso.", "monospace, მწვანე აქცენტები, ზუსტი რიტმი.", "Monospace, կանաչ շեշտեր, ճշգրիտ ռիթմ։", "Monospazio, accenti verdi, ritmo preciso."),
+            "best_for": shared_best,
+            "preview_text": _style_text("System ready", "Система готова", "Система готова", "Système prêt", "System bereit", "Sistema listo", "სისტემა მზადაა", "Համակարգը պատրաստ է", "Sistema pronto"),
+        },
+        "soft": {
+            "label": _style_text("Soft", "Soft", "Soft", "Soft", "Soft", "Soft", "Soft", "Soft", "Soft"),
+            "short": _style_text("Gentle, warm and calm.", "Нежно, тепло и спокойно.", "Ніжно, тепло й спокійно.", "Doux, chaleureux et calme.", "Sanft, warm und ruhig.", "Suave, cálido y tranquilo.", "ნაზი, თბილი და მშვიდი.", "Նուրբ, տաք և հանգիստ։", "Delicato, caldo e calmo."),
+            "description": _style_text("Soft is gentle and human. It is good for calm narration, family, wellness and emotional stories.", "Soft мягкий и человечный. Хорош для спокойного рассказа, семьи, wellness и эмоциональных историй.", "Soft м'який і людяний. Добре для спокійної оповіді, сім'ї, wellness та емоційних історій.", "Soft est doux et humain. Pour narration calme, famille, bien-être et histoires émotionnelles.", "Soft ist sanft und menschlich. Für ruhige Erzählung, Familie, Wellness und Emotion.", "Soft es suave y humano. Para narración tranquila, familia, bienestar e historias emocionales.", "Soft ნაზი და ადამიანურია. კარგია მშვიდი თხრობის, ოჯახის, wellness და ემოციური ისტორიებისთვის.", "Soft-ը նուրբ և մարդկային է։ Հարմար է հանգիստ պատմության, ընտանիքի, wellness և զգացմունքային պատմությունների համար։", "Soft è delicato e umano. Per narrazione calma, famiglia, wellness e storie emotive."),
+            "look": _style_text("Soft shadow, warm contrast, calm placement.", "Мягкая тень, тёплый контраст, спокойное положение.", "М'яка тінь, теплий контраст, спокійне розташування.", "Ombre douce, contraste chaud, placement calme.", "Weicher Schatten, warmer Kontrast, ruhige Position.", "Sombra suave, contraste cálido, posición tranquila.", "რბილი ჩრდილი, თბილი კონტრასტი, მშვიდი განლაგება.", "Մեղմ ստվեր, տաք կոնտրաստ, հանգիստ տեղադրում։", "Ombra morbida, contrasto caldo, posizione calma."),
+            "best_for": shared_best,
+            "preview_text": _style_text("A softer note", "Мягкая мысль", "М'яка думка", "Note douce", "Sanfte Note", "Nota suave", "რბილი აზრი", "Մեղմ միտք", "Nota morbida"),
+        },
+    }
+
+
 def _localized_subtitle_languages(language: str) -> list[dict[str, str]]:
     labels = {
         "auto": {"en": "Auto", "ru": "Авто", "uk": "Авто", "fr": "Auto", "de": "Auto", "es": "Auto", "ka": "ავტო", "hy": "Ավտո", "it": "Auto"},
+    }
+    subtitle_language_meta = {
+        "en": {"native": "English", "flag": "https://flagcdn.com/gb.svg"},
+        "ru": {"native": "Русский", "flag": "https://flagcdn.com/ru.svg"},
+        "uk": {"native": "Українська", "flag": "https://flagcdn.com/ua.svg"},
+        "fr": {"native": "Français", "flag": "https://flagcdn.com/fr.svg"},
+        "de": {"native": "Deutsch", "flag": "https://flagcdn.com/de.svg"},
+        "es": {"native": "Español", "flag": "https://flagcdn.com/es.svg"},
+        "it": {"native": "Italiano", "flag": "https://flagcdn.com/it.svg"},
+        "pt": {"native": "Português", "flag": "https://flagcdn.com/pt.svg"},
+        "pl": {"native": "Polski", "flag": "https://flagcdn.com/pl.svg"},
+        "tr": {"native": "Türkçe", "flag": "https://flagcdn.com/tr.svg"},
+        "nl": {"native": "Nederlands", "flag": "https://flagcdn.com/nl.svg"},
+        "sv": {"native": "Svenska", "flag": "https://flagcdn.com/se.svg"},
+        "ar": {"native": "العربية", "flag": "https://flagcdn.com/sa.svg"},
+        "hi": {"native": "हिन्दी", "flag": "https://flagcdn.com/in.svg"},
+        "ja": {"native": "日本語", "flag": "https://flagcdn.com/jp.svg"},
+        "ko": {"native": "한국어", "flag": "https://flagcdn.com/kr.svg"},
+        "zh": {"native": "中文", "flag": "https://flagcdn.com/cn.svg"},
+        "ka": {"native": "ქართული", "flag": "https://flagcdn.com/ge.svg"},
+        "hy": {"native": "Հայերեն", "flag": "https://flagcdn.com/am.svg"},
     }
     available = {value for value, _label in actions.SUBTITLE_LANGUAGE_CHOICES}
     options = [
@@ -3712,8 +4622,8 @@ def _localized_subtitle_languages(language: str) -> list[dict[str, str]]:
     options.extend(
         {
             "code": value,
-            "label": language_lookup.get(value, {}).get("native") or label,
-            "flag": language_lookup.get(value, {}).get("flag", ""),
+            "label": subtitle_language_meta.get(value, {}).get("native") or language_lookup.get(value, {}).get("native") or label,
+            "flag": subtitle_language_meta.get(value, {}).get("flag") or language_lookup.get(value, {}).get("flag", ""),
         }
         for value, label in actions.SUBTITLE_LANGUAGE_CHOICES
         if value != "auto" and value in available
@@ -3759,6 +4669,7 @@ def _localized_value(key: str, language: str, fallback: str) -> str:
         "interrupted": {"en": "Task interrupted", "ru": "Задача прервана", "uk": "Задачу перервано", "fr": "Tâche interrompue", "de": "Aufgabe unterbrochen", "es": "Tarea interrumpida", "ka": "ამოცანა შეწყდა", "hy": "Առաջադրանքը ընդհատվեց", "it": "Attività interrotta"},
         "server_restarted": {"en": "The server restarted before the task finished.", "ru": "Сервер был перезапущен до завершения задачи.", "uk": "Сервер було перезапущено до завершення задачі.", "fr": "Le serveur a redémarré avant la fin de la tâche.", "de": "Der Server wurde vor Abschluss der Aufgabe neu gestartet.", "es": "El servidor se reinició antes de finalizar la tarea.", "ka": "სერვერი ამოცანის დასრულებამდე გადაიტვირთა.", "hy": "Սերվերը վերագործարկվեց մինչև առաջադրանքի ավարտը։", "it": "Il server si è riavviato prima della fine dell'attività."},
     }
+    values["cancelled"] = {"en": "Cancelled", "ru": "Отменено", "uk": "Скасовано", "fr": "Annulé", "de": "Abgebrochen", "es": "Cancelado", "ka": "გაუქმდა", "hy": "Չեղարկված", "it": "Annullato"}
     return values.get(key, {}).get(language, values.get(key, {}).get("en", fallback))
 
 
@@ -3775,6 +4686,7 @@ def _localize_runtime_text(text: str, language: str) -> str:
         "Ошибка": _localized_value("failed", language, "Failed"),
     }
     value = str(text)
+    value = value.replace("Cancelled", _localized_value("cancelled", language, "Cancelled"))
     for source, target in replacements.items():
         value = value.replace(source, target)
     value = value.replace("Файл готов", _localized_value("ready_file", language, "File ready"))
@@ -3783,6 +4695,82 @@ def _localize_runtime_text(text: str, language: str) -> str:
     value = value.replace("Видео", _localized_value("video", language, "Video"))
     value = value.replace("Конвертация", _localized_value("convert", language, "Convert"))
     return value
+
+
+def _ai_summary_items(ai_meta: object, language: str) -> list[dict[str, str]]:
+    if not isinstance(ai_meta, dict):
+        return []
+    items: list[dict[str, str]] = []
+    for name, meta in ai_meta.items():
+        if not isinstance(meta, dict):
+            continue
+        key = str(name or "").strip()
+        status = str(meta.get("status") or "unknown").strip().lower() or "unknown"
+        label_key = "ai_used" if status == "used" else "ai_fallback" if status == "fallback" else "ai_unknown"
+        reason = _friendly_ai_reason(str(meta.get("fallback_reason") or meta.get("reason") or "").strip(), language)
+        model = str(meta.get("model") or "").strip()
+        selected_outputs = meta.get("selected_outputs")
+        output_count = len(selected_outputs) if isinstance(selected_outputs, list) else 0
+        scenario = translate(f"ai_{key}", language) if key else translate("ai_unknown", language)
+        details = [scenario]
+        if model:
+            details.append(model)
+        if reason and status != "fallback":
+            details.append(reason)
+        if output_count:
+            details.append(f"{output_count} {translate('ai_outputs', language)}")
+        items.append(
+            {
+                "key": key,
+                "status": status,
+                "label": translate(label_key, language),
+                "detail": " · ".join(part for part in details if part),
+                "reason": reason,
+                "model": model,
+            }
+        )
+    return items
+
+
+def _friendly_ai_reason(reason: str, language: str) -> str:
+    value = _localize_runtime_text(str(reason or "").strip(), language)
+    if not value:
+        return ""
+    lowered = value.lower()
+    localized = {
+        "quota": {
+            "en": "OpenAI quota is exhausted, local fallback used",
+            "ru": "Лимит OpenAI исчерпан, использован локальный fallback",
+            "uk": "Ліміт OpenAI вичерпано, використано локальний fallback",
+        },
+        "not_configured": {
+            "en": "OpenAI is not configured, local fallback used",
+            "ru": "OpenAI не настроен, использован локальный fallback",
+            "uk": "OpenAI не налаштовано, використано локальний fallback",
+        },
+        "no_usable": {
+            "en": "OpenAI returned no usable result, local fallback used",
+            "ru": "OpenAI не вернул подходящий результат, использован локальный fallback",
+            "uk": "OpenAI не повернув придатний результат, використано локальний fallback",
+        },
+        "generic": {
+            "en": "AI unavailable, local fallback used",
+            "ru": "AI недоступен, использован локальный fallback",
+            "uk": "AI недоступний, використано локальний fallback",
+        },
+    }
+    lang = language if language in {"en", "ru", "uk"} else "en"
+    if "insufficient_quota" in lowered or "insufficient quota" in lowered or "exceeded your current quota" in lowered or "error code: 429" in lowered:
+        return localized["quota"][lang]
+    if "openai is not configured" in lowered:
+        return localized["not_configured"][lang]
+    if "no usable" in lowered or "returned no cues" in lowered:
+        return localized["no_usable"][lang]
+    if "error code:" in lowered or "traceback" in lowered or "{'error'" in lowered or '"error"' in lowered:
+        return localized["generic"][lang]
+    value = re.sub(r"https?://\S+", "", value)
+    value = re.sub(r"\s+", " ", value).strip(" -:;·")
+    return value[:140]
 
 
 def _localize_job(job: dict, language: str) -> dict:
@@ -3798,6 +4786,7 @@ def _localize_job(job: dict, language: str) -> dict:
         item["label"] = _localize_runtime_text(str(item.get("label") or ""), language)
         outputs.append(item)
     prepared["outputs"] = outputs
+    prepared["ai_summary"] = _ai_summary_items(prepared.get("ai"), language)
     return prepared
 
 
@@ -3809,6 +4798,1110 @@ def _localize_events(events: list[dict], language: str) -> list[dict]:
         item["message"] = _localize_runtime_text(str(item.get("message") or ""), language)
         localized.append(item)
     return localized
+
+
+def _extract_originality_upload(upload, language: str) -> str:
+    suffix = Path(upload.name or "").suffix.lower()
+    data = b"".join(upload.chunks())
+    if suffix == ".doc":
+        raise ValueError(_originality_runtime_text("legacy_doc", language))
+    if suffix == ".docx":
+        return _extract_docx_text(data, language)
+    if suffix == ".pdf":
+        return _extract_pdf_text(data, language)
+    if suffix in {".txt", ".md", ".csv", ".json", ".rtf", ".html", ".htm", ""} or str(getattr(upload, "content_type", "") or "").startswith("text/"):
+        text = _decode_text_bytes(data)
+        if suffix in {".html", ".htm"}:
+            text = html.unescape(strip_tags(text))
+        if suffix == ".rtf":
+            text = _strip_rtf_text(text)
+        return text
+    raise ValueError(_originality_runtime_text("unsupported", language))
+
+
+def _extract_docx_text(data: bytes, language: str) -> str:
+    try:
+        document = Document(BytesIO(data))
+    except Exception as exc:
+        raise ValueError(_originality_runtime_text("docx_failed", language)) from exc
+    parts: list[str] = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+    return "\n\n".join(parts)
+
+
+def _extract_pdf_text(data: bytes, language: str) -> str:
+    try:
+        reader = PdfReader(BytesIO(data))
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
+        pages = []
+        for page in reader.pages[:80]:
+            pages.append(page.extract_text() or "")
+    except Exception as exc:
+        raise ValueError(_originality_runtime_text("pdf_failed", language)) from exc
+    text = "\n\n".join(page.strip() for page in pages if page.strip())
+    if not text.strip():
+        raise ValueError(_originality_runtime_text("pdf_empty", language))
+    return _repair_extracted_text(text)
+
+
+def _decode_text_bytes(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-16", "cp1251", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+
+def _strip_rtf_text(text: str) -> str:
+    text = re.sub(r"\\'[0-9a-fA-F]{2}", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+-?\d* ?", " ", text)
+    text = text.replace("{", " ").replace("}", " ")
+    return re.sub(r"\s+", " ", text)
+
+
+def _clean_originality_text(text: str) -> str:
+    text = html.unescape(str(text or ""))
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\u00a0", " ")
+    text = re.sub(r"[ \t\f\v]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return _repair_extracted_text(text.strip())
+
+
+def _repair_extracted_text(text: str) -> str:
+    text = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    raw_lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    lines = [line for line in raw_lines if line and not re.fullmatch(r"[-–—_ ]*\d{1,4}[-–—_ ]*", line)]
+    if not lines:
+        return text.strip()
+    word_counts = [len(_originality_words(line)) for line in lines]
+    short_ratio = sum(1 for count in word_counts if count <= 6) / max(1, len(word_counts))
+    median_words = statistics.median(word_counts) if word_counts else 0
+    if len(lines) < 18 or (short_ratio < 0.48 and median_words > 7):
+        return _repair_pdf_spacing_artifacts(re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip())
+
+    paragraphs: list[str] = []
+    current = ""
+    for line in lines:
+        if _is_noise_pdf_line(line):
+            continue
+        line = _normalize_pdf_line(line)
+        if not line:
+            continue
+        is_heading = _looks_like_section_heading(line)
+        should_flush = bool(current) and (is_heading or _ends_complete_sentence(current) and len(_originality_words(current)) >= 18)
+        if should_flush:
+            paragraphs.append(current.strip())
+            current = ""
+        current = f"{current} {line}".strip() if current else line
+        if is_heading and len(_originality_words(current)) <= 12:
+            paragraphs.append(current.strip())
+            current = ""
+    if current.strip():
+        paragraphs.append(current.strip())
+    repaired = "\n\n".join(_dedupe_repeated_short_lines(paragraphs))
+    repaired = re.sub(r"\s+([,;:!?])", r"\1", repaired).strip()
+    return _repair_pdf_spacing_artifacts(repaired)
+
+
+def _normalize_pdf_line(line: str) -> str:
+    line = re.sub(r"(?<=\d)\s+\.\s*(?=\d)", ".", line)
+    line = _repair_link_spacing_artifacts(line)
+    line = re.sub(r"\b([A-Za-zА-Яа-яЁёІіЇїЄєҐґ])\s+\.\s+", r"\1. ", line)
+    line = _repair_pdf_spacing_artifacts(line)
+    line = re.sub(r"\s{2,}", " ", line)
+    return line.strip()
+
+
+def _repair_link_spacing_artifacts(text: str) -> str:
+    text = str(text or "")
+    text = re.sub(r"\b(https?):\s*/\s*/", r"\1://", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(www)\s+\.\s+", r"\1.", text, flags=re.IGNORECASE)
+    text = re.sub(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9._%+-]+)\s*\.\s+([A-Za-z]{2,})(?=(?:[\s/]|$))", r"\1.\2", text)
+    text = re.sub(r"((?:https?://|www\.)[A-Za-z0-9.-]+)\s*\.\s+([A-Za-z]{2,})(?=(?:[\s/]|$))", r"\1.\2", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b([A-Za-z0-9-]{3,}\d[A-Za-z0-9-]*)\s*\.\s+([A-Za-z]{2,})(?=(?:[\s/]|$))", r"\1.\2", text)
+    text = re.sub(r"\b(https?://)\s+", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"/\s+/", "//", text)
+    return text
+
+
+def _repair_pdf_spacing_artifacts(text: str) -> str:
+    text = str(text or "")
+    replacements = (
+        (r"\bPy\s+thon\b", "Python"),
+        (r"\bD\s+j\s+ango\b", "Django"),
+        (r"\bD\s+jango\b", "Django"),
+        (r"\bF\s+igma\b", "Figma"),
+        (r"\bG\s+it\s+H\s+u\s+b\b", "GitHub"),
+        (r"\bV\s+S\s+C\s+o\s+d\s+e\b", "VS Code"),
+        (r"\bX\s+co\s+d\s+e\b", "Xcode"),
+        (r"\bP\s+ostgre\s+S\s+Q\s+L\b", "PostgreSQL"),
+        (r"\bR\s+E\s+S\s+T\b", "REST"),
+        (r"\bC\s+R\s+M\b", "CRM"),
+        (r"\bA\s+I\b", "AI"),
+        (r"\bU\s+I\s*/\s*U\s+X\b", "UI/UX"),
+        (r"\bi\s+O\s+S\b", "iOS"),
+        (r"\bDe\s+v\s+elopment\b", "Development"),
+        (r"\bde\s+v\s+elopment\b", "development"),
+        (r"\blea\s+d\s+ership\b", "leadership"),
+        (r"\bhan\s+d\s+s-on\b", "hands-on"),
+        (r"\bPro\s+j\s+ect\b", "Project"),
+        (r"\bpro\s+j\s+ects\b", "projects"),
+        (r"\bFullstack\b", "Fullstack"),
+        (r"\bF\s+ullstack\b", "Fullstack"),
+        (r"\btra\s+f\s+fi\s+c\b", "traffic"),
+        (r"\bplat\s+f\s+orm\b", "platform"),
+    )
+    for pattern, value in replacements:
+        text = re.sub(pattern, value, text, flags=re.IGNORECASE)
+    text = re.sub(r"\b([a-z]{3,})\s+([b-hj-z])\s+([a-z]{2,})(?=[\s,.;:!?)]|$)", r"\1\2\3", text)
+    text = re.sub(r"\b([A-Z][a-z]{2,})\s+([b-hj-z])\s+([a-z]{2,})(?=[\s,.;:!?)]|$)", r"\1\2\3", text)
+    text = re.sub(r"\b(?![AI]\s)([A-Z])\s+([a-z]{3,})(?=[\s,.;:!?)]|$)", r"\1\2", text)
+    return _repair_link_spacing_artifacts(text)
+
+
+def _is_noise_pdf_line(line: str) -> bool:
+    if len(line) <= 2:
+        return True
+    alpha_count = len(re.findall(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ]", line))
+    if alpha_count == 0 and len(line) < 12:
+        return True
+    if len(_originality_words(line)) <= 1 and re.fullmatch(r"[\d\s./№()_-]+", line):
+        return True
+    return False
+
+
+def _looks_like_section_heading(line: str) -> bool:
+    clean = line.strip()
+    words = _originality_words(clean)
+    if not (2 <= len(words) <= 12):
+        return False
+    if re.search(r"[;:!?…]$", clean):
+        return False
+    if re.fullmatch(r"\d+(?:\.\d+)*\.?", clean):
+        return False
+    alpha_count = len(re.findall(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ]", clean))
+    if alpha_count < 6:
+        return False
+    digit_ratio = len(re.findall(r"\d", clean)) / max(1, len(clean))
+    if digit_ratio > 0.32:
+        return False
+    return bool(re.match(r"^(?:\d+(?:\.\d+)*\.?\s+)?[A-ZА-ЯІЇЄҐ]", clean))
+
+
+def _ends_complete_sentence(text: str) -> bool:
+    return bool(re.search(r"[.!?…][\"')\]]?$", text.strip()))
+
+
+def _dedupe_repeated_short_lines(lines: list[str]) -> list[str]:
+    counts = Counter(line for line in lines if len(line) <= 90)
+    seen: Counter[str] = Counter()
+    result = []
+    for line in lines:
+        if counts[line] >= 4:
+            seen[line] += 1
+            if seen[line] > 1:
+                continue
+        result.append(line)
+    return result
+
+
+def _analyze_originality_text(text: str, language: str, source_name: str = "", truncated: bool = False) -> dict[str, object]:
+    sentences = _originality_sentences(text)
+    words = _originality_words(text)
+    paragraphs = _analysis_paragraphs(text)
+    document_kind = _originality_document_kind(text)
+    word_count = len(words)
+    sentence_count = len(sentences)
+    paragraph_count = len(paragraphs)
+    lengths = [len(item["words"]) for item in sentences if item["words"]]
+    avg_sentence = statistics.mean(lengths) if lengths else 0
+    sentence_stdev = statistics.pstdev(lengths) if len(lengths) > 1 else 0
+    lexical_diversity = len(set(words)) / max(1, word_count)
+
+    shingle_counts = Counter(_word_shingles(words, 8))
+    shingle_total = sum(shingle_counts.values())
+    duplicate_shingles = sum(count - 1 for count in shingle_counts.values() if count > 1)
+    duplicate_ratio = duplicate_shingles / max(1, shingle_total)
+    normalized_sentences = [item["norm"] for item in sentences if len(item["norm"]) > 34]
+    sentence_counts = Counter(normalized_sentences)
+    repeated_sentence_norms = {value for value, count in sentence_counts.items() if count > 1}
+    repeated_sentence_ratio = sum(count - 1 for count in sentence_counts.values() if count > 1) / max(1, len(normalized_sentences))
+
+    long_ratio = sum(1 for length in lengths if length >= 36) / max(1, len(lengths))
+    short_ratio = sum(1 for length in lengths if length <= 6) / max(1, len(lengths))
+    ai_marker_hits = _ai_marker_hits(text)
+    source_count = _source_marker_count(text)
+    source_claim_count = _source_claim_count(text)
+    heading_count = min(_heading_count(text), max(0, paragraph_count + 4))
+    bullet_count = len(re.findall(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text))
+
+    uniqueness_score = _clamp_score(100 - duplicate_ratio * 310 - repeated_sentence_ratio * 90)
+    repetition_score = _clamp_score(100 - duplicate_ratio * 360 - repeated_sentence_ratio * 110)
+    readability_score = _clamp_score(96 - long_ratio * 54 - short_ratio * 18 - max(0, avg_sentence - 28) * 1.4 - max(0, 10 - avg_sentence) * 1.2)
+    structure_score = _clamp_score(62 + min(22, paragraph_count * 2.2) + min(10, heading_count * 3) + min(6, bullet_count * 1.2) - (18 if paragraph_count <= 1 and word_count > 280 else 0))
+    sources_score = _source_support_score(word_count, source_count, source_claim_count, document_kind)
+    ai_risk = _ai_risk_score(
+        word_count=word_count,
+        sentence_count=sentence_count,
+        sentence_stdev=sentence_stdev,
+        avg_sentence=avg_sentence,
+        marker_hits=ai_marker_hits,
+        lexical_diversity=lexical_diversity,
+        long_ratio=long_ratio,
+        source_count=source_count,
+    )
+    overall_score = _clamp_score(
+        uniqueness_score * 0.32
+        + (100 - ai_risk) * 0.22
+        + readability_score * 0.18
+        + repetition_score * 0.13
+        + sources_score * 0.08
+        + structure_score * 0.07
+    )
+
+    metrics = [
+        _originality_metric("uniqueness", translate("metric_uniqueness", language), uniqueness_score, _score_tone(uniqueness_score), _metric_detail("uniqueness", language, round(duplicate_ratio * 100), len(repeated_sentence_norms))),
+        _originality_metric("ai_risk", translate("metric_ai_risk", language), ai_risk, _risk_tone(ai_risk), _metric_detail("ai_risk", language, ai_marker_hits, round(sentence_stdev, 1))),
+        _originality_metric("readability", translate("metric_readability", language), readability_score, _score_tone(readability_score), _metric_detail("readability", language, round(avg_sentence, 1), round(long_ratio * 100))),
+        _originality_metric("repetition", translate("metric_repetition", language), repetition_score, _score_tone(repetition_score), _metric_detail("repetition", language, duplicate_shingles, round(repeated_sentence_ratio * 100))),
+        _originality_metric("sources", translate("metric_sources", language), sources_score, _score_tone(sources_score), _metric_detail("sources", language, source_count, source_claim_count)),
+        _originality_metric("structure", translate("metric_structure", language), structure_score, _score_tone(structure_score), _metric_detail("structure", language, paragraph_count, heading_count)),
+    ]
+    segments = _originality_segments(sentences, repeated_sentence_norms, source_count, language, document_kind)
+    return {
+        "overall": {"score": overall_score, "tone": _score_tone(overall_score), "label": translate("originality_score", language)},
+        "source": {"name": source_name, "words": word_count, "sentences": sentence_count, "paragraphs": paragraph_count, "kind": document_kind, "kind_label": _document_kind_label(document_kind, language), "truncated": truncated},
+        "metrics": metrics,
+        "segments": segments,
+        "highlights": _originality_highlight_summary(segments, language),
+    }
+
+
+def _originality_sentences(text: str) -> list[dict[str, object]]:
+    units = []
+    protected = _protect_originality_sentence_boundaries(text)
+    for match in ORIGINALITY_SENTENCE_RE.finditer(protected):
+        stripped = _restore_originality_sentence_boundaries(match.group(0).strip())
+        if not stripped:
+            continue
+        words = _originality_words(stripped)
+        units.append({"text": stripped, "words": words, "norm": _normalize_originality_sentence(stripped)})
+    if not units and text.strip():
+        units.append({"text": text.strip(), "words": _originality_words(text), "norm": _normalize_originality_sentence(text)})
+    return units
+
+
+def _analysis_paragraphs(text: str) -> list[str]:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", text) if part.strip()]
+    if not paragraphs:
+        return [text.strip()] if text.strip() else []
+    words = _originality_words(text)
+    if len(paragraphs) > max(8, len(words) // 24):
+        merged: list[str] = []
+        current = ""
+        for part in paragraphs:
+            if current and (len(_originality_words(current)) >= 55 or _looks_like_section_heading(part)):
+                merged.append(current.strip())
+                current = ""
+            current = f"{current} {part}".strip() if current else part
+        if current:
+            merged.append(current.strip())
+        return merged
+    return paragraphs
+
+
+def _protect_originality_sentence_boundaries(text: str) -> str:
+    protected = text
+    dot_token = "__ORIGINALITY_DOT__"
+
+    def protect_dots(match: re.Match[str]) -> str:
+        return match.group(0).replace(".", dot_token)
+
+    protected = re.sub(r"\b[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b", protect_dots, protected, flags=re.UNICODE)
+    protected = re.sub(r"\bhttps?://[^\s]+", protect_dots, protected, flags=re.IGNORECASE)
+    protected = re.sub(r"\bwww\.[^\s]+", protect_dots, protected, flags=re.IGNORECASE)
+    protected = re.sub(r"\b[A-Za-z0-9-]{2,}\.[A-Za-z]{2,}(?:\.[A-Za-z]{2,})?\b", protect_dots, protected)
+    protected = re.sub(r"(?<=\d)\.(?=\d)", "∯", protected)
+    protected = re.sub(r"\b([A-Za-zА-Яа-яЁёІіЇїЄєҐґ])\.(?=\s)", r"\1∯", protected)
+    protected = re.sub(r"\b(м|р|п|ст|кв|вул|ім|т|гр|Mr|Mrs|Ms|Dr|Prof)\.(?=\s)", lambda match: match.group(0).replace(".", "∯"), protected, flags=re.IGNORECASE)
+    protected = re.sub(r"\b(\d{1,3})\.(?=\s+(?:[a-zа-яіїєґ]|[0-9]))", r"\1∯", protected, flags=re.IGNORECASE)
+    protected = re.sub(r"\b(\d{1,3})\.(?=\s+[A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])", r"\1∯", protected)
+    return protected
+
+
+def _restore_originality_sentence_boundaries(text: str) -> str:
+    text = text.replace("__ORIGINALITY_DOT__", ".")
+    return text.replace("∯", ".")
+
+
+def _originality_words(text: str) -> list[str]:
+    return [word.strip("’'-").lower() for word in ORIGINALITY_WORD_RE.findall(text.lower()) if len(word.strip("’'-")) > 1]
+
+
+def _normalize_originality_sentence(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\wА-Яа-яЁёІіЇїЄєҐґ]+", " ", text.lower(), flags=re.UNICODE)).strip()
+
+
+def _word_shingles(words: list[str], size: int) -> list[str]:
+    if len(words) < size:
+        return []
+    return [" ".join(words[index : index + size]) for index in range(0, len(words) - size + 1)]
+
+
+def _originality_mode_code(value: object) -> str:
+    code = str(value or "local").strip().lower()
+    return code if code in ORIGINALITY_MODES else "local"
+
+
+def _originality_check_metadata(mode_code: str, text: str) -> dict[str, object]:
+    mode = ORIGINALITY_MODES[_originality_mode_code(mode_code)]
+    probes = _originality_web_probe_queries(text, int(mode["max_web_queries"]))
+    return {
+        "mode": mode_code,
+        "mode_label": mode["label"],
+        "price_cherryx": mode["price"],
+        "max_chars": mode["max_chars"],
+        "web_queries_limit": mode["max_web_queries"],
+        "web_status": "planned" if probes else "not_requested",
+        "web_provider": "not_connected",
+        "web_probes": probes,
+        "share_enabled": True,
+    }
+
+
+def _originality_web_probe_queries(text: str, limit: int) -> list[dict[str, object]]:
+    if limit <= 0:
+        return []
+    sentences = [item for item in _originality_sentences(text) if len(item.get("words", [])) >= 8]
+    scored: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for item in sentences:
+        raw = re.sub(r"\s+", " ", str(item.get("text") or "")).strip()
+        words = _originality_words(raw)
+        if len(words) < 8:
+            continue
+        quote = " ".join(raw.split()[: min(14, max(8, len(raw.split())))])
+        key = _normalize_originality_sentence(quote)[:120]
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        score = len(set(words)) + min(24, len(words))
+        scored.append((score, quote))
+    scored.sort(reverse=True)
+    return [
+        {"query": f'"{quote}"', "status": "queued_stub", "matches": []}
+        for _, quote in scored[:limit]
+    ]
+
+
+def _ai_marker_hits(text: str) -> int:
+    lower = text.lower()
+    markers = (
+        "it is important to note", "it should be noted", "in conclusion", "moreover", "furthermore", "comprehensive analysis",
+        "multifaceted", "delves into", "plays a crucial role", "realm of", "significant impact",
+        "важно отметить", "следует отметить", "необходимо подчеркнуть", "таким образом", "в заключение", "данная работа",
+        "актуальность данной", "в современном мире", "комплексный подход", "многогранный", "играет важную роль",
+        "варто зазначити", "слід зазначити", "слід підкреслити", "таким чином", "у сучасному світі", "актуальність цієї",
+        "комплексний підхід", "відіграє важливу роль",
+    )
+    return sum(lower.count(marker) for marker in markers)
+
+
+def _source_marker_count(text: str) -> int:
+    return len(re.findall(r"https?://|www\.|\[[0-9]{1,3}\]|\((?:[^()]{2,40}),\s*(?:19|20)\d{2}[a-z]?\)|\bdoi\s*:|\bisbn\s*:", text, flags=re.IGNORECASE))
+
+
+def _source_claim_count(text: str) -> int:
+    lower = text.lower()
+    markers = (
+        "according to", "research shows", "studies show", "statistics", "data shows", "survey",
+        "согласно", "по данным", "исследования показывают", "статистика", "опрос", "учёные", "ученые",
+        "згідно з", "за даними", "дослідження показують", "статистика", "опитування",
+    )
+    return sum(lower.count(marker) for marker in markers)
+
+
+def _heading_count(text: str) -> int:
+    count = 0
+    for line in text.splitlines():
+        clean = line.strip()
+        words = _originality_words(clean)
+        alpha_count = len(re.findall(r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ]", clean))
+        if (
+            8 <= len(clean) <= 96
+            and 2 <= len(words) <= 12
+            and alpha_count >= 6
+            and not re.search(r"[.!?…;:]$", clean)
+            and not re.fullmatch(r"[\d\s./№()_-]+", clean)
+        ):
+            count += 1
+    return count
+
+
+def _originality_document_kind(text: str) -> str:
+    lower = text.lower()
+    legal_hits = sum(lower.count(marker) for marker in ("договір", "договору", "сторін", "замовник", "розробник", "виконавець", "форс-мажор", "рнокпп", "підпис", "відповідальність сторін"))
+    academic_hits = sum(lower.count(marker) for marker in ("курсова", "диплом", "вступ", "висновки", "список використаних джерел", "актуальність", "мета дослідження", "об'єкт дослідження", "предмет дослідження"))
+    if legal_hits >= 4 and legal_hits >= academic_hits:
+        return "legal"
+    if academic_hits >= 3:
+        return "academic"
+    return "general"
+
+
+def _source_support_score(word_count: int, source_count: int, source_claim_count: int, document_kind: str = "general") -> int:
+    if document_kind == "legal":
+        return _clamp_score(86 + min(8, source_count * 2) - max(0, source_claim_count - source_count) * 2)
+    if word_count < 160:
+        return 72 if source_count == 0 else 88
+    if source_count:
+        return _clamp_score(74 + min(22, source_count * 4) - max(0, source_claim_count - source_count) * 2)
+    if source_claim_count:
+        return 46
+    return 64 if word_count > 700 else 76
+
+
+def _ai_risk_score(*, word_count: int, sentence_count: int, sentence_stdev: float, avg_sentence: float, marker_hits: int, lexical_diversity: float, long_ratio: float, source_count: int) -> int:
+    if sentence_count <= 1:
+        return 22
+    uniformity = max(0.0, min(1.0, 1 - (sentence_stdev / max(avg_sentence, 1))))
+    marker_pressure = min(1.0, marker_hits / max(1.0, sentence_count / 7))
+    diversity_pressure = 0.0
+    if word_count > 180:
+        if lexical_diversity < 0.36:
+            diversity_pressure = min(1.0, (0.36 - lexical_diversity) * 5)
+        elif 0.42 <= lexical_diversity <= 0.58:
+            diversity_pressure = 0.28
+    risk = 14 + uniformity * 26 + marker_pressure * 34 + diversity_pressure * 18 + long_ratio * 9 + (5 if source_count == 0 and word_count > 450 else 0)
+    if word_count < 140:
+        risk -= 10
+    return _clamp_score(risk)
+
+
+def _originality_segments(sentences: list[dict[str, object]], repeated_norms: set[str], source_count: int, language: str, document_kind: str = "general") -> list[dict[str, object]]:
+    segments: list[dict[str, object]] = []
+    for item in sentences[:ORIGINALITY_VISIBLE_SEGMENTS]:
+        text = str(item["text"])
+        lower = text.lower()
+        words = item["words"] if isinstance(item.get("words"), list) else []
+        issue_keys: list[str] = []
+        if item.get("norm") in repeated_norms:
+            issue_keys.append("issue_repetition")
+        if _ai_marker_hits(text):
+            issue_keys.append("issue_ai_pattern")
+        if len(words) >= 38:
+            issue_keys.append("issue_long_sentence")
+        if document_kind != "legal" and source_count == 0 and _source_claim_count(text):
+            issue_keys.append("issue_sources")
+        if any(marker in lower for marker in ("данная работа", "в современном мире", "it is important to note", "in conclusion", "таким образом", "слід зазначити")):
+            issue_keys.append("issue_boilerplate")
+        issue_keys = list(dict.fromkeys(issue_keys))
+        issues = [translate(key, language) for key in issue_keys]
+        severity = "none"
+        if issues:
+            severity = "high" if "issue_repetition" in issue_keys or len(issue_keys) >= 3 else "medium"
+        segments.append({"text": text, "severity": severity, "issues": issues})
+    if len(sentences) > ORIGINALITY_VISIBLE_SEGMENTS:
+        segments.append({"text": "...", "severity": "none", "issues": []})
+    return segments
+
+
+def _originality_highlight_summary(segments: list[dict[str, object]], language: str) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for segment in segments:
+        for issue in segment.get("issues", []):
+            counts[str(issue)] += 1
+    return [{"label": label, "count": count, "tone": "bad" if count >= 4 else "warn"} for label, count in counts.most_common(6)] or [{"label": translate("originality_no_issues", language), "count": 0, "tone": "good"}]
+
+
+def _originality_detail_context(request: HttpRequest, job: dict, owner_id: int | None, guest_key: str, language: str) -> dict[str, object]:
+    if str(job.get("kind") or "") != "originality":
+        return {"is_originality": False}
+    record = _job_record_for_workspace(str(job.get("id") or ""), owner_id, guest_key)
+    analysis = _load_originality_analysis(record) if record else {}
+    if record and analysis:
+        _refresh_originality_html_report(record, analysis, language)
+    html_output = _originality_payload_output(job, "html")
+    json_output = _originality_payload_output(job, "json")
+    display_outputs = [html_output] if html_output else []
+    next_url = request.get_full_path()
+    overall = analysis.get("overall", {}) if isinstance(analysis.get("overall"), dict) else {}
+    score = max(0, min(100, int(overall.get("score") or 0)))
+    params = _job_record_params(record) if record else {}
+    originality_params = params.get("originality") if isinstance(params.get("originality"), dict) else {}
+    share_token = str(originality_params.get("share_token") or "")
+    return {
+        "is_originality": True,
+        "display_outputs": display_outputs,
+        "originality_report": analysis,
+        "originality_overall": overall,
+        "originality_score_degrees": round(score * 3.6, 1),
+        "originality_source": analysis.get("source", {}) if isinstance(analysis.get("source"), dict) else {},
+        "originality_metrics": analysis.get("metrics", []) if isinstance(analysis.get("metrics"), list) else [],
+        "originality_highlights": analysis.get("highlights", []) if isinstance(analysis.get("highlights"), list) else [],
+        "originality_report_output": html_output,
+        "originality_json_output": json_output,
+        "originality_report_url": html_output.get("preview_url", "") if html_output else "",
+        "originality_json_url": json_output.get("preview_url", "") if json_output else "",
+        "originality_send_url": reverse("studio:send_originality_report", args=[job.get("id")]),
+        "originality_result_link": request.build_absolute_uri(reverse("studio:job_detail", args=[job.get("id")])),
+        "originality_share_link": request.build_absolute_uri(reverse("studio:originality_shared_report", args=[share_token])) if share_token else "",
+        "originality_check": analysis.get("check", {}) if isinstance(analysis.get("check"), dict) else {},
+        "originality_recent_reports": _recent_originality_reports(owner_id, guest_key, exclude_job_id=str(job.get("id") or "")),
+        "originality_email_default": request.user.email if request.user.is_authenticated else "",
+        "originality_account_url": f"{reverse('studio:login')}?{urlencode({'next': next_url})}",
+    }
+
+
+def _recent_originality_reports(owner_id: int | None, guest_key: str, exclude_job_id: str = "") -> list[dict[str, object]]:
+    queryset = JobRecord.objects.filter(kind="originality").order_by("-created_at")
+    if owner_id is not None:
+        queryset = queryset.filter(owner_id=owner_id)
+    else:
+        queryset = queryset.filter(owner__isnull=True, guest_key=guest_key)
+    reports = []
+    for record in queryset[:8]:
+        if record.job_id == exclude_job_id:
+            continue
+        params = _job_record_params(record)
+        originality = params.get("originality") if isinstance(params.get("originality"), dict) else {}
+        check = originality.get("check") if isinstance(originality.get("check"), dict) else {}
+        reports.append(
+            {
+                "title": record.title,
+                "url": reverse("studio:job_detail", args=[record.job_id]),
+                "created_at": record.created_at,
+                "mode_label": check.get("mode_label") or "Local",
+                "price": check.get("price_cherryx") or 0,
+                "status": record.status,
+            }
+        )
+        if len(reports) >= 4:
+            break
+    return reports
+
+
+def _load_originality_analysis(record: JobRecord | None) -> dict[str, object]:
+    if not record:
+        return {}
+    for output in record.outputs.all():
+        path = Path(output.path)
+        if path.suffix.lower() != ".json" and "json" not in str(output.media_type).lower():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        analysis = payload.get("analysis") if isinstance(payload, dict) else None
+        if isinstance(analysis, dict):
+            return analysis
+    return {}
+
+
+def _originality_record_by_share_token(token: str) -> JobRecord | None:
+    clean = str(token or "").strip()
+    if len(clean) < 12:
+        return None
+    queryset = JobRecord.objects.filter(kind="originality").prefetch_related("outputs").order_by("-created_at")
+    for record in queryset[:500]:
+        params = _job_record_params(record)
+        originality = params.get("originality") if isinstance(params.get("originality"), dict) else {}
+        if originality.get("share_public", True) and originality.get("share_token") == clean:
+            return record
+    return None
+
+
+def _originality_payload_output(job: dict, kind: str) -> dict[str, object]:
+    for output in job.get("outputs", []):
+        name = str(output.get("name") or "").lower()
+        media_type = str(output.get("media_type") or "").lower()
+        if kind == "html" and (name.endswith(".html") or media_type.startswith("text/html")):
+            return output
+        if kind == "json" and (name.endswith(".json") or "json" in media_type):
+            return output
+    return {}
+
+
+def _originality_html_output(record: JobRecord) -> tuple[int, JobOutputRecord] | None:
+    for index, output in enumerate(record.outputs.all()):
+        name = Path(output.path).name.lower()
+        media_type = str(output.media_type or "").lower()
+        if name.endswith(".html") or media_type.startswith("text/html"):
+            return index, output
+    return None
+
+
+def _refresh_originality_html_report(
+    record: JobRecord,
+    analysis: dict[str, object],
+    language: str,
+    output_pair: tuple[int, JobOutputRecord] | None = None,
+) -> None:
+    output_pair = output_pair or _originality_html_output(record)
+    if not output_pair or not analysis:
+        return
+    _, output = output_pair
+    path = Path(output.path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_originality_report_html_v2(analysis, language), encoding="utf-8")
+    size = path.stat().st_size
+    if output.size != size or not str(output.media_type or "").lower().startswith("text/html"):
+        output.size = size
+        output.media_type = "text/html; charset=utf-8"
+        output.save(update_fields=["size", "media_type"])
+    try:
+        record.total_output_size = sum(int(item.size or 0) for item in record.outputs.all())
+        record.save(update_fields=["total_output_size", "updated_at"])
+    except Exception:
+        pass
+
+
+def _send_originality_email(request: HttpRequest, record: JobRecord, output_pair: tuple[int, JobOutputRecord], email: str, language: str) -> None:
+    index, output = output_pair
+    path = Path(output.path)
+    if not path.exists():
+        raise ValueError(translate("file_missing", language))
+    detail_url = request.build_absolute_uri(reverse("studio:job_detail", args=[record.job_id]))
+    preview_url = request.build_absolute_uri(reverse("studio:preview_output", args=[record.job_id, index]))
+    subject = f"CherryX · {translate('originality_title', language)}"
+    text_body = (
+        f"{translate('originality_email_intro', language)}\n\n"
+        f"{record.message}\n\n"
+        f"{translate('originality_full_report', language)}: {preview_url}\n"
+        f"{translate('copy_result_link', language)}: {detail_url}\n"
+    )
+    html_body = (
+        f"<p>{html.escape(translate('originality_email_intro', language))}</p>"
+        f"<p><strong>{html.escape(record.message)}</strong></p>"
+        f'<p><a href="{html.escape(preview_url)}">{html.escape(translate("originality_full_report", language))}</a></p>'
+        f'<p><a href="{html.escape(detail_url)}">{html.escape(translate("copy_result_link", language))}</a></p>'
+    )
+    message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=None, to=[email])
+    message.attach_alternative(html_body, "text/html")
+    message.attach(path.name, path.read_bytes(), "text/html")
+    message.send(fail_silently=False)
+
+
+def _create_originality_record(analysis: dict[str, object], text: str, owner_id: int | None, guest_key: str, language: str, source_name: str) -> JobRecord:
+    job_id = uuid.uuid4().hex[:16]
+    target_dir = settings.storage_dir / "originality_reports" / job_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    json_path = target_dir / "originality_report.json"
+    html_path = target_dir / "originality_report.html"
+    json_payload = {"analysis": analysis, "text_excerpt": text[:8000]}
+    json_path.write_text(json.dumps(json_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    html_path.write_text(_render_originality_report_html_v2(analysis, language), encoding="utf-8")
+
+    source = analysis.get("source") if isinstance(analysis.get("source"), dict) else {}
+    overall = analysis.get("overall") if isinstance(analysis.get("overall"), dict) else {}
+    metrics = analysis.get("metrics") if isinstance(analysis.get("metrics"), list) else []
+    ai_metric = next((metric for metric in metrics if isinstance(metric, dict) and metric.get("key") == "ai_risk"), {})
+    score = int(overall.get("score") or 0)
+    ai_score = int(ai_metric.get("score") or 0) if isinstance(ai_metric, dict) else 0
+    words = int(source.get("words") or 0)
+    title_name = Path(source_name).name if source_name else translate("originality_title", language)
+    record = JobRecord.objects.create(
+        owner_id=owner_id,
+        guest_key=guest_key if owner_id is None else "",
+        job_id=job_id,
+        kind="originality",
+        title=f"{translate('originality_check', language)}: {title_name}"[:240],
+        status="completed",
+        progress=100,
+        message=f"{translate('originality_score', language)}: {score}/100 · {translate('metric_ai_risk', language)}: {ai_score}/100 · {words} {translate('originality_words', language)}",
+        params_json="",
+        output_count=2,
+        total_output_size=html_path.stat().st_size + json_path.stat().st_size,
+        primary_output_type="text",
+    )
+    record.params_json = json.dumps(
+        {
+            "originality": {
+                "share_token": secrets.token_urlsafe(18),
+                "share_public": True,
+                "share_summary_only": False,
+                "created_language": language,
+                "check": analysis.get("check") if isinstance(analysis.get("check"), dict) else {},
+                "source_name": source_name,
+            }
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+    record.save(update_fields=["params_json", "updated_at"])
+    JobEventRecord.objects.create(job=record, status="queued", progress=12, message=_originality_process_message("received", language))
+    JobEventRecord.objects.create(job=record, status="running", progress=44, message=_originality_process_message("extracted", language, words))
+    JobEventRecord.objects.create(job=record, status="running", progress=78, message=_originality_process_message("metrics", language))
+    JobEventRecord.objects.create(job=record, status="completed", progress=100, message=_originality_process_message("ready", language, score))
+    JobOutputRecord.objects.create(job=record, label=_originality_output_label("html", language), path=str(html_path), media_type="text/html; charset=utf-8", size=html_path.stat().st_size)
+    JobOutputRecord.objects.create(job=record, label=_originality_output_label("json", language), path=str(json_path), media_type="application/json; charset=utf-8", size=json_path.stat().st_size)
+    record._prefetched_objects_cache = {"outputs": list(record.outputs.all())}
+    return record
+
+
+def _render_originality_report_html_v2(analysis: dict[str, object], language: str) -> str:
+    overall = analysis.get("overall") if isinstance(analysis.get("overall"), dict) else {}
+    source = analysis.get("source") if isinstance(analysis.get("source"), dict) else {}
+    metrics = analysis.get("metrics") if isinstance(analysis.get("metrics"), list) else []
+    highlights = analysis.get("highlights") if isinstance(analysis.get("highlights"), list) else []
+    segments = analysis.get("segments") if isinstance(analysis.get("segments"), list) else []
+    score = max(0, min(100, int(overall.get("score") or 0)))
+    tone = str(overall.get("tone") or "none")
+    if tone not in {"good", "warn", "bad"}:
+        tone = "none"
+    problem_segments = [
+        segment
+        for segment in segments
+        if isinstance(segment, dict)
+        and str(segment.get("severity") or "none") in {"medium", "high"}
+        and isinstance(segment.get("issues"), list)
+        and segment.get("issues")
+    ]
+    metric_markup = "\n".join(
+        _render_originality_report_metric(metric)
+        for metric in metrics
+        if isinstance(metric, dict)
+    )
+    highlight_markup = "\n".join(
+        _render_originality_report_highlight(item)
+        for item in highlights
+        if isinstance(item, dict)
+    )
+    segment_markup = "\n".join(_render_originality_report_problem_segment(segment) for segment in problem_segments)
+    if not segment_markup:
+        segment_markup = (
+            f'<div class="map-empty"><b>{html.escape(translate("originality_no_issues", language))}</b>'
+            f'<span>{html.escape(translate("originality_report_ready", language))}</span></div>'
+        )
+    title = str(source.get("name") or translate("originality_title", language))
+    kind = str(source.get("kind_label") or "")
+    meta_items = [
+        title,
+        kind,
+        f'{int(source.get("words") or 0)} {translate("originality_words", language)}',
+        f'{int(source.get("sentences") or 0)} {translate("originality_sentences", language)}',
+    ]
+    meta_markup = "\n".join(f"<span>{html.escape(item)}</span>" for item in meta_items if item)
+    score_label = html.escape(str(overall.get("label") or translate("originality_score", language)))
+    page_title = html.escape(translate("originality_title", language))
+    metrics_title = html.escape(translate("originality_metrics", language))
+    highlights_title = html.escape(translate("originality_highlights", language))
+    score_degrees = score * 3.6
+    return f"""<!doctype html>
+<html lang="{html.escape(clean_language(language))}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{page_title}</title>
+  <style>
+    :root {{ color-scheme: light; --blue:#2563eb; --ink:#101827; --muted:#64748b; --line:#d8e3f0; --surface:#ffffff; --good:#10b981; --warn:#f59e0b; --bad:#ef4444; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; padding:24px; background:linear-gradient(180deg,#eef6ff 0,#f8fbff 42%,#ffffff 100%); color:var(--ink); font-family:Inter,Segoe UI,Arial,sans-serif; }}
+    main {{ max-width:1120px; margin:0 auto; display:grid; gap:16px; }}
+    .hero {{ position:relative; overflow:hidden; display:grid; grid-template-columns:auto minmax(0,1fr); gap:20px; align-items:center; padding:22px; border:1px solid color-mix(in srgb,var(--blue) 18%,var(--line)); border-radius:18px; background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(255,255,255,.78)); box-shadow:0 24px 70px rgba(15,23,42,.12); }}
+    .hero::before {{ content:""; position:absolute; inset:0; background:radial-gradient(circle at 8% 0%,color-mix(in srgb,var(--blue) 14%,transparent),transparent 34%),repeating-linear-gradient(135deg,color-mix(in srgb,var(--blue) 8%,transparent) 0 1px,transparent 1px 20px); pointer-events:none; }}
+    .hero > * {{ position:relative; }}
+    .score {{ --score-size:122px; --score-ring:10px; --score-deg:{score_degrees}deg; position:relative; isolation:isolate; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; width:var(--score-size); height:var(--score-size); border-radius:50%; color:var(--blue); background:conic-gradient(from -90deg,currentColor 0 var(--score-deg),color-mix(in srgb,currentColor 11%,#e8eef8) var(--score-deg) 360deg); box-shadow:0 18px 38px color-mix(in srgb,currentColor 16%,transparent),inset 0 0 0 1px color-mix(in srgb,currentColor 22%,transparent); animation:score-breathe 3.8s ease-in-out infinite; }}
+    .score::before {{ content:""; position:absolute; inset:calc(var(--score-ring) + 1px); z-index:0; border-radius:inherit; background:radial-gradient(circle at 32% 22%,rgba(255,255,255,.98),transparent 34%),linear-gradient(180deg,#fff,color-mix(in srgb,currentColor 8%,#f7fbff)); box-shadow:inset 0 1px 0 rgba(255,255,255,.96),inset 0 -12px 26px color-mix(in srgb,currentColor 7%,transparent),0 0 0 1px color-mix(in srgb,currentColor 12%,transparent); }}
+    .score::after {{ content:""; position:absolute; inset:-3px; z-index:1; border-radius:inherit; background:conic-gradient(from 0deg,transparent 0 68%,color-mix(in srgb,currentColor 24%,transparent) 74%,transparent 82%); mask:radial-gradient(circle,transparent calc(50% - var(--score-ring) - 4px),#000 calc(50% - var(--score-ring) - 3px),#000 calc(50% + 3px),transparent calc(50% + 5px)); -webkit-mask:radial-gradient(circle,transparent calc(50% - var(--score-ring) - 4px),#000 calc(50% - var(--score-ring) - 3px),#000 calc(50% + 3px),transparent calc(50% + 5px)); opacity:.48; animation:score-orbit 5.8s linear infinite; pointer-events:none; }}
+    .score b,.score span {{ position:relative; z-index:2; }}
+    .score b {{ font-size:40px; font-variant-numeric:tabular-nums; letter-spacing:0; line-height:.88; text-shadow:0 8px 18px color-mix(in srgb,currentColor 18%,transparent); }}
+    .score span {{ color:color-mix(in srgb,var(--ink) 72%,var(--muted)); font-size:13px; font-weight:900; line-height:1; }}
+    .score.is-good {{ color:var(--good); }} .score.is-warn {{ color:var(--warn); }} .score.is-bad {{ color:var(--bad); }}
+    h1 {{ margin:0 0 8px; font-size:clamp(26px,4vw,42px); line-height:1; letter-spacing:0; }}
+    p {{ margin:0; color:var(--muted); line-height:1.45; }}
+    .meta {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }}
+    .meta span {{ display:inline-flex; align-items:center; min-height:30px; padding:6px 10px; border:1px solid color-mix(in srgb,var(--blue) 15%,var(--line)); border-radius:999px; background:rgba(255,255,255,.76); color:#334155; font-size:12px; font-weight:800; }}
+    .metrics {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
+    .metric {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 12px; align-items:center; padding:15px; border:1px solid var(--line); border-radius:14px; background:var(--surface); box-shadow:0 12px 34px rgba(15,23,42,.06); }}
+    .metric span {{ display:block; color:var(--ink); font-weight:900; }}
+    .metric b {{ color:var(--blue); font-size:30px; line-height:1; }}
+    .metric small {{ display:block; margin-top:4px; color:var(--muted); font-size:12px; line-height:1.3; }}
+    .metric i {{ grid-column:1 / -1; height:8px; overflow:hidden; border-radius:999px; background:#e8edf6; }}
+    .metric em {{ display:block; height:100%; border-radius:inherit; background:var(--blue); }}
+    .metric.is-good em {{ background:var(--good); }} .metric.is-good b {{ color:var(--good); }}
+    .metric.is-warn em {{ background:var(--warn); }} .metric.is-warn b {{ color:var(--warn); }}
+    .metric.is-bad em {{ background:var(--bad); }} .metric.is-bad b {{ color:var(--bad); }}
+    .grid {{ display:grid; grid-template-columns:minmax(250px,.34fr) minmax(0,1fr); gap:14px; }}
+    section {{ padding:17px; border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.92); box-shadow:0 14px 40px rgba(15,23,42,.06); }}
+    h2 {{ margin:0 0 12px; font-size:18px; }}
+    ul {{ display:grid; gap:8px; list-style:none; margin:0; padding:0; }}
+    li {{ display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:42px; padding:9px 0; border-top:1px solid #edf1f7; font-weight:800; }}
+    li:first-child {{ border-top:0; }}
+    li span {{ color:#334155; }}
+    li b {{ min-width:30px; height:28px; display:grid; place-items:center; border-radius:999px; background:var(--blue); color:#fff; font-size:12px; }}
+    li.is-good b {{ background:var(--good); }} li.is-warn b {{ background:var(--warn); }} li.is-bad b {{ background:var(--bad); }}
+    .map {{ max-height:640px; overflow:auto; padding-right:6px; color:#334155; font-size:14px; line-height:1.75; scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--blue) 42%,#9db7ff) transparent; }}
+    .map::-webkit-scrollbar {{ width:8px; }} .map::-webkit-scrollbar-track {{ background:transparent; }} .map::-webkit-scrollbar-thumb {{ border-radius:999px; background:color-mix(in srgb,var(--blue) 42%,#9db7ff); }}
+    .map-empty {{ display:grid; gap:6px; min-height:160px; place-content:center; text-align:center; border:1px dashed color-mix(in srgb,var(--good) 36%,var(--line)); border-radius:14px; background:linear-gradient(180deg,color-mix(in srgb,var(--good) 8%,#fff),#fff); }}
+    .map-empty b {{ color:#047857; font-size:16px; }}
+    .map-empty span {{ color:var(--muted); font-size:13px; font-weight:750; }}
+    mark {{ display:inline; margin:0 1px; padding:2px 4px; border-radius:6px; color:inherit; }}
+    mark.medium {{ background:rgba(245,158,11,.22); }} mark.high {{ background:rgba(239,68,68,.18); }}
+    mark small {{ display:inline-flex; margin-left:4px; padding:2px 5px; border-radius:999px; background:rgba(15,23,42,.78); color:#fff; font-size:10px; font-weight:800; }}
+    @keyframes score-breathe {{ 0%,100% {{ filter:saturate(1); }} 50% {{ filter:saturate(1.08) brightness(1.02); }} }}
+    @keyframes score-orbit {{ to {{ transform:rotate(360deg); }} }}
+    @media (prefers-reduced-motion:reduce) {{ .score,.score::after {{ animation:none; }} }}
+    @media (max-width:760px) {{ body {{ padding:12px; }} .hero,.grid,.metrics {{ grid-template-columns:1fr; }} .score {{ --score-size:104px; --score-ring:9px; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div class="score is-{html.escape(tone)}"><b>{score}</b><span>/100</span></div>
+      <div>
+        <h1>{page_title}</h1>
+        <p>{score_label}</p>
+        <div class="meta">{meta_markup}</div>
+      </div>
+    </header>
+    <div class="metrics">{metric_markup}</div>
+    <div class="grid">
+      <section><h2>{metrics_title}</h2><ul>{highlight_markup}</ul></section>
+      <section><h2>{highlights_title}</h2><div class="map">{segment_markup}</div></section>
+    </div>
+  </main>
+</body>
+</html>"""
+
+
+def _render_originality_report_metric(metric: dict[str, object]) -> str:
+    score = max(0, min(100, int(metric.get("score") or 0)))
+    tone = str(metric.get("tone") or "none")
+    if tone not in {"good", "warn", "bad"}:
+        tone = "none"
+    return (
+        f'<article class="metric is-{html.escape(tone)}">'
+        f'<div><span>{html.escape(str(metric.get("label") or ""))}</span>'
+        f'<small>{html.escape(str(metric.get("detail") or ""))}</small></div>'
+        f"<b>{score}</b><i><em style=\"width:{score}%\"></em></i></article>"
+    )
+
+
+def _render_originality_report_highlight(item: dict[str, object]) -> str:
+    tone = str(item.get("tone") or "none")
+    if tone not in {"good", "warn", "bad"}:
+        tone = "none"
+    return (
+        f'<li class="is-{html.escape(tone)}">'
+        f'<span>{html.escape(str(item.get("label") or ""))}</span>'
+        f'<b>{int(item.get("count") or 0)}</b></li>'
+    )
+
+
+def _render_originality_report_problem_segment(segment: dict[str, object]) -> str:
+    text = html.escape(str(segment.get("text") or ""))
+    severity = str(segment.get("severity") or "none")
+    if severity not in {"medium", "high"}:
+        severity = "medium"
+    issues = segment.get("issues") if isinstance(segment.get("issues"), list) else []
+    issue_text = " / ".join(str(issue) for issue in issues if issue)
+    if not text or not issue_text:
+        return ""
+    return f'<mark class="{html.escape(severity)}">{text}<small>{html.escape(issue_text)}</small></mark>'
+
+
+def _render_originality_report_html(analysis: dict[str, object], language: str) -> str:
+    overall = analysis.get("overall") if isinstance(analysis.get("overall"), dict) else {}
+    source = analysis.get("source") if isinstance(analysis.get("source"), dict) else {}
+    metrics = analysis.get("metrics") if isinstance(analysis.get("metrics"), list) else []
+    highlights = analysis.get("highlights") if isinstance(analysis.get("highlights"), list) else []
+    segments = analysis.get("segments") if isinstance(analysis.get("segments"), list) else []
+    score = int(overall.get("score") or 0)
+    metric_markup = "\n".join(
+        f'<article class="metric {html.escape(str(metric.get("tone") or ""))}"><span>{html.escape(str(metric.get("label") or ""))}</span><b>{int(metric.get("score") or 0)}</b><small>{html.escape(str(metric.get("detail") or ""))}</small><i><em style="width:{max(0, min(100, int(metric.get("score") or 0)))}%"></em></i></article>'
+        for metric in metrics
+        if isinstance(metric, dict)
+    )
+    highlight_markup = "\n".join(
+        f'<li><span>{html.escape(str(item.get("label") or ""))}</span><b>{int(item.get("count") or 0)}</b></li>'
+        for item in highlights
+        if isinstance(item, dict)
+    )
+    segment_markup = "\n".join(_render_originality_report_segment(segment) for segment in segments if isinstance(segment, dict))
+    title = html.escape(str(source.get("name") or translate("originality_title", language)))
+    kind = html.escape(str(source.get("kind_label") or ""))
+    return f"""<!doctype html>
+<html lang="{html.escape(clean_language(language))}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(translate("originality_title", language))}</title>
+  <style>
+    :root {{ color-scheme: light; --blue:#2563eb; --ink:#111827; --muted:#64748b; --line:#d7e1ec; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; padding:24px; background:#f5f8fc; color:var(--ink); font-family:Inter,Segoe UI,Arial,sans-serif; }}
+    main {{ max-width:1100px; margin:0 auto; display:grid; gap:18px; }}
+    header {{ display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px; align-items:center; padding:18px; border:1px solid var(--line); border-radius:12px; background:#fff; box-shadow:0 18px 44px rgba(15,23,42,.08); }}
+    .score {{ display:grid; place-items:center; width:104px; height:104px; border-radius:50%; color:var(--blue); background:radial-gradient(circle,color-mix(in srgb,var(--blue) 12%,transparent),transparent 62%),#fff; box-shadow:inset 0 0 0 10px color-mix(in srgb,var(--blue) 10%,transparent); border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line)); }}
+    .score b {{ font-size:34px; line-height:.9; }}
+    .score span {{ font-size:13px; color:var(--muted); font-weight:800; }}
+    h1 {{ margin:0 0 8px; font-size:clamp(24px,4vw,38px); line-height:1; }}
+    p {{ margin:0; color:var(--muted); line-height:1.45; }}
+    .metrics {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
+    .metric {{ display:grid; gap:7px; padding:14px; border:1px solid var(--line); border-radius:10px; background:#fff; }}
+    .metric span {{ font-weight:850; }}
+    .metric b {{ font-size:28px; color:var(--blue); }}
+    .metric small {{ min-height:30px; color:var(--muted); font-size:12px; line-height:1.25; }}
+    .metric i {{ height:7px; overflow:hidden; border-radius:999px; background:#e8edf6; }}
+    .metric em {{ display:block; height:100%; border-radius:inherit; background:var(--blue); }}
+    .metric.good em {{ background:#10b981; }} .metric.warn em {{ background:#f59e0b; }} .metric.bad em {{ background:#ef4444; }}
+    .grid {{ display:grid; grid-template-columns:minmax(220px,.32fr) minmax(0,1fr); gap:14px; }}
+    section {{ padding:16px; border:1px solid var(--line); border-radius:12px; background:#fff; }}
+    h2 {{ margin:0 0 12px; font-size:17px; }}
+    ul {{ display:grid; gap:9px; list-style:none; margin:0; padding:0; }}
+    li {{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:9px; border-bottom:1px solid #edf1f7; font-weight:760; }}
+    li b {{ min-width:30px; height:26px; display:grid; place-items:center; border-radius:999px; background:#2563eb; color:#fff; font-size:12px; }}
+    .map {{ max-height:640px; overflow:auto; padding-right:6px; font-size:14px; line-height:1.75; }}
+    mark {{ display:inline; margin:0 1px; padding:2px 4px; border-radius:6px; color:inherit; }}
+    mark.medium {{ background:rgba(245,158,11,.22); }} mark.high {{ background:rgba(239,68,68,.18); }}
+    mark small {{ display:inline-flex; margin-left:4px; padding:2px 5px; border-radius:999px; background:rgba(15,23,42,.78); color:#fff; font-size:10px; font-weight:800; }}
+    @media (max-width:760px) {{ body {{ padding:12px; }} header,.grid,.metrics {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="score"><b>{score}</b><span>/100</span></div>
+      <div>
+        <h1>{html.escape(translate("originality_title", language))}</h1>
+        <p>{title} · {kind} · {int(source.get("words") or 0)} {html.escape(translate("originality_words", language))} · {int(source.get("sentences") or 0)} {html.escape(translate("originality_sentences", language))}</p>
+      </div>
+    </header>
+    <div class="metrics">{metric_markup}</div>
+    <div class="grid">
+      <section><h2>{html.escape(translate("originality_metrics", language))}</h2><ul>{highlight_markup}</ul></section>
+      <section><h2>{html.escape(translate("originality_highlights", language))}</h2><div class="map">{segment_markup}</div></section>
+    </div>
+  </main>
+</body>
+</html>"""
+
+
+def _render_originality_report_segment(segment: dict[str, object]) -> str:
+    text = html.escape(str(segment.get("text") or ""))
+    severity = str(segment.get("severity") or "none")
+    issues = segment.get("issues") if isinstance(segment.get("issues"), list) else []
+    issue_text = " · ".join(str(issue) for issue in issues if issue)
+    if severity in {"medium", "high"} and issue_text:
+        return f'<mark class="{html.escape(severity)}">{text}<small>{html.escape(issue_text)}</small></mark>'
+    return f"<span>{text}</span>"
+
+
+def _document_kind_label(kind: str, language: str) -> str:
+    values = {
+        "legal": {"en": "Legal document", "ru": "Юридический документ", "uk": "Юридичний документ", "fr": "Document juridique", "de": "Rechtsdokument", "es": "Documento legal", "ka": "იურიდიული დოკუმენტი", "hy": "Իրավական փաստաթուղթ", "it": "Documento legale"},
+        "academic": {"en": "Academic work", "ru": "Академическая работа", "uk": "Академічна робота", "fr": "Travail académique", "de": "Akademische Arbeit", "es": "Trabajo académico", "ka": "აკადემიური ნაშრომი", "hy": "Ակադեմիական աշխատանք", "it": "Lavoro accademico"},
+        "general": {"en": "Text document", "ru": "Текстовый документ", "uk": "Текстовий документ", "fr": "Document texte", "de": "Textdokument", "es": "Documento de texto", "ka": "ტექსტური დოკუმენტი", "hy": "Տեքստային փաստաթուղթ", "it": "Documento di testo"},
+    }
+    language = clean_language(language)
+    item = values.get(kind, values["general"])
+    return item.get(language) or item["en"]
+
+
+def _originality_process_message(key: str, language: str, value: int | None = None) -> str:
+    values = {
+        "received": {"en": "Document received", "ru": "Документ получен", "uk": "Документ отримано", "fr": "Document reçu", "de": "Dokument empfangen", "es": "Documento recibido", "ka": "დოკუმენტი მიღებულია", "hy": "Փաստաթուղթը ստացվել է", "it": "Documento ricevuto"},
+        "extracted": {"en": f"Text extracted: {value or 0} words", "ru": f"Текст извлечён: {value or 0} слов", "uk": f"Текст витягнуто: {value or 0} слів", "fr": f"Texte extrait : {value or 0} mots", "de": f"Text extrahiert: {value or 0} Wörter", "es": f"Texto extraído: {value or 0} palabras", "ka": f"ტექსტი ამოღებულია: {value or 0} სიტყვა", "hy": f"Տեքստը հանվել է՝ {value or 0} բառ", "it": f"Testo estratto: {value or 0} parole"},
+        "metrics": {"en": "Metrics calculated and fragments marked", "ru": "Метрики рассчитаны, фрагменты отмечены", "uk": "Метрики розраховано, фрагменти позначено", "fr": "Mesures calculées et fragments marqués", "de": "Metriken berechnet und Stellen markiert", "es": "Métricas calculadas y fragmentos marcados", "ka": "მეტრიკები დათვლილია და ფრაგმენტები მონიშნულია", "hy": "Ցուցիչները հաշվարկվել են, հատվածները նշվել են", "it": "Metriche calcolate e frammenti segnati"},
+        "ready": {"en": f"Report ready: {value or 0}/100", "ru": f"Отчёт готов: {value or 0}/100", "uk": f"Звіт готовий: {value or 0}/100", "fr": f"Rapport prêt : {value or 0}/100", "de": f"Bericht fertig: {value or 0}/100", "es": f"Informe listo: {value or 0}/100", "ka": f"ანგარიში მზადაა: {value or 0}/100", "hy": f"Հաշվետվությունը պատրաստ է՝ {value or 0}/100", "it": f"Report pronto: {value or 0}/100"},
+    }
+    item = values.get(key, {})
+    language = clean_language(language)
+    return item.get(language) or item.get("en") or key
+
+
+def _originality_output_label(key: str, language: str) -> str:
+    values = {
+        "html": {"en": "HTML originality report", "ru": "HTML-отчёт уникальности", "uk": "HTML-звіт унікальності", "fr": "Rapport originalité HTML", "de": "HTML-Originalitätsbericht", "es": "Informe HTML de originalidad", "ka": "HTML ორიგინალურობის ანგარიში", "hy": "HTML ինքնատիպության հաշվետվություն", "it": "Report originalità HTML"},
+        "json": {"en": "JSON metrics", "ru": "JSON-метрики", "uk": "JSON-метрики", "fr": "Métriques JSON", "de": "JSON-Metriken", "es": "Métricas JSON", "ka": "JSON მეტრიკები", "hy": "JSON ցուցիչներ", "it": "Metriche JSON"},
+    }
+    item = values.get(key, {})
+    language = clean_language(language)
+    return item.get(language) or item.get("en") or key
+
+
+def _originality_metric(key: str, label: str, score: float, tone: str, detail: str) -> dict[str, object]:
+    return {"key": key, "label": label, "score": _clamp_score(score), "tone": tone, "detail": detail}
+
+
+def _metric_detail(key: str, language: str, first: float | int, second: float | int) -> str:
+    if key == "uniqueness":
+        return f"{_originality_phrase('repeated_shingles', language)}: {first}% · {_originality_phrase('duplicate_sentences', language)}: {second}"
+    if key == "ai_risk":
+        return f"{_originality_phrase('ai_markers', language)}: {first} · {_originality_phrase('length_spread', language)}: {second}"
+    if key == "readability":
+        return f"{_originality_phrase('avg_sentence', language)}: {first} · {_originality_phrase('long_sentences', language)}: {second}%"
+    if key == "repetition":
+        return f"{_originality_phrase('repeated_shingles_count', language)}: {first} · {_originality_phrase('sentence_repeats', language)}: {second}%"
+    if key == "sources":
+        return f"{_originality_phrase('links_citations', language)}: {first} · {_originality_phrase('claims', language)}: {second}"
+    if key == "structure":
+        return f"{_originality_phrase('paragraphs', language)}: {first} · {_originality_phrase('headings', language)}: {second}"
+    return ""
+
+
+def _originality_phrase(key: str, language: str) -> str:
+    phrases = {
+        "repeated_shingles": {"en": "Repeated shingles", "ru": "Повторы шинглов", "uk": "Повтори шинглів", "fr": "Shingles répétés", "de": "Wiederholte Shingles", "es": "Shingles repetidos", "ka": "განმეორებული შინგლები", "hy": "Կրկնվող շինգլներ", "it": "Shingle ripetuti"},
+        "duplicate_sentences": {"en": "duplicate sentences", "ru": "дубли фраз", "uk": "дублі фраз", "fr": "phrases doublées", "de": "doppelte Sätze", "es": "frases duplicadas", "ka": "დუბლირებული წინადადებები", "hy": "կրկնվող նախադասություններ", "it": "frasi duplicate"},
+        "ai_markers": {"en": "AI markers", "ru": "AI-маркеры", "uk": "AI-маркери", "fr": "marqueurs IA", "de": "KI-Marker", "es": "marcadores IA", "ka": "AI ნიშნები", "hy": "AI նշաններ", "it": "marker IA"},
+        "length_spread": {"en": "length spread", "ru": "разброс длины", "uk": "розкид довжини", "fr": "écart longueur", "de": "Längenstreuung", "es": "variación longitud", "ka": "სიგრძის გადახრა", "hy": "երկարության շեղում", "it": "scarto lunghezza"},
+        "avg_sentence": {"en": "Avg sentence", "ru": "Средняя фраза", "uk": "Середня фраза", "fr": "Phrase moyenne", "de": "Durchschnittssatz", "es": "Frase media", "ka": "საშუალო წინადადება", "hy": "Միջին նախադասություն", "it": "Frase media"},
+        "long_sentences": {"en": "long", "ru": "длинные", "uk": "довгі", "fr": "longues", "de": "lange", "es": "largas", "ka": "გრძელი", "hy": "երկար", "it": "lunghe"},
+        "repeated_shingles_count": {"en": "Repeated shingles", "ru": "Повторных шинглов", "uk": "Повторних шинглів", "fr": "Shingles répétés", "de": "Wiederholte Shingles", "es": "Shingles repetidos", "ka": "განმეორებული შინგლები", "hy": "Կրկնվող շինգլներ", "it": "Shingle ripetuti"},
+        "sentence_repeats": {"en": "sentence repeats", "ru": "повтор фраз", "uk": "повтор фраз", "fr": "répétitions phrases", "de": "Satzwiederholungen", "es": "repetición frases", "ka": "წინადადებების გამეორება", "hy": "նախադասության կրկնություն", "it": "ripetizioni frasi"},
+        "links_citations": {"en": "Links/citations", "ru": "Ссылки/цитаты", "uk": "Посилання/цитати", "fr": "Liens/citations", "de": "Links/Zitate", "es": "Enlaces/citas", "ka": "ბმულები/ციტატები", "hy": "Հղումներ/մեջբերումներ", "it": "Link/citazioni"},
+        "claims": {"en": "claims", "ru": "утверждения", "uk": "твердження", "fr": "affirmations", "de": "Aussagen", "es": "afirmaciones", "ka": "მტკიცებები", "hy": "պնդումներ", "it": "affermazioni"},
+        "paragraphs": {"en": "Paragraphs", "ru": "Абзацы", "uk": "Абзаци", "fr": "Paragraphes", "de": "Absätze", "es": "Párrafos", "ka": "აბზაცები", "hy": "Պարբերություններ", "it": "Paragrafi"},
+        "headings": {"en": "headings", "ru": "заголовки", "uk": "заголовки", "fr": "titres", "de": "Überschriften", "es": "títulos", "ka": "სათაურები", "hy": "վերնագրեր", "it": "titoli"},
+    }
+    values = phrases.get(key, {})
+    language = clean_language(language)
+    return values.get(language) or values.get("en") or key
+
+
+def _score_tone(score: float) -> str:
+    if score >= 76:
+        return "good"
+    if score >= 55:
+        return "warn"
+    return "bad"
+
+
+def _risk_tone(score: float) -> str:
+    if score <= 34:
+        return "good"
+    if score <= 64:
+        return "warn"
+    return "bad"
+
+
+def _clamp_score(value: float) -> int:
+    return int(round(max(0, min(100, value))))
+
+
+def _originality_runtime_text(key: str, language: str) -> str:
+    messages = {
+        "file_too_large": {"en": "Document is larger than 8 MB.", "ru": "Документ больше 8 MB.", "uk": "Документ більший за 8 MB."},
+        "legacy_doc": {"en": "Old .doc files are not supported. Save as DOCX, PDF or TXT.", "ru": "Старый .doc не поддерживается. Сохраните как DOCX, PDF или TXT.", "uk": "Старий .doc не підтримується. Збережіть як DOCX, PDF або TXT."},
+        "unsupported": {"en": "Unsupported document format. Use DOCX, PDF, TXT, MD, RTF or HTML.", "ru": "Формат документа не поддерживается. Используйте DOCX, PDF, TXT, MD, RTF или HTML.", "uk": "Формат документа не підтримується. Використайте DOCX, PDF, TXT, MD, RTF або HTML."},
+        "docx_failed": {"en": "Could not read DOCX text.", "ru": "Не получилось прочитать текст DOCX.", "uk": "Не вдалося прочитати текст DOCX."},
+        "pdf_failed": {"en": "Could not read PDF text.", "ru": "Не получилось прочитать текст PDF.", "uk": "Не вдалося прочитати текст PDF."},
+        "pdf_empty": {"en": "PDF has no readable text layer.", "ru": "В PDF нет читаемого текстового слоя.", "uk": "У PDF немає читабельного текстового шару."},
+    }
+    values = messages.get(key, {})
+    language = clean_language(language)
+    return values.get(language) or values.get("en") or key
 
 
 def _require_file(request: HttpRequest, field: str):
@@ -3923,6 +6016,7 @@ def _attach_output_urls(job: dict, url_cache: dict[str, dict[str, object]] | Non
     prepared["download_all_url"] = reverse("studio:download_all_outputs", args=[job["id"]])
     prepared["delete_url"] = reverse("studio:delete_job", args=[job["id"]])
     prepared["repeat_url"] = reverse("studio:repeat_job", args=[job["id"]])
+    prepared["cancel_url"] = reverse("studio:cancel_job", args=[job["id"]])
     outputs = []
     job_id = str(job.get("id") or "")
     cached = (url_cache or {}).get(job_id, {})

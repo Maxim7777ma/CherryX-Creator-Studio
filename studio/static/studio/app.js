@@ -2,6 +2,8 @@ const jobs = new Map();
 const polling = new Set();
 const ACTIVE_TAB_KEY = "studio.activeTab";
 const RESUME_STEP_KEY = "studio.resumeStep";
+const JOB_FILTER_KEY = "studio.jobFilter";
+const JOB_FORM_DRAFT_PREFIX = "studio.jobFormDraft.";
 const DESIGN_MODE_KEY = "studio.designerMode";
 const DESIGN_STORAGE_KEY = "studio.designBoard";
 const DESIGN_STORAGE_KEY_V2 = "studio.designBoard.v2";
@@ -41,6 +43,10 @@ setupLanguageSwitchers();
 setupSubscriptionDrawer();
 setupAccountPanel();
 setupDesignerModes();
+setupJobFormDrafts();
+setupSubtitleStylePickers();
+setupJobFilters();
+setupOriginalityChecker();
 restoreActiveTab();
 
 document.querySelectorAll(".tab").forEach((button) => {
@@ -91,8 +97,22 @@ document.querySelectorAll(".job-form").forEach((form) => {
 
 function setupLanguageSwitchers() {
   document.querySelectorAll(".language-switcher").forEach((switcher) => {
+    if (switcher.dataset.languageSwitcherBound === "1") return;
     const button = switcher.querySelector(".language-current");
     if (!button) return;
+    switcher.dataset.languageSwitcherBound = "1";
+    const positionMenu = () => {
+      const rect = button.getBoundingClientRect();
+      const safeGap = 14;
+      const menuWidth = 230;
+      const right = Math.max(safeGap, window.innerWidth - rect.right);
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+      switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
+      switcher.style.setProperty(
+        "--language-menu-right",
+        `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
+      );
+    };
     switcher.addEventListener("click", (event) => {
       event.stopPropagation();
     });
@@ -100,7 +120,14 @@ function setupLanguageSwitchers() {
       event.stopPropagation();
       const open = switcher.classList.toggle("is-open");
       button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) positionMenu();
     });
+    window.addEventListener("resize", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    });
+    window.addEventListener("scroll", () => {
+      if (switcher.classList.contains("is-open")) positionMenu();
+    }, { passive: true });
     document.addEventListener("click", (event) => {
       if (!switcher.contains(event.target)) {
         switcher.classList.remove("is-open");
@@ -141,6 +168,76 @@ function setupAccountPanel() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") setOpen(false);
+  });
+}
+
+function setupJobFormDrafts() {
+  document.querySelectorAll(".job-form").forEach((form, index) => {
+    const key = `${JOB_FORM_DRAFT_PREFIX}${form.id || form.dataset.endpoint || index}`;
+    let draft = {};
+    try {
+      draft = JSON.parse(localStorage.getItem(key) || "{}");
+    } catch {
+      draft = {};
+    }
+
+    const controls = [...form.querySelectorAll("input, select, textarea")].filter((control) => {
+      return control.name && control.type !== "file" && (control.type !== "hidden" || control.matches("[data-subtitle-style-input]")) && control.name !== "csrfmiddlewaretoken";
+    });
+
+    controls.forEach((control) => {
+      if (!(control.name in draft)) return;
+      if (control.type === "checkbox") {
+        control.checked = Boolean(draft[control.name]);
+        return;
+      }
+      if (control.type === "radio") {
+        control.checked = String(control.value) === String(draft[control.name]);
+        return;
+      }
+      control.value = draft[control.name];
+    });
+
+    const save = () => {
+      const next = {};
+      controls.forEach((control) => {
+        if (control.type === "checkbox") {
+          next[control.name] = control.checked;
+          return;
+        }
+        if (control.type === "radio") {
+          if (control.checked) next[control.name] = control.value;
+          return;
+        }
+        next[control.name] = control.value;
+      });
+      localStorage.setItem(key, JSON.stringify(next));
+    };
+
+    controls.forEach((control) => {
+      control.addEventListener("input", save);
+      control.addEventListener("change", save);
+    });
+  });
+}
+
+function setupJobFilters() {
+  const wrapper = document.querySelector("[data-job-filters]");
+  if (!wrapper) return;
+  const saved = localStorage.getItem(JOB_FILTER_KEY) || "all";
+  wrapper.querySelectorAll("[data-job-filter]").forEach((button) => {
+    const active = button.dataset.jobFilter === saved;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.addEventListener("click", () => {
+      localStorage.setItem(JOB_FILTER_KEY, button.dataset.jobFilter || "all");
+      wrapper.querySelectorAll("[data-job-filter]").forEach((item) => {
+        const isActive = item === button;
+        item.classList.toggle("is-active", isActive);
+        item.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      updateJobsPanel();
+    });
   });
 }
 
@@ -276,6 +373,62 @@ function setupCustomSelects() {
   });
 }
 
+function setupSubtitleStylePickers() {
+  document.querySelectorAll("[data-subtitle-style-picker]").forEach((picker) => {
+    const input = picker.querySelector("[data-subtitle-style-input]");
+    const current = picker.querySelector("[data-subtitle-style-current]");
+    const menu = picker.querySelector("[data-subtitle-style-menu]");
+    const cards = [...picker.querySelectorAll("[data-subtitle-style-value]")];
+    if (!input || !current || !menu || !cards.length) return;
+
+    const close = () => {
+      picker.classList.remove("is-open");
+      current.setAttribute("aria-expanded", "false");
+    };
+
+    const choose = (card, animate = true) => {
+      const value = card.dataset.subtitleStyleValue || "pop";
+      const swatch = card.querySelector(".subtitle-style-swatch")?.cloneNode(true);
+      const title = card.querySelector(".subtitle-style-copy b")?.textContent?.trim() || value;
+      const hint = card.querySelector(".subtitle-style-copy small")?.textContent?.trim() || "";
+      input.value = value;
+      cards.forEach((item) => item.classList.toggle("is-selected", item === card));
+      current.replaceChildren(
+        swatch || Object.assign(document.createElement("span"), { className: `subtitle-style-swatch is-${value}`, textContent: title }),
+        Object.assign(document.createElement("span"), {
+          innerHTML: `<b>${escapeHtml(title)}</b><small>${escapeHtml(hint)}</small>`,
+        }),
+      );
+      if (animate) {
+        current.classList.remove("is-pulse");
+        void current.offsetWidth;
+        current.classList.add("is-pulse");
+      }
+      close();
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+
+    const selected = cards.find((card) => card.dataset.subtitleStyleValue === input.value) || cards[0];
+    choose(selected, false);
+
+    current.addEventListener("click", () => {
+      const open = !picker.classList.contains("is-open");
+      picker.classList.toggle("is-open", open);
+      current.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    cards.forEach((card) => {
+      card.querySelector("[data-subtitle-style-choice]")?.addEventListener("click", () => choose(card));
+      card.querySelector("[data-subtitle-style-details]")?.addEventListener("click", () => choose(card, false));
+    });
+    document.addEventListener("click", (event) => {
+      if (!picker.contains(event.target)) close();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+  });
+}
+
 function loadAppMessages() {
   const script = document.getElementById("app-messages");
   if (!script) return {};
@@ -320,6 +473,157 @@ function setupFileFields() {
       dropzone.tabIndex = 0;
     }
   });
+}
+
+function setupOriginalityChecker() {
+  document.querySelectorAll("[data-originality-form]").forEach((form) => {
+    const panel = form.closest(".tool-panel");
+    const result = panel ? panel.querySelector("[data-originality-result]") : null;
+    const button = form.querySelector("button[type='submit']");
+    const textInput = form.querySelector("[data-originality-text]");
+    const fileInput = form.querySelector("input[type='file']");
+    if (!result) return;
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const hasText = Boolean(textInput && textInput.value.trim());
+      const hasFile = Boolean(fileInput && fileInput.files && fileInput.files.length);
+      if (!hasText && !hasFile) {
+        renderOriginalityError(result, i18n.originality_empty || "Paste text or upload a document.");
+        return;
+      }
+      const originalText = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = i18n.originality_checking || "Checking";
+      }
+      result.hidden = false;
+      result.classList.remove("is-error");
+      result.innerHTML = `<div class="originality-loading"><span></span><b>${escapeHtml(i18n.originality_checking || "Checking")}</b></div>`;
+      try {
+        const response = await fetch(form.dataset.endpoint, {
+          method: "POST",
+          body: new FormData(form),
+          headers: {
+            "X-CSRFToken": csrfToken(),
+            "X-Requested-With": "XMLHttpRequest",
+          },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || i18n.task_failed || "Task failed");
+        }
+        if (payload.job) renderJob(payload.job);
+        renderOriginalityAnalysis(result, payload.analysis || {}, payload.job || null);
+      } catch (error) {
+        renderOriginalityError(result, error.message || String(error));
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+      }
+    });
+  });
+}
+
+function renderOriginalityAnalysis(container, analysis, job = null) {
+  const overall = analysis.overall || {};
+  const source = analysis.source || {};
+  const metrics = Array.isArray(analysis.metrics) ? analysis.metrics : [];
+  const highlights = Array.isArray(analysis.highlights) ? analysis.highlights : [];
+  const segments = Array.isArray(analysis.segments) ? analysis.segments : [];
+  const check = analysis.check && typeof analysis.check === "object" ? analysis.check : {};
+  const score = Math.max(0, Math.min(100, Number(overall.score || 0)));
+  const scoreDeg = Math.round(score * 36) / 10;
+  const markedSegments = segments.filter((segment) => segment && segment.severity && segment.severity !== "none" && Array.isArray(segment.issues) && segment.issues.length);
+  const mapMarkup = markedSegments.length
+    ? markedSegments.map(renderOriginalitySegment).join(" ")
+    : `<div class="originality-map-empty"><strong>${escapeHtml(i18n.originality_no_issues || "No issues found.")}</strong><span>${escapeHtml(i18n.originality_open_report || i18n.originality_full_report || "Open report for details.")}</span></div>`;
+  const meta = [
+    source.name,
+    source.kind_label,
+    source.words !== undefined ? `${source.words} ${i18n.originality_words || "words"}` : "",
+    source.sentences !== undefined ? `${source.sentences} ${i18n.originality_sentences || "sentences"}` : "",
+  ].filter(Boolean);
+  const jobLink = job && job.detail_url ? `<a class="originality-report-link" href="${escapeHtml(job.detail_url)}" data-icon="external-link">${escapeHtml(i18n.originality_open_report || i18n.open || "Open report")}</a>` : "";
+  container.hidden = false;
+  container.classList.remove("is-error");
+  container.innerHTML = `
+    <div class="originality-overview">
+      <div class="originality-score is-${toneClass(overall.tone)}" style="--score-deg:${scoreDeg}deg">
+        <strong>${score}</strong>
+        <span>/100</span>
+      </div>
+      <div>
+        <small>${escapeHtml(overall.label || i18n.originality_score || "Integrity score")}</small>
+        <h3>${escapeHtml(meta.join(" · "))}</h3>
+        ${jobLink}
+      </div>
+    </div>
+    <div class="originality-metrics" aria-label="${escapeHtml(i18n.originality_metrics || "Metrics")}">
+      ${metrics.map(renderOriginalityMetric).join("")}
+    </div>
+    <div class="originality-check-meta">
+      <span>${escapeHtml(check.mode_label || "Local")}</span>
+      <span>${escapeHtml(String(check.price_cherryx || 5))} CherryX</span>
+      <span>${escapeHtml(String(check.web_queries_limit || 0))} web probes</span>
+      <span>${escapeHtml(check.web_status || "local")}</span>
+    </div>
+    <div class="originality-analysis-grid">
+      <section class="originality-highlight-list">
+        <h3>${escapeHtml(i18n.originality_metrics || "Metrics")}</h3>
+        ${highlights.map(renderOriginalityHighlight).join("")}
+      </section>
+      <section class="originality-text-map">
+        <h3>${escapeHtml(i18n.originality_highlights || "Marked fragments")}</h3>
+        <div>${mapMarkup}</div>
+      </section>
+    </div>
+  `;
+}
+
+function renderOriginalityMetric(metric) {
+  const score = Number(metric.score || 0);
+  return `
+    <article class="originality-metric is-${toneClass(metric.tone)}">
+      <div>
+        <strong>${escapeHtml(metric.label || "")}</strong>
+        <small>${escapeHtml(metric.detail || "")}</small>
+      </div>
+      <b>${score}</b>
+      <i aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, score))}%"></span></i>
+    </article>
+  `;
+}
+
+function renderOriginalityHighlight(item) {
+  return `
+    <article class="originality-highlight is-${toneClass(item.tone)}">
+      <span>${escapeHtml(item.label || "")}</span>
+      <b>${Number(item.count || 0)}</b>
+    </article>
+  `;
+}
+
+function renderOriginalitySegment(segment) {
+  const severity = toneClass(segment.severity);
+  const text = escapeHtml(segment.text || "");
+  const issues = Array.isArray(segment.issues) ? segment.issues.filter(Boolean).join(" · ") : "";
+  if (severity === "none" || !issues) {
+    return `<span>${text}</span>`;
+  }
+  return `<mark class="is-${severity}" title="${escapeHtml(issues)}">${text}<small>${escapeHtml(issues)}</small></mark>`;
+}
+
+function renderOriginalityError(container, message) {
+  container.hidden = false;
+  container.classList.add("is-error");
+  container.innerHTML = `<div class="originality-error">${escapeHtml(message || i18n.error || "Error")}</div>`;
+}
+
+function toneClass(value) {
+  return ["good", "warn", "bad", "medium", "high", "none"].includes(value) ? value : "none";
 }
 
 function setupResumeWizards() {
@@ -1454,7 +1758,7 @@ function setupDesignerPanelV2(panel) {
   };
 
   const uploadDesignAsset = async (file) => {
-    if (readOnly) throw new Error("View only");
+    if (readOnly) throw new Error(i18n.view_only || "View only");
     await ensureDesignProject();
     const form = new FormData();
     form.append("file", file);
@@ -1514,7 +1818,7 @@ function setupDesignerPanelV2(panel) {
     try {
       saving = true;
       clearTimeout(saveTimer);
-      setSaveStatus("Saving...");
+      setSaveStatus(i18n.saving || "Saving...");
       await ensureDesignProject();
       await migrateEmbeddedImages();
       const preview = await generateDesignPreview();
@@ -1526,10 +1830,10 @@ function setupDesignerPanelV2(panel) {
       dirty = false;
       saveFailed = false;
       syncProjectChrome();
-      setSaveStatus(`Saved ${savedTime()}`);
+      setSaveStatus(`${i18n.saved || "Saved"} ${savedTime()}`);
     } catch {
       saveFailed = true;
-      setSaveStatus("Save failed", true);
+      setSaveStatus(i18n.save_failed || "Save failed", true);
     } finally {
       saving = false;
     }
@@ -1539,7 +1843,7 @@ function setupDesignerPanelV2(panel) {
     if (!didInitialRender || !projectConfig.apiUrl || readOnly) return;
     dirty = true;
     saveFailed = false;
-    setSaveStatus("Saving...");
+    setSaveStatus(i18n.saving || "Saving...");
     clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveProject, 600);
   };
@@ -2226,8 +2530,9 @@ function setupDesignerPanelV2(panel) {
   const renderInspector = () => {
     if (!inspector) return;
     const selection = [...selectedIds];
+    const canvasLabel = i18n.canvas || "Canvas";
     if (selectionCount) {
-      if (!selection.length) selectionCount.textContent = tool === "draw" ? (i18n.pen || "Pen") : "Canvas";
+      if (!selection.length) selectionCount.textContent = tool === "draw" ? (i18n.pen || "Pen") : canvasLabel;
       else if (selection.length === 1) selectionCount.textContent = (selectedLayer() && (selectedLayer().name || selectedLayer().type)) || "Layer";
       else selectionCount.textContent = `${selection.length} ${i18n.layers || "Layers"}`;
     }
@@ -2249,7 +2554,7 @@ function setupDesignerPanelV2(panel) {
       }
       inspector.innerHTML = `
         <section class="designer-inspector-section is-empty">
-          <span>Canvas</span>
+          <span>${escapeHtml(canvasLabel)}</span>
           <div class="designer-selection-actions">
             <button type="button" data-design-tool-proxy="frame">${escapeHtml(i18n.frame || "Frame")}</button>
             <button type="button" data-design-tool-proxy="text">${escapeHtml(i18n.text || "Text")}</button>
@@ -4089,7 +4394,7 @@ function setupDesignerPanelV2(panel) {
           state.title = data.project?.title || next;
           syncProjectChrome();
         } catch {
-          setSaveStatus("Save failed", true);
+          setSaveStatus(i18n.save_failed || "Save failed", true);
         }
       }
     };
@@ -4140,7 +4445,7 @@ function setupDesignerPanelV2(panel) {
   });
   render();
   syncProjectChrome();
-  setSaveStatus(readOnly ? "View only" : (projectId ? `Saved ${savedTime()}` : "Local draft"));
+  setSaveStatus(readOnly ? (i18n.view_only || "View only") : (projectId ? `${i18n.saved || "Saved"} ${savedTime()}` : (i18n.local_draft || "Local draft")));
   didInitialRender = true;
   if (!state.didFit) {
     state.didFit = true;
@@ -4746,15 +5051,36 @@ function setupTemplatePicker(form) {
 }
 
 document.addEventListener("click", async (event) => {
+  const actionToggle = event.target.closest("[data-job-actions-toggle]");
+  if (actionToggle) {
+    event.preventDefault();
+    const actions = actionToggle.closest("[data-job-actions]");
+    const open = !actions?.classList.contains("is-open");
+    closeJobActionMenus(actions);
+    if (actions) {
+      actions.classList.toggle("is-open", open);
+      actionToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    return;
+  }
+
+  if (!event.target.closest("[data-job-actions]")) {
+    closeJobActionMenus();
+  }
+
   const deleteButton = event.target.closest("[data-delete-url]");
   if (deleteButton) {
     event.preventDefault();
     const card = deleteButton.closest("[data-job-id]");
     const jobId = card ? card.dataset.jobId : "";
-    if (!window.confirm(i18n.delete_confirm || "Delete this task and its files?")) return;
-    const originalText = deleteButton.textContent;
+    closeJobActionMenus();
+    const confirmed = await confirmJobDelete(card);
+    if (!confirmed) return;
+    const deleteLabel = deleteButton.querySelector("span");
+    const originalText = deleteLabel ? deleteLabel.textContent : deleteButton.textContent;
     deleteButton.disabled = true;
-    deleteButton.textContent = i18n.deleting || "Deleting";
+    if (deleteLabel) deleteLabel.textContent = i18n.deleting || "Deleting";
+    else deleteButton.textContent = i18n.deleting || "Deleting";
     try {
       const response = await fetch(deleteButton.dataset.deleteUrl, {
         method: "POST",
@@ -4772,14 +5098,12 @@ document.addEventListener("click", async (event) => {
         polling.delete(jobId);
       }
       card?.remove();
-      const empty = document.getElementById("empty-jobs");
-      const counter = document.getElementById("jobs-count");
-      if (empty) empty.hidden = jobs.size > 0;
-      if (counter) counter.textContent = String(jobs.size);
+      updateJobsPanel();
       if (payload.account_stats) updateAccountStats(payload.account_stats);
     } catch (error) {
       deleteButton.disabled = false;
-      deleteButton.textContent = originalText;
+      if (deleteLabel) deleteLabel.textContent = originalText;
+      else deleteButton.textContent = originalText;
       window.alert(error.message || String(error));
     }
     return;
@@ -4788,9 +5112,12 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-repeat-url]");
   if (!button) return;
   event.preventDefault();
-  const originalText = button.textContent;
+  closeJobActionMenus();
+  const repeatLabel = button.querySelector("span");
+  const originalText = repeatLabel ? repeatLabel.textContent : button.textContent;
   button.disabled = true;
-  button.textContent = i18n.repeating || "Repeating";
+  if (repeatLabel) repeatLabel.textContent = i18n.repeating || "Repeating";
+  else button.textContent = i18n.repeating || "Repeating";
   try {
     const response = await fetch(button.dataset.repeatUrl, {
       method: "POST",
@@ -4817,8 +5144,13 @@ document.addEventListener("click", async (event) => {
     });
   } finally {
     button.disabled = false;
-    button.textContent = originalText;
+    if (repeatLabel) repeatLabel.textContent = originalText;
+    else button.textContent = originalText;
   }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeJobActionMenus();
 });
 
 function updateAccountStats(stats) {
@@ -4857,6 +5189,7 @@ function updatePreview(input) {
     URL.revokeObjectURL(preview.dataset.objectUrl);
     delete preview.dataset.objectUrl;
   }
+  preview.classList.remove("is-document-preview", "is-pdf-preview", "is-text-preview", "is-card-preview");
   preview.innerHTML = "";
 
   const file = input.files && input.files[0];
@@ -4894,9 +5227,144 @@ function updatePreview(input) {
     preview.appendChild(video);
     return;
   }
-  const label = document.createElement("span");
-  label.textContent = file.name;
-  preview.appendChild(label);
+  if (isPdfFile(file)) {
+    preview.classList.add("is-document-preview", "is-pdf-preview");
+    const frame = document.createElement("iframe");
+    frame.src = `${url}#toolbar=0&navpanes=0`;
+    frame.title = file.name;
+    preview.appendChild(frame);
+    return;
+  }
+  if (isTextPreviewFile(file)) {
+    preview.classList.add("is-document-preview", "is-text-preview");
+    const reader = new FileReader();
+    const pre = document.createElement("pre");
+    pre.textContent = i18n.loading || "Loading";
+    preview.appendChild(pre);
+    reader.addEventListener("load", () => {
+      const text = String(reader.result || "");
+      pre.textContent = text.slice(0, 12000) || file.name;
+      if (text.length > 12000) {
+        const note = document.createElement("small");
+        note.textContent = "Preview truncated. Full document will be checked.";
+        preview.appendChild(note);
+      }
+    });
+    reader.addEventListener("error", () => {
+      previewDocumentCard(preview, file, "Text preview is unavailable. The document will still be processed.");
+    });
+    reader.readAsText(file);
+    return;
+  }
+  if (input.dataset.documentPreviewEndpoint && isServerExtractableDocument(file)) {
+    previewServerDocument(input, preview, file);
+    return;
+  }
+  previewDocumentCard(preview, file, documentPreviewHint(file));
+}
+
+function isPdfFile(file) {
+  const name = (file.name || "").toLowerCase();
+  return file.type === "application/pdf" || name.endsWith(".pdf");
+}
+
+function isTextPreviewFile(file) {
+  const name = (file.name || "").toLowerCase();
+  const type = (file.type || "").toLowerCase();
+  return type.startsWith("text/") || [".txt", ".md", ".csv", ".json", ".html", ".htm"].some((ext) => name.endsWith(ext));
+}
+
+function isServerExtractableDocument(file) {
+  const name = (file.name || "").toLowerCase();
+  return [".docx", ".rtf", ".doc"].some((ext) => name.endsWith(ext));
+}
+
+async function previewServerDocument(input, preview, file) {
+  preview.classList.add("is-document-preview", "is-text-preview");
+  preview.innerHTML = `<pre>${escapeHtml(i18n.loading || "Loading")}</pre>`;
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const response = await fetch(input.dataset.documentPreviewEndpoint, {
+      method: "POST",
+      body: formData,
+      headers: {
+        "X-CSRFToken": csrfToken(),
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Preview unavailable");
+    }
+    renderExtractedDocumentPreview(preview, {
+      name: payload.name || file.name,
+      words: Number(payload.words || 0),
+      text: payload.text || file.name,
+      type: fileExtensionLabel(file),
+    });
+    if (payload.truncated) {
+      const note = document.createElement("small");
+      note.textContent = "Preview truncated. Full document will be checked.";
+      preview.appendChild(note);
+    }
+  } catch (error) {
+    previewDocumentCard(preview, file, error.message || documentPreviewHint(file));
+  }
+}
+
+function renderExtractedDocumentPreview(preview, payload) {
+  preview.innerHTML = "";
+  const header = document.createElement("div");
+  header.className = "document-text-preview-head";
+  header.innerHTML = `
+    <span class="document-preview-type">${escapeHtml(payload.type || "DOC")}</span>
+    <strong>${escapeHtml(payload.name || "Document")}</strong>
+    <span>${Number(payload.words || 0).toLocaleString("ru-RU")} words</span>
+  `;
+  const page = document.createElement("article");
+  page.className = "document-extracted-page";
+  const paragraphs = String(payload.text || "")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!paragraphs.length) {
+    const empty = document.createElement("p");
+    empty.textContent = payload.name || "Document";
+    page.appendChild(empty);
+  } else {
+    paragraphs.slice(0, 80).forEach((paragraph, index) => {
+      const element = document.createElement(index === 0 && paragraph.length < 140 ? "h4" : "p");
+      element.textContent = paragraph;
+      page.appendChild(element);
+    });
+  }
+  preview.append(header, page);
+}
+
+function documentPreviewHint(file) {
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".docx")) return "DOCX preview will be extracted during the check.";
+  if (name.endsWith(".rtf")) return "RTF preview will be extracted during the check.";
+  return "Preview is not available in browser. The file will still be processed.";
+}
+
+function previewDocumentCard(preview, file, hint) {
+  preview.classList.add("is-document-preview", "is-card-preview");
+  preview.innerHTML = `
+    <article class="document-preview-card">
+      <b>${escapeHtml(fileExtensionLabel(file))}</b>
+      <strong>${escapeHtml(file.name || "Document")}</strong>
+      <span>${escapeHtml(readableSize(file.size))}${file.type ? ` · ${escapeHtml(file.type)}` : ""}</span>
+      <small>${escapeHtml(hint)}</small>
+    </article>
+  `;
+}
+
+function fileExtensionLabel(file) {
+  const name = String(file.name || "");
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  return (ext || "file").slice(0, 5).toUpperCase();
 }
 
 function updateCompatibleFormats(input, file) {
@@ -4958,10 +5426,7 @@ async function pollJob(jobId) {
 function renderJob(job) {
   jobs.set(job.id, job);
   const list = document.getElementById("jobs-list");
-  const empty = document.getElementById("empty-jobs");
-  const counter = document.getElementById("jobs-count");
-  empty.hidden = jobs.size > 0;
-  counter.textContent = String(jobs.size);
+  if (!list) return;
 
   let card = list.querySelector(`[data-job-id="${cssEscape(job.id)}"]`);
   if (!card) {
@@ -4971,57 +5436,238 @@ function renderJob(job) {
   }
 
   card.className = `job-card ${job.status === "failed" ? "is-failed" : ""}`;
+  card.dataset.jobStatus = job.status || "";
   card.innerHTML = `
     <div class="job-topline">
       <p class="job-title">${escapeHtml(job.title || i18n.task || "Task")}</p>
-      <span class="job-status">${escapeHtml(statusLabel(job.status))}</span>
+      <div class="job-top-actions">
+        <span class="job-status">${escapeHtml(statusLabel(job.status))}</span>
+        ${renderJobActionMenu(job)}
+      </div>
     </div>
     <p class="job-message">
       <span>${escapeHtml(job.error || job.message || "")}</span>
       ${job.eta_text && job.status !== "completed" && job.status !== "failed" ? `<small class="job-eta">${escapeHtml(job.eta_text)}</small>` : ""}
     </p>
+    ${renderAiMeta(job.ai)}
     <div class="progress" aria-label="progress">
       <span style="width: ${Number(job.progress || 0)}%"></span>
     </div>
-    <div class="job-actions">
-      ${job.detail_url ? `<a class="job-open" href="${escapeHtml(job.detail_url)}">${escapeHtml(i18n.open || "Open")}</a>` : ""}
-      ${job.repeatable && job.repeat_url ? `<button class="job-open" type="button" data-repeat-url="${escapeHtml(job.repeat_url)}">${escapeHtml(i18n.repeat || "Repeat")}</button>` : ""}
-      ${(job.outputs || []).length && job.download_all_url ? `<a class="job-open" href="${escapeHtml(job.download_all_url)}">${escapeHtml(i18n.download_all || "Download all")}</a>` : ""}
-      ${job.delete_url && job.status !== "queued" && job.status !== "running" ? `<button class="job-open danger-action" type="button" data-delete-url="${escapeHtml(job.delete_url)}">${escapeHtml(i18n.delete || "Delete")}</button>` : ""}
-    </div>
     ${renderOutputs(job.outputs || [])}
   `;
-  trimJobsPanel();
+  updateJobsPanel();
 }
 
-function trimJobsPanel() {
+function renderJobActionMenu(job) {
+  const actions = [];
+  const access = window.STUDIO_ACCESS || {};
+  const hasAccess = access.hasAccess === true;
+  const checkoutUrl = access.checkoutUrl || "/billing/checkout/";
+  if (job.detail_url) {
+    actions.push(`<a class="job-action-item" href="${escapeHtml(job.detail_url)}" data-icon="external-link"><span>${escapeHtml(i18n.open || "Open")}</span></a>`);
+  }
+  if (job.repeatable && job.repeat_url) {
+    actions.push(`<button class="job-action-item" type="button" data-repeat-url="${escapeHtml(job.repeat_url)}" data-icon="rotate-ccw"><span>${escapeHtml(i18n.repeat || "Repeat")}</span></button>`);
+  }
+  if ((job.outputs || []).length && job.download_all_url) {
+    const href = hasAccess ? job.download_all_url : checkoutUrl;
+    actions.push(`<a class="job-action-item" href="${escapeHtml(href)}" data-icon="download"><span>${escapeHtml(hasAccess ? (i18n.download_all || "Download all") : "Checkout")}</span></a>`);
+  }
+  if (job.delete_url && job.status !== "queued" && job.status !== "running") {
+    actions.push(`<button class="job-action-item is-danger" type="button" data-delete-url="${escapeHtml(job.delete_url)}" data-icon="trash-2"><span>${escapeHtml(i18n.delete || "Delete")}</span></button>`);
+  }
+  if (!actions.length) return "";
+  const label = escapeHtml(i18n.actions || "Actions");
+  return `
+    <div class="job-action-menu" data-job-actions>
+      <button class="job-action-toggle" type="button" data-job-actions-toggle data-icon="settings" aria-label="${label}" aria-expanded="false">
+        <span>${label}</span>
+      </button>
+      <div class="job-action-popover" role="menu">
+        ${actions.join("")}
+      </div>
+    </div>
+  `;
+}
+
+function closeJobActionMenus(except) {
+  document.querySelectorAll("[data-job-actions].is-open").forEach((menu) => {
+    if (except && menu === except) return;
+    menu.classList.remove("is-open");
+    menu.querySelector("[data-job-actions-toggle]")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function confirmJobDelete(card) {
+  const modal = ensureJobDeleteModal();
+  const title = card?.querySelector(".job-title")?.textContent?.trim() || i18n.task || "Task";
+  modal.querySelector("[data-job-delete-title]").textContent = i18n.delete_task_question || "Delete this task?";
+  modal.querySelector("[data-job-delete-copy]").textContent = i18n.delete_confirm || "Delete this task and its files?";
+  modal.querySelector("[data-job-delete-name]").textContent = title;
+  modal.hidden = false;
+  document.body.classList.add("job-delete-open");
+  const confirm = modal.querySelector("[data-job-delete-confirm]");
+  confirm.focus();
+
+  return new Promise((resolve) => {
+    const finish = (value) => {
+      modal.hidden = true;
+      document.body.classList.remove("job-delete-open");
+      modal.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKeydown);
+      resolve(value);
+    };
+    const onClick = (event) => {
+      if (event.target.closest("[data-job-delete-confirm]")) finish(true);
+      if (event.target.closest("[data-job-delete-cancel]")) finish(false);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") finish(false);
+    };
+    modal.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKeydown);
+  });
+}
+
+function ensureJobDeleteModal() {
+  let modal = document.querySelector("[data-job-delete-modal]");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.className = "job-delete-modal";
+  modal.dataset.jobDeleteModal = "";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="job-delete-backdrop" data-job-delete-cancel></div>
+    <section class="job-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="job-delete-title">
+      <span>${escapeHtml(i18n.delete_confirmation || "Delete confirmation")}</span>
+      <h2 id="job-delete-title" data-job-delete-title>${escapeHtml(i18n.delete_task_question || "Delete this task?")}</h2>
+      <p data-job-delete-copy>${escapeHtml(i18n.delete_confirm || "Delete this task and its files?")}</p>
+      <div class="job-delete-target">
+        <small>${escapeHtml(i18n.task || "Task")}</small>
+        <b data-job-delete-name></b>
+      </div>
+      <footer>
+        <button type="button" data-job-delete-cancel>${escapeHtml(i18n.cancel || "Cancel")}</button>
+        <button class="is-danger" type="button" data-job-delete-confirm>${escapeHtml(i18n.delete || "Delete")}</button>
+      </footer>
+    </section>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function updateJobsPanel() {
   const list = document.getElementById("jobs-list");
   if (!list) return;
-  [...list.querySelectorAll("[data-job-id]")].slice(5).forEach((card) => card.remove());
+  const empty = document.getElementById("empty-jobs");
+  const counter = document.getElementById("jobs-count");
+  const filter = localStorage.getItem(JOB_FILTER_KEY) || "all";
+  const cards = [...list.querySelectorAll("[data-job-id]")];
+  let visibleCount = 0;
+  cards.forEach((card) => {
+    const show = jobMatchesFilter(card.dataset.jobStatus || "", filter);
+    visibleCount += show ? 1 : 0;
+    card.hidden = !show || visibleCount > 5;
+  });
+  if (empty) empty.hidden = visibleCount > 0;
+  if (counter) counter.textContent = filter === "all" ? String(jobs.size) : `${visibleCount}/${jobs.size}`;
+}
+
+function jobMatchesFilter(status, filter) {
+  if (filter === "active") return status === "queued" || status === "running";
+  if (filter === "completed") return status === "completed";
+  if (filter === "failed") return status === "failed" || status === "cancelled";
+  return true;
 }
 
 function renderOutputs(outputs) {
   if (!outputs.length) return "";
+  const access = window.STUDIO_ACCESS || {};
+  const hasAccess = access.hasAccess === true;
+  const checkoutUrl = access.checkoutUrl || "/billing/checkout/";
   return `
     <div class="output-scroll" aria-label="Task outputs">
       <div class="output-list">
         ${outputs
           .map(
-            (output) => `
+            (output) => {
+              const href = hasAccess ? output.url : checkoutUrl;
+              const downloadAttr = hasAccess ? " download" : "";
+              return `
               <div class="output-link-wrap">
-                <a class="output-link" href="${escapeHtml(output.url)}" download>
+                <a class="output-link" href="${escapeHtml(href)}"${downloadAttr}>
                   <span>${escapeHtml(output.label || output.name)}</span>
                   <small>${escapeHtml(output.size_text || "")}</small>
                 </a>
-                ${output.can_edit_design ? `<button class="output-link" type="button" data-edit-design-url="${escapeHtml(output.edit_design_url)}"><span>Редактировать дизайн</span><small>Design Mode</small></button>` : ""}
-                ${output.can_edit_video ? `<button class="output-link" type="button" data-edit-video-url="${escapeHtml(output.edit_video_url)}"><span>Редактировать видео</span><small>Video Editor</small></button>` : ""}
+                ${output.can_edit_design ? `<button class="output-link" type="button" data-edit-design-url="${escapeHtml(output.edit_design_url)}"><span>${escapeHtml(i18n.edit_design || "Edit design")}</span><small>Design Mode</small></button>` : ""}
+                ${output.can_edit_video ? `<button class="output-link" type="button" data-edit-video-url="${escapeHtml(output.edit_video_url)}"><span>${escapeHtml(i18n.edit_video || "Edit video")}</span><small>${escapeHtml(i18n.video_editor_nav || "Video Editor")}</small></button>` : ""}
               </div>
-            `,
+            `;
+            },
           )
           .join("")}
       </div>
     </div>
   `;
+}
+
+function aiMetaName(name) {
+  const key = `ai_${String(name || "")}`;
+  return i18n[key] || String(name || "").replace(/_/g, " ");
+}
+
+function friendlyAiReason(reason) {
+  const value = String(reason || "").trim();
+  if (!value) return "";
+  const lower = value.toLowerCase();
+  const lang = String(document.documentElement.lang || "en").slice(0, 2);
+  const pick = (items) => items[lang] || items.en;
+  if (lower.includes("insufficient_quota") || lower.includes("insufficient quota") || lower.includes("exceeded your current quota") || lower.includes("error code: 429")) {
+    return pick({
+      en: "OpenAI quota is exhausted, local fallback used",
+      ru: "Лимит OpenAI исчерпан, использован локальный fallback",
+      uk: "Ліміт OpenAI вичерпано, використано локальний fallback",
+    });
+  }
+  if (lower.includes("openai is not configured")) {
+    return pick({
+      en: "OpenAI is not configured, local fallback used",
+      ru: "OpenAI не настроен, использован локальный fallback",
+      uk: "OpenAI не налаштовано, використано локальний fallback",
+    });
+  }
+  if (lower.includes("no usable") || lower.includes("returned no cues")) {
+    return pick({
+      en: "OpenAI returned no usable result, local fallback used",
+      ru: "OpenAI не вернул подходящий результат, использован локальный fallback",
+      uk: "OpenAI не повернув придатний результат, використано локальний fallback",
+    });
+  }
+  if (lower.includes("error code:") || lower.includes("traceback") || lower.includes("{'error'") || lower.includes('"error"')) {
+    return pick({
+      en: "AI unavailable, local fallback used",
+      ru: "AI недоступен, использован локальный fallback",
+      uk: "AI недоступний, використано локальний fallback",
+    });
+  }
+  return value.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 140);
+}
+
+function renderAiMeta(ai) {
+  if (!ai || typeof ai !== "object") return "";
+  const items = Object.entries(ai)
+    .map(([rawName, meta]) => {
+      if (!meta || typeof meta !== "object") return "";
+      const status = String(meta.status || "");
+      const reason = friendlyAiReason(meta.fallback_reason || meta.reason || "");
+      const label = status === "used" ? (i18n.ai_used || "AI used") : status === "fallback" ? (i18n.ai_fallback || "AI fallback") : (i18n.ai_unknown || "AI");
+      const detailParts = [aiMetaName(rawName)];
+      if (status === "used" && meta.model) detailParts.push(String(meta.model));
+      const name = detailParts.filter(Boolean).join(" · ");
+      return `<span class="ai-meta-chip is-${escapeHtml(status || "unknown")}" title="${escapeHtml(reason)}"><b>${escapeHtml(label)}</b><small>${escapeHtml(name.replace(/_/g, " "))}</small></span>`;
+    })
+    .filter(Boolean);
+  return items.length ? `<div class="ai-meta-row" aria-label="AI status">${items.join("")}</div>` : "";
 }
 
 document.addEventListener("click", async (event) => {
@@ -5041,7 +5687,7 @@ document.addEventListener("click", async (event) => {
     if (!response.ok || !data.designer_url) throw new Error(data.error || "Design import failed");
     window.location.href = data.designer_url;
   } catch (error) {
-    button.textContent = original || "Редактировать дизайн";
+    button.textContent = original || i18n.edit_design || "Edit design";
     button.dataset.loading = "0";
     alert(error.message || "Design import failed");
   }
@@ -5064,7 +5710,7 @@ document.addEventListener("click", async (event) => {
     if (!response.ok || !data.video_editor_url) throw new Error(data.error || "Video import failed");
     window.location.href = data.video_editor_url;
   } catch (error) {
-    button.textContent = original || "Редактировать видео";
+    button.textContent = original || i18n.edit_video || "Edit video";
     button.dataset.loading = "0";
     alert(error.message || "Video import failed");
   }
@@ -5076,6 +5722,7 @@ function statusLabel(status) {
     running: i18n.running || "In progress",
     completed: i18n.completed || "Done",
     failed: i18n.failed || "Failed",
+    cancelled: i18n.cancelled || "Cancelled",
   }[status] || status;
 }
 

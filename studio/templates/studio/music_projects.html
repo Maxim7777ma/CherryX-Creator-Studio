@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "music_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
     <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page music-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -20,15 +20,35 @@
       </div>
     </header>
 
-    <main class="video-projects-shell music-projects-shell" data-music-projects data-editor-url="{{ music_editor_url }}" data-api-url="{{ music_projects_api_url }}">
-      <section class="video-projects-head">
+    <main class="video-projects-shell music-projects-shell" data-project-list data-music-projects data-editor-url="{{ music_editor_url }}" data-api-url="{{ music_projects_api_url }}">
+      <section class="video-projects-head music-projects-head">
         <div>
           <span>{% ui "music_production" %}</span>
           <strong>{% ui "projects" %}</strong>
-          <small><b data-project-total>{{ music_projects|length }}</b> {% ui "in_workspace" %}</small>
+          <small><b data-project-total>{{ project_listing.total|default:music_projects|length }}</b> {% ui "in_workspace" %}</small>
         </div>
-        <button type="button" data-create-project>{% ui "create_project" %}</button>
+        <button type="button" data-create-project data-icon="circle-plus">{% ui "create_project" %}</button>
       </section>
+
+      <form class="project-filter-bar" method="get" data-project-filters>
+        <label>
+          <span>{% ui "project_search" %}</span>
+          <input type="search" name="q" value="{{ project_listing.query }}" placeholder="{% ui "project_search_placeholder" %}">
+        </label>
+        <label>
+          <span>{% ui "sort" %}</span>
+          <select name="sort">
+            <option value="updated" {% if project_listing.sort == "updated" %}selected{% endif %}>{% ui "recent" %}</option>
+            <option value="title" {% if project_listing.sort == "title" %}selected{% endif %}>{% ui "title" %}</option>
+            <option value="created" {% if project_listing.sort == "created" %}selected{% endif %}>{% ui "created" %}</option>
+            <option value="oldest" {% if project_listing.sort == "oldest" %}selected{% endif %}>{% ui "oldest" %}</option>
+          </select>
+        </label>
+        <button type="submit">{% ui "apply" %}</button>
+        {% if project_listing.query or project_listing.sort != "updated" %}
+          <a href="{% url 'studio:music_project_list' %}">{% ui "clear_filters" %}</a>
+        {% endif %}
+      </form>
 
       <section class="video-project-bulk" data-project-bulk hidden>
         <div>
@@ -41,32 +61,52 @@
         </div>
       </section>
 
-      <section class="video-projects-grid" data-project-grid>
+      <section class="video-projects-grid music-projects-grid" data-project-grid>
         {% for project in music_projects %}
           <article class="video-project-card music-project-card" data-project-id="{{ project.id }}" data-project-title="{{ project.title }}">
             <label class="video-project-select" aria-label="{% ui "select_project" %}">
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
-            <a class="video-project-thumb music-project-thumb" href="{{ music_editor_url }}?project={{ project.id }}">
-              <div class="music-project-visual" aria-hidden="true">
-                <i></i><i></i><i></i><i></i><i></i><i></i>
-              </div>
-              <span class="music-project-pill">{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.duration_text }}{% endif %}</span>
-              <b class="music-project-metric">{{ project.track_count }} {% ui "audio_files" %} &middot; {{ project.storage_text }}</b>
-            </a>
+            <div class="music-project-preview">
+              <a class="video-project-thumb music-project-thumb" href="{{ music_editor_url }}?project={{ project.id }}" aria-label="{% ui "open" %}: {{ project.title }}">
+                <div class="music-project-visual" aria-hidden="true">
+                  <span class="music-project-visual-head">
+                    <b>Studio</b>
+                    <em>{{ project.track_count }} {% ui "audio_files" %}</em>
+                  </span>
+                  <span class="music-project-session">
+                    <span class="music-project-controls">
+                      <i></i><i></i><i></i>
+                    </span>
+                    <span class="music-project-arrangement">
+                      <i class="clip-a"><b></b></i>
+                      <i class="clip-b"><b></b></i>
+                      <i class="clip-c"><b></b></i>
+                      <em></em>
+                    </span>
+                  </span>
+                  <span class="music-project-role">{% if project.access_role == "owner" %}{% ui "owner" %}{% elif project.access_role == "editor" %}{% ui "role_editor" %}{% else %}{% ui "role_viewer" %}{% endif %}</span>
+                </div>
+              </a>
+              <button class="music-project-player {% if not project.assets %}is-empty{% endif %}" type="button" data-project-preview-player data-preview-url="{{ project.assets.0.preview_url|default:'' }}" aria-label="{% ui "play" %}: {{ project.title }}">
+                <i></i>
+                <b>{{ project.duration_text }}</b>
+                <em></em>
+              </button>
+            </div>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
-              <span>{{ project.updated_at|slice:":10" }} &middot; {{ project.storage_text }}</span>
-              <div class="music-project-stats" aria-label="Project stats">
-                <small>{{ project.track_count }} {% ui "files" %}</small>
-                <small>{{ project.duration_text }}</small>
-                <small>{{ project.access_role }}</small>
+              <span class="music-project-meta">{{ project.updated_at|slice:":10" }} <i></i> {{ project.storage_text }}</span>
+              <div class="music-project-stats" aria-label="{% ui "projects" %}">
+                <small><img alt="" src="https://api.iconify.design/lucide/music.svg?color=%23169858">{{ project.track_count }} {% ui "audio_files" %}</small>
+                <small><img alt="" src="https://api.iconify.design/lucide/clock-3.svg?color=%230f172a">{{ project.duration_text }}</small>
+                <small><img alt="" src="https://api.iconify.design/lucide/user-round.svg?color=%230f172a">{% if project.access_role == "owner" %}{% ui "owner" %}{% elif project.access_role == "editor" %}{% ui "role_editor" %}{% else %}{% ui "role_viewer" %}{% endif %}</small>
               </div>
             </div>
             <div class="video-project-actions">
-              <a href="{{ music_editor_url }}?project={{ project.id }}">{% ui "open" %}</a>
-              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>{% endif %}
+              <a href="{{ music_editor_url }}?project={{ project.id }}"><img alt="" src="https://api.iconify.design/lucide/folder-open.svg?color=white">{% ui "open" %}</a>
+              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}"><img alt="" src="https://api.iconify.design/lucide/trash-2.svg?color=%23d71920">{% ui "delete" %}</button>{% endif %}
             </div>
           </article>
         {% endfor %}
@@ -74,14 +114,36 @@
 
       <article class="video-project-empty music-project-empty" data-project-empty {% if music_projects %}hidden{% endif %}>
         <div class="music-project-empty-copy">
+          <small data-icon="music-2">{% ui "music_production" %}</small>
           <strong>{% ui "no_music_projects" %}</strong>
           <span>{% ui "music_empty_copy" %}</span>
+          <div class="music-project-empty-metrics" aria-hidden="true">
+            <b>120 BPM</b>
+            <b>16 Bars</b>
+            <b>WAV</b>
+          </div>
         </div>
         <div class="music-project-empty-art" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i>
+          <span class="music-empty-toolbar"><i></i><i></i><i></i></span>
+          <span class="music-empty-wave"><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="music-empty-timeline">
+            <i></i><i></i><i></i><i></i>
+          </span>
         </div>
-        <button type="button" data-create-project>{% ui "create_project" %}</button>
+        <button type="button" data-create-project data-icon="circle-plus">{% ui "create_project" %}</button>
       </article>
+
+      {% if project_listing.has_more or project_listing.page > 1 %}
+        <nav class="project-pagination" data-project-pagination aria-label="{% ui "projects" %}">
+          {% if project_listing.page > 1 %}
+            <a data-project-page="prev" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'-1' }}">{% ui "back" %}</a>
+          {% endif %}
+          <span>{{ project_listing.page }}</span>
+          {% if project_listing.has_more %}
+            <a data-project-page="next" href="?q={{ project_listing.query|urlencode }}&sort={{ project_listing.sort }}&page={{ project_listing.page|add:'1' }}">{% ui "load_more" %}</a>
+          {% endif %}
+        </nav>
+      {% endif %}
     </main>
 
     <div class="project-delete-modal" data-delete-modal hidden>

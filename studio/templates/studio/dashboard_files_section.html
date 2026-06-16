@@ -63,14 +63,18 @@
         <strong>{{ output.size_text }}</strong>
         <div class="stats-actions">
           <a href="{{ output.detail_url }}">{% ui "open" %}</a>
-          <a href="{{ output.preview_url }}" target="_blank" rel="noreferrer">Preview</a>
+          <a href="{{ output.preview_url }}" target="_blank" rel="noreferrer">{% ui "preview" %}</a>
           {% if output.can_edit_design %}
-            <button class="stats-design-btn" type="button" data-edit-design-url="{{ output.edit_design_url }}">Редактировать дизайн</button>
+            <button class="stats-design-btn" type="button" data-edit-design-url="{{ output.edit_design_url }}">{% ui "edit_design" %}</button>
           {% endif %}
           {% if output.can_edit_video %}
-            <button class="stats-design-btn" type="button" data-edit-video-url="{{ output.edit_video_url }}">Редактировать видео</button>
+            <button class="stats-design-btn" type="button" data-edit-video-url="{{ output.edit_video_url }}">{% ui "edit_video" %}</button>
           {% endif %}
-          <a href="{{ output.url }}" download>{% ui "download" %}</a>
+          {% if has_access %}
+            <a href="{{ output.url }}" download>{% ui "download" %}</a>
+          {% else %}
+            <a href="{{ checkout_url }}">Checkout</a>
+          {% endif %}
           <button class="stats-share-btn" type="button" data-share-url="{{ output.url }}" data-share-name="{{ output.label|default:output.name }}">{% ui "share" %}</button>
         </div>
       </article>

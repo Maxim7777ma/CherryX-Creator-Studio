@@ -5,10 +5,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "checkout" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
   </head>
   <body class="auth-page">
-    <main class="checkout-shell">
+    <main class="checkout-shell checkout-wizard-shell">
       <section class="checkout-copy checkout-brand">
         <div class="checkout-topline">
           <a class="back-link eyebrow" href="{% url 'studio:index' %}">{% ui "checkout_back" %}</a>
@@ -22,6 +22,9 @@
           <strong id="summary-title">{{ selected_plan.name }} - {{ selected_plan.price_label }}</strong>
           <p id="summary-copy">{{ selected_plan.headline }}</p>
           <em id="summary-badge">{{ selected_plan.badge }}</em>
+          {% if has_access %}
+            <small class="checkout-access-note">{% ui "pricing_active_until" %}: {{ active_until|date:"d.m.Y H:i" }}</small>
+          {% endif %}
         </div>
 
         <div class="checkout-benefits">
@@ -41,13 +44,32 @@
         </div>
       </section>
 
-      <section class="auth-card checkout-card">
+      <section
+        class="auth-card checkout-card checkout-wizard-card"
+        data-checkout-wizard
+        data-email-check-url="{% url 'billing:check_email' %}"
+        data-name-required-error="{% ui "checkout_name_required" %}"
+        data-name-error="{% ui "checkout_name_length" %}"
+        data-email-required-error="{% ui "checkout_email_required" %}"
+        data-email-error="{% ui "checkout_email_invalid" %}"
+        data-email-exists-error="{% ui "email_exists_checkout" %}"
+        data-password-required-error="{% ui "checkout_password_required" %}"
+        data-password-error="{% ui "checkout_password_weak" %}"
+        data-password-confirm-required-error="{% ui "checkout_password_confirm_required" %}"
+        data-password-match-error="{% ui "passwords_mismatch" %}"
+      >
         <div class="section-title">
           <h2>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}{% ui "checkout_payment_account" %}{% endif %}</h2>
           <span>{% ui "checkout_demo" %}</span>
         </div>
 
-        <form method="post" class="auth-form" id="checkout-form">
+        <div class="checkout-progress" aria-label="{% ui "checkout" %}">
+          <button class="is-active" type="button" data-checkout-step-tab="1"><b>1</b>{% ui "checkout_plan_selection" %}</button>
+          <button type="button" data-checkout-step-tab="2"><b>2</b>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}{% ui "checkout_payment_account" %}{% endif %}</button>
+          <button type="button" data-checkout-step-tab="3"><b>3</b>{% ui "checkout_total" %}</button>
+        </div>
+
+        <form method="post" class="auth-form checkout-flow" id="checkout-form" novalidate>
           {% csrf_token %}
           {% if form.non_field_errors %}
             <div class="form-errors">{{ form.non_field_errors }}</div>
@@ -57,114 +79,120 @@
           <input type="hidden" name="due" id="id_due" value="{{ checkout_price.due_cents }}">
           {{ form.next }}
 
-          <fieldset class="plan-picker" aria-label="{% ui "checkout_plan_selection" %}">
-            {% for plan in plans %}
-              <button
-                class="plan-button plan-{{ plan.code }} {% if plan.code == selected_plan.code %}is-selected{% endif %}"
-                type="button"
-                data-plan="{{ plan.code }}"
-                data-name="{{ plan.name }}"
-                data-badge="{{ plan.badge }}"
-                data-price="{{ plan.price_display }}"
-                data-due-cents="{{ plan.due_cents|default:plan.price_cents }}"
-                data-due="{{ plan.due_display|default:plan.price_display }}"
-                data-credit="{{ plan.credit_display|default:'0$' }}"
-                data-price-label="{{ plan.price_label }}"
-                data-headline="{{ plan.headline }}"
-                aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
-              >
-                <span>{{ plan.badge }}</span>
-                <strong>{{ plan.name }}</strong>
-                <em>{{ plan.price_label }}</em>
-              </button>
-            {% endfor %}
-          </fieldset>
+          <section class="checkout-step checkout-step-plan is-active" data-checkout-step="1">
+            <div class="checkout-step-head">
+              <b>1</b>
+              <span>{% ui "checkout_plan_selection" %}</span>
+            </div>
+            <fieldset class="plan-picker checkout-plan-picker" aria-label="{% ui "checkout_plan_selection" %}">
+              {% for plan in plans %}
+                <div class="checkout-plan-option plan-{{ plan.code }}">
+                  <button
+                    class="plan-button {% if plan.code == selected_plan.code %}is-selected{% endif %}"
+                    type="button"
+                    data-plan="{{ plan.code }}"
+                    data-name="{{ plan.name }}"
+                    data-badge="{{ plan.badge }}"
+                    data-price="{{ plan.price_display }}"
+                    data-due-cents="{{ plan.due_cents|default:plan.price_cents }}"
+                    data-due="{{ plan.due_display|default:plan.price_display }}"
+                    data-credit="{{ plan.credit_display|default:'0$' }}"
+                    data-list="{{ plan.list_display|default:plan.price_display }}"
+                    data-price-label="{{ plan.price_label }}"
+                    data-headline="{{ plan.headline }}"
+                    aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
+                  >
+                    <span class="plan-letter">{{ plan.name|first }}</span>
+                    <span class="plan-copy">
+                      <span class="plan-badge">{{ plan.badge }}</span>
+                      <strong>{{ plan.name }}</strong>
+                      <em>{{ plan.price_label }}</em>
+                      <small>{% ui "billing_now_due" %}: {{ plan.due_display|default:plan.price_display }}</small>
+                    </span>
+                  </button>
+                  <a
+                    class="plan-info-link"
+                    href="{% url 'billing:pricing' %}?focus={{ plan.code }}&next={{ next_url|urlencode }}#plan-{{ plan.code }}"
+                    target="_blank"
+                    rel="noopener"
+                    aria-label="{{ plan.name }} {% ui "details" %}"
+                  >i</a>
+                </div>
+              {% endfor %}
+            </fieldset>
+            <div class="checkout-step-actions">
+              <button class="primary-action checkout-next" type="button" data-checkout-next>{% ui "next" %}</button>
+            </div>
+          </section>
 
-          {% for field in form %}
-            {% if field.name != "plan" and field.name != "next" %}
-              <label class="field{% if field.field.widget.input_type == 'password' %} has-password-toggle{% endif %}">
-                <span>{{ field.label }}</span>
-                <span class="checkout-input-wrap">
-                  {{ field }}
-                  {% if field.field.widget.input_type == 'password' %}
-                    <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="{% ui "auth_show_password" %}" data-show-label="{% ui "auth_show_password" %}" data-hide-label="{% ui "auth_hide_password" %}"></button>
-                  {% endif %}
-                </span>
-                {% if field.errors %}
-                  <small class="field-error">{{ field.errors|striptags }}</small>
+          <section class="checkout-step checkout-step-account" data-checkout-step="2" hidden>
+            <div class="checkout-step-head">
+              <b>2</b>
+              <span>{% if request.user.is_authenticated %}{% ui "activate" %}{% else %}{% ui "checkout_payment_account" %}{% endif %}</span>
+            </div>
+            <div class="checkout-account-fields">
+              {% for field in form %}
+                {% if field.name != "plan" and field.name != "next" %}
+                  <label class="field{% if field.field.widget.input_type == 'password' %} has-password-toggle{% endif %}">
+                    <span>{{ field.label }}</span>
+                    <span class="checkout-input-wrap">
+                      {{ field }}
+                      {% if field.field.widget.input_type == 'password' %}
+                        <button class="password-toggle" type="button" data-password-toggle data-icon="eye" aria-label="{% ui "auth_show_password" %}" data-show-label="{% ui "auth_show_password" %}" data-hide-label="{% ui "auth_hide_password" %}"></button>
+                      {% endif %}
+                    </span>
+                    {% if field.errors %}
+                      <small class="field-error" data-field-error="{{ field.name }}">{{ field.errors|striptags }}</small>
+                    {% else %}
+                      <small class="field-error" data-field-error="{{ field.name }}" hidden></small>
+                    {% endif %}
+                  </label>
                 {% endif %}
-              </label>
-            {% endif %}
-          {% endfor %}
+              {% endfor %}
+            </div>
+            <div class="checkout-step-actions">
+              <button class="secondary-link" type="button" data-checkout-back>{% ui "back" %}</button>
+              <button class="primary-action checkout-next" type="button" data-checkout-next>{% ui "next" %}</button>
+            </div>
+          </section>
 
-          <div class="payment-box">
-            <span>{% ui "checkout_total" %}</span>
-            <strong id="payment-total">{{ checkout_price.due_display }}</strong>
-            <small>{% ui "checkout_payment_note" %}</small>
-          </div>
+          <section class="checkout-step checkout-step-payment" data-checkout-step="3" hidden>
+            <div class="checkout-step-head">
+              <b>3</b>
+              <span>{% ui "checkout_total" %}</span>
+            </div>
+            <div class="payment-box">
+              <span>{% ui "checkout_total" %}</span>
+              <strong id="payment-total">{{ checkout_price.due_display }}</strong>
+              <dl class="checkout-price-breakdown">
+                <div>
+                  <dt>{% ui "billing_base_price" %}</dt>
+                  <dd id="payment-list">{{ checkout_price.list_display }}</dd>
+                </div>
+                <div>
+                  <dt>{% ui "billing_remaining_credit" %}</dt>
+                  <dd id="payment-credit">{{ checkout_price.credit_display }}</dd>
+                </div>
+                <div>
+                  <dt>{% ui "billing_now_due" %}</dt>
+                  <dd id="payment-due">{{ checkout_price.due_display }}</dd>
+                </div>
+              </dl>
+              <small>{% ui "checkout_payment_note" %}</small>
+            </div>
 
-          <button class="primary-action checkout-action" type="submit">{% ui "checkout_cta" %}</button>
+            <div class="checkout-step-actions">
+              <button class="secondary-link" type="button" data-checkout-back>{% ui "back" %}</button>
+              <button class="primary-action checkout-action" type="submit">{% ui "checkout_cta" %}</button>
+            </div>
+            <p class="auth-switch">
+              {% ui "checkout_have_account" %} <a href="{% url 'studio:login' %}">{% ui "login" %}</a>
+            </p>
+          </section>
         </form>
-
-        <p class="auth-switch">
-          {% ui "checkout_have_account" %} <a href="{% url 'studio:login' %}">{% ui "login" %}</a>
-        </p>
       </section>
     </main>
 
-    <script>
-      (() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          button.addEventListener("click", () => {
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-          });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-password-toggle]").forEach((button) => {
-          const input = button.closest(".checkout-input-wrap")?.querySelector("input");
-          if (!input) return;
-          button.addEventListener("click", () => {
-            const hidden = input.type === "password";
-            input.type = hidden ? "text" : "password";
-            button.dataset.icon = hidden ? "eye-off" : "eye";
-            button.setAttribute("aria-label", hidden ? button.dataset.hideLabel : button.dataset.showLabel);
-          });
-        });
-
-        const buttons = document.querySelectorAll(".plan-button");
-        const planInput = document.getElementById("id_plan");
-        const dueInput = document.getElementById("id_due");
-        const total = document.getElementById("payment-total");
-        const badge = document.getElementById("summary-badge");
-        const title = document.getElementById("summary-title");
-        const copy = document.getElementById("summary-copy");
-
-        buttons.forEach((button) => {
-          button.addEventListener("click", () => {
-            buttons.forEach((item) => {
-              item.classList.remove("is-selected");
-              item.setAttribute("aria-pressed", "false");
-            });
-            button.classList.add("is-selected");
-            button.setAttribute("aria-pressed", "true");
-            planInput.value = button.dataset.plan;
-            if (dueInput) dueInput.value = button.dataset.dueCents || "";
-            total.textContent = button.dataset.due || button.dataset.price;
-            badge.textContent = button.dataset.badge;
-            title.textContent = `${button.dataset.name} - ${button.dataset.priceLabel}`;
-            copy.textContent = button.dataset.headline;
-          });
-        });
-      })();
-    </script>
+    <script defer src="{% static 'studio/billing_pages.js' %}?v=20260615-checkout-state"></script>
   </body>
 </html>

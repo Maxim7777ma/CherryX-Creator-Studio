@@ -41,6 +41,48 @@ SHORTS_VIDEO_CRF = "21"
 PREVIEW_VIDEO_CRF = "21"
 SUBTITLE_VIDEO_CRF = "20"
 VIDEO_AUDIO_FILTER = "loudnorm=I=-16:LRA=11:TP=-1.5"
+WHISPER_LANGUAGE_ALIASES = {
+    "auto": None,
+    "": None,
+    "ua": "uk",
+    "ukr": "uk",
+    "rus": "ru",
+    "eng": "en",
+    "ger": "de",
+    "deu": "de",
+    "fre": "fr",
+    "fra": "fr",
+    "spa": "es",
+    "geo": "ka",
+    "kat": "ka",
+    "arm": "hy",
+    "hye": "hy",
+    "pt-br": "pt",
+    "pt_br": "pt",
+    "zh-cn": "zh",
+    "zh_cn": "zh",
+    "zh-tw": "zh",
+    "zh_tw": "zh",
+}
+WHISPER_LANGUAGE_CODES = {
+    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da", "de",
+    "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht",
+    "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb", "ln", "lo", "lt",
+    "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "nn", "no", "oc", "pa", "pl",
+    "ps", "pt", "ro", "ru", "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta",
+    "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "zh",
+}
+SUBTITLE_LANGUAGE_PROMPTS = {
+    "ru": "Точная русская транскрипция с нормальной пунктуацией. Не переводить.",
+    "uk": "Точна українська транскрипція з нормальною пунктуацією. Не перекладати.",
+    "en": "Accurate English transcript with natural punctuation. Do not translate.",
+    "fr": "Transcription française précise avec ponctuation naturelle. Ne pas traduire.",
+    "de": "Genaue deutsche Transkription mit natürlicher Zeichensetzung. Nicht übersetzen.",
+    "es": "Transcripción precisa en español con puntuación natural. No traducir.",
+    "ka": "ზუსტი ქართული ტრანსკრიფცია ბუნებრივი პუნქტუაციით. არ თარგმნო.",
+    "hy": "Ճշգրիտ հայերեն տառադարձում բնական կետադրությամբ։ Չթարգմանել։",
+    "it": "Trascrizione italiana accurata con punteggiatura naturale. Non tradurre.",
+}
 
 
 @dataclass(frozen=True)
@@ -783,27 +825,28 @@ def _cover_variant_profile(title: str, focus_point: tuple[int, int] | None, vari
         accent2 = _premium_cover_secondary_accent(f"{title}:{seed}")
 
     if layout == "poster":
-        max_text_width = 760
-        panel_x = 54 if text_left else 468
-        headline_y = 118
+        max_text_width = 650
+        panel_x = 62 if text_left else 552
+        headline_y = 132
     elif layout == "broadcast":
-        max_text_width = 610
-        panel_x = 54 if text_left else 628
-        headline_y = 126
+        max_text_width = 560
+        panel_x = 62 if text_left else 660
+        headline_y = 138
     elif layout == "impact":
-        max_text_width = 690
-        panel_x = 62 if text_left else 542
-        headline_y = 102
+        max_text_width = 610
+        panel_x = 70 if text_left else 604
+        headline_y = 126
     else:
-        max_text_width = 650 if text_left else 620
-        panel_x = 58 if text_left else 626
-        headline_y = 135
+        max_text_width = 590 if text_left else 560
+        panel_x = 66 if text_left else 676
+        headline_y = 146
 
     badge_x = panel_x
     badge_y = 46 if layout != "impact" else 38
     hook_text = _premium_cover_hook(title, mood)
-    hook_x = 56 if text_left else 1280 - min(560, len(hook_text) * 18 + 96)
-    hook_y = 625 if layout != "poster" else 610
+    hook_width = min(500, len(hook_text) * 15 + 86)
+    hook_x = 62 if text_left else 1280 - hook_width - 62
+    hook_y = 620 if layout != "poster" else 604
     return {
         "layout": layout,
         "mood": mood,
@@ -907,6 +950,14 @@ def render_subtitle_assets(source: Path, assets: SubtitleAssets, timeout_seconds
     return ShortClip(path=assets.output, start_seconds=0, duration_seconds=assets.duration_seconds)
 
 
+def normalize_subtitle_language(value: str | None) -> str | None:
+    language = (value or "").strip().lower().replace("_", "-")
+    language = WHISPER_LANGUAGE_ALIASES.get(language, language)
+    if not language:
+        return None
+    return language if language in WHISPER_LANGUAGE_CODES else None
+
+
 def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: str | None = None) -> list[SubtitleCue]:
     try:
         from faster_whisper import WhisperModel
@@ -915,13 +966,24 @@ def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: 
             "Для автосубтитров нужен локальный faster-whisper. Обнови зависимости: pip install -r requirements.txt"
         ) from exc
 
+    normalized_language = normalize_subtitle_language(language)
+    prompt = SUBTITLE_LANGUAGE_PROMPTS.get(normalized_language or "", "")
     model = WhisperModel(model_size or "small", device="cpu", compute_type="int8")
     segments, _info = model.transcribe(
         str(source),
-        language=language or None,
+        language=normalized_language,
+        initial_prompt=prompt or None,
         vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 420, "speech_pad_ms": 280},
         word_timestamps=True,
-        beam_size=5,
+        beam_size=7,
+        best_of=5,
+        patience=1.05,
+        temperature=(0.0, 0.2, 0.4),
+        condition_on_previous_text=False,
+        compression_ratio_threshold=2.35,
+        log_prob_threshold=-1.0,
+        no_speech_threshold=0.55,
     )
 
     cues: list[SubtitleCue] = []
@@ -934,16 +996,16 @@ def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: 
             start = float(getattr(segment, "start", 0.0) or 0.0)
             end = float(getattr(segment, "end", start + 1.0) or start + 1.0)
             if text and end > start:
-                cues.append(SubtitleCue(start=start, end=end, text=text))
-    return _merge_short_cues(cues)
+                cues.extend(_split_segment_text_into_cues(start, end, text))
+    return _polish_subtitle_cues(_merge_short_cues(cues))
 
 
 def _word_cues(words) -> list[SubtitleCue]:
     cues: list[SubtitleCue] = []
     current: list[tuple[float, float, str]] = []
     current_chars = 0
-    max_chars = 42
-    max_duration = 3.0
+    max_chars = 36
+    max_duration = 2.8
 
     for word in words:
         raw = _normalize_caption_text(getattr(word, "word", ""))
@@ -953,7 +1015,8 @@ def _word_cues(words) -> list[SubtitleCue]:
             continue
         gap = start - current[-1][1] if current else 0
         duration = end - current[0][0] if current else 0
-        if current and (current_chars + len(raw) > max_chars or duration > max_duration or gap > 0.65):
+        hard_break = bool(current and re.search(r"[.!?…]$", current[-1][2]) and current_chars >= 18)
+        if current and (current_chars + len(raw) > max_chars or duration > max_duration or gap > 0.55 or hard_break):
             cues.append(_cue_from_words(current))
             current = []
             current_chars = 0
@@ -972,17 +1035,87 @@ def _cue_from_words(words: list[tuple[float, float, str]]) -> SubtitleCue:
     return SubtitleCue(start=max(0.0, start), end=end, text=_normalize_caption_text(text))
 
 
+def _split_segment_text_into_cues(start: float, end: float, text: str) -> list[SubtitleCue]:
+    text = _normalize_caption_text(text)
+    if not text:
+        return []
+    parts = [part.strip() for part in re.split(r"(?<=[.!?…])\s+", text) if part.strip()]
+    if len(parts) <= 1 and len(text) <= 42:
+        return [SubtitleCue(start=max(0.0, start), end=max(end, start + 0.65), text=text)]
+    if len(parts) <= 1:
+        parts = _split_long_caption_text(text, 36)
+    duration = max(0.65, end - start)
+    total_chars = max(1, sum(len(part) for part in parts))
+    cues: list[SubtitleCue] = []
+    cursor = start
+    for index, part in enumerate(parts):
+        if index == len(parts) - 1:
+            part_end = end
+        else:
+            part_duration = max(0.65, duration * (len(part) / total_chars))
+            part_end = min(end, cursor + part_duration)
+        cues.append(SubtitleCue(start=max(0.0, cursor), end=max(part_end, cursor + 0.65), text=_normalize_caption_text(part)))
+        cursor = part_end
+    return cues
+
+
+def _split_long_caption_text(text: str, max_chars: int) -> list[str]:
+    words = text.split()
+    parts: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            parts.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts or [text]
+
+
 def _merge_short_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:
     merged: list[SubtitleCue] = []
     for cue in cues:
         if not cue.text:
             continue
-        if merged and cue.end - cue.start < 0.55 and cue.end - merged[-1].start < 3.2:
+        combined_text = f"{merged[-1].text} {cue.text}".strip() if merged else cue.text
+        if merged and cue.end - cue.start < 0.55 and cue.end - merged[-1].start < 3.0 and len(combined_text) <= 42:
             previous = merged.pop()
-            merged.append(SubtitleCue(previous.start, cue.end, f"{previous.text} {cue.text}".strip()))
+            merged.append(SubtitleCue(previous.start, cue.end, combined_text))
         else:
             merged.append(cue)
     return merged
+
+
+def _polish_subtitle_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:
+    polished: list[SubtitleCue] = []
+    previous_text = ""
+    for cue in cues:
+        text = _normalize_caption_text(cue.text)
+        if not text or _is_low_value_caption(text):
+            continue
+        if previous_text and text.lower() == previous_text.lower() and cue.start - polished[-1].end < 0.35:
+            continue
+        start = max(0.0, cue.start)
+        end = max(cue.end, start + 0.65)
+        if polished and start < polished[-1].end:
+            start = polished[-1].end + 0.02
+            end = max(end, start + 0.55)
+        polished.append(SubtitleCue(start=round(start, 3), end=round(end, 3), text=text))
+        previous_text = text
+    return polished
+
+
+def _is_low_value_caption(text: str) -> bool:
+    normalized = text.strip().lower()
+    normalized = re.sub(r"[\[\](){}]", "", normalized).strip()
+    low_value = {
+        "music", "музыка", "музика", "applause", "аплодисменты", "оплески",
+        "thank you for watching", "thanks for watching", "subscribe", "подписывайтесь",
+    }
+    return normalized in low_value
 
 
 def _write_ass_subtitles(path: Path, cues: list[SubtitleCue], width: int, height: int, style: str) -> None:
@@ -1262,7 +1395,16 @@ def _subtitle_motion_tags(
 
 
 def _normalize_caption_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    value = re.sub(r"\s+", " ", text or "").strip()
+    value = value.replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?")
+    value = re.sub(r"\s+([,.;:!?…])", r"\1", value)
+    value = re.sub(r"([,.;:!?…])([^\s,.;:!?…])", r"\1 \2", value)
+    value = re.sub(r"\.{2,}", "…", value)
+    value = re.sub(r"([!?]){3,}", r"\1", value)
+    value = re.sub(r"\b(\w{2,})\s+\1\b", r"\1", value, flags=re.IGNORECASE)
+    if value:
+        value = value[0].upper() + value[1:]
+    return value.strip()
 
 
 def _ass_escape_text(text: str) -> str:
@@ -1292,12 +1434,20 @@ def _escape_filter_path(path: Path) -> str:
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:
-    for name in ("arial.ttf", "segoeui.ttf", "DejaVuSans.ttf"):
+    for name in _font_candidates("arial.ttf", "segoeui.ttf", "DejaVuSans.ttf"):
         try:
-            return ImageFont.truetype(name, size)
+            return ImageFont.truetype(str(name), size)
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+def _font_candidates(*names: str) -> list[str | Path]:
+    candidates: list[str | Path] = list(names)
+    windows_fonts = Path("C:/Windows/Fonts")
+    for name in names:
+        candidates.append(windows_fonts / name)
+    return candidates
 
 
 def _wrap_text(text: str, line_length: int) -> list[str]:
@@ -1924,8 +2074,8 @@ def _draw_business_cover(
     mood = str(profile["mood"])
     warm = (255, 226, 96, 255)
 
-    cinematic = canvas.filter(ImageFilter.GaussianBlur(radius=18))
-    canvas.paste(Image.blend(canvas, cinematic, 0.08))
+    cinematic = canvas.filter(ImageFilter.GaussianBlur(radius=12))
+    canvas.paste(Image.blend(canvas, cinematic, 0.05))
     vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     vignette_draw = ImageDraw.Draw(vignette, "RGBA")
     for step in range(42):
@@ -1947,58 +2097,58 @@ def _draw_business_cover(
     title_text = _cover_title_text(cover_copy.headline)
     description_text = _cover_description_text(cover_copy.description)
 
-    fade_alpha = 238 if mood == "clean" else 250
+    fade_alpha = 210 if mood == "clean" else 226
     _draw_cover_fade(draw, width, height, text_left, (0, 0, 0, fade_alpha))
-    draw.rectangle((0, 0, width, height), fill=(0, 0, 0, 22 if mood == "clean" else 34))
+    draw.rectangle((0, 0, width, height), fill=(0, 0, 0, 14 if mood == "clean" else 24))
     _draw_cover_light_sweep(canvas, text_left, accent2)
     _draw_cover_variant_frame(draw, width, height, text_left, accent, accent2, layout)
     if layout in {"split", "broadcast"} and variant_index % 2:
-        draw.line((0, height - 30, width, height - 30), fill=(*accent2[:3], 90), width=6)
-        draw.line((0, height - 16, width, height - 16), fill=(*accent[:3], 190), width=4)
+        draw.line((0, height - 30, width, height - 30), fill=(*accent2[:3], 72), width=4)
+        draw.line((0, height - 16, width, height - 16), fill=(*accent[:3], 160), width=3)
     elif layout in {"split", "broadcast"}:
-        draw.line((0, 28, width, 28), fill=(*accent2[:3], 110), width=6)
-        draw.line((0, 44, width, 44), fill=(*accent[:3], 175), width=4)
+        draw.line((0, 28, width, 28), fill=(*accent2[:3], 82), width=4)
+        draw.line((0, 44, width, 44), fill=(*accent[:3], 145), width=3)
     elif layout == "impact":
         _draw_cover_impact_burst(draw, width, height, text_left, accent, accent2)
 
-    label_font = _load_cover_font(28)
+    label_font = _load_cover_font(22)
     eyebrow = str(profile["eyebrow"])
-    eyebrow_w = min(max_text_width, _text_width(label_font, eyebrow) + 42)
+    eyebrow_w = min(max_text_width, _text_width(label_font, eyebrow) + 34)
     badge_y = int(profile["badge_y"])
-    draw.rounded_rectangle((panel_x, badge_y, panel_x + eyebrow_w, badge_y + 46), radius=8, fill=(*accent[:3], 245))
-    draw.text((panel_x + 20, badge_y + 8), eyebrow, fill=(8, 10, 14, 255), font=label_font)
+    draw.rounded_rectangle((panel_x, badge_y, panel_x + eyebrow_w, badge_y + 38), radius=7, fill=(*accent[:3], 235))
+    draw.text((panel_x + 17, badge_y + 8), eyebrow, fill=(8, 10, 14, 255), font=label_font)
 
     title_font, lines = _fit_cover_title(title_text, max_text_width, 3)
     y = int(profile["headline_y"])
-    title_line_height = max(82, int(getattr(title_font, "size", 88)) + 8)
-    title_box_height = len(lines) * title_line_height + 22
+    title_line_height = max(54, int(getattr(title_font, "size", 58)) + 7)
+    title_box_height = len(lines) * title_line_height + 20
     draw.rounded_rectangle(
-        (panel_x - 22, y - 16, panel_x + max_text_width + 26, y + title_box_height),
-        radius=14,
-        fill=(0, 0, 0, 86),
+        (panel_x - 18, y - 14, panel_x + max_text_width + 20, y + title_box_height),
+        radius=10,
+        fill=(0, 0, 0, 72),
     )
     for index, line in enumerate(lines):
         fill = (255, 255, 255, 255) if index != 1 else accent
         _draw_cover_text_shadow(draw, (panel_x, y), line, title_font)
-        draw.text((panel_x, y), line, fill=fill, font=title_font, stroke_width=8, stroke_fill=(0, 0, 0, 255))
+        draw.text((panel_x, y), line, fill=fill, font=title_font, stroke_width=4, stroke_fill=(0, 0, 0, 238))
         y += title_line_height
 
     if description_text:
-        description_font = _load_cover_font(28)
+        description_font = _load_cover_font(23)
         description_lines = _wrap_cover_text(description_text.upper(), description_font, max_width=max_text_width, max_lines=2)
         if description_lines and y < 542:
-            desc_y = y + 14
-            line_height = 36
-            box_height = len(description_lines) * line_height + 22
+            desc_y = y + 12
+            line_height = 30
+            box_height = len(description_lines) * line_height + 18
             draw.rounded_rectangle(
-                (panel_x - 10, desc_y - 8, panel_x + max_text_width + 18, desc_y + box_height),
-                radius=8,
-                fill=(0, 0, 0, 170),
-                outline=(*accent[:3], 90),
-                width=2,
+                (panel_x - 8, desc_y - 7, panel_x + max_text_width + 12, desc_y + box_height),
+                radius=7,
+                fill=(0, 0, 0, 132),
+                outline=(*accent[:3], 68),
+                width=1,
             )
             for line in description_lines:
-                draw.text((panel_x + 4, desc_y), line, fill=(238, 242, 246, 245), font=description_font, stroke_width=3, stroke_fill=(0, 0, 0, 220))
+                draw.text((panel_x + 3, desc_y), line, fill=(238, 242, 246, 238), font=description_font, stroke_width=2, stroke_fill=(0, 0, 0, 210))
                 desc_y += line_height
 
     _draw_premium_hook_badge(draw, width, height, text_left, accent, warm, title_text, str(profile["badge"]), int(profile["hook_x"]), int(profile["hook_y"]))
@@ -2029,19 +2179,19 @@ def _draw_cover_variant_frame(
     layout: str,
 ) -> None:
     if layout == "poster":
-        draw.rounded_rectangle((18, 18, width - 18, height - 18), radius=4, outline=(*accent[:3], 230), width=7)
-        draw.rectangle((34, 34, width - 34, height - 34), outline=(*accent2[:3], 92), width=2)
+        draw.rounded_rectangle((18, 18, width - 18, height - 18), radius=4, outline=(*accent[:3], 190), width=4)
+        draw.rectangle((34, 34, width - 34, height - 34), outline=(*accent2[:3], 70), width=1)
         return
     if layout == "broadcast":
-        draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=16, outline=(*accent[:3], 205), width=4)
+        draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=14, outline=(*accent[:3], 165), width=3)
         x = int(width * (0.57 if text_left else 0.43))
-        draw.line((x, 0, x + (-88 if text_left else 88), height), fill=(*accent2[:3], 90), width=7)
+        draw.line((x, 0, x + (-88 if text_left else 88), height), fill=(*accent2[:3], 58), width=4)
         return
     if layout == "impact":
-        draw.rounded_rectangle((10, 10, width - 10, height - 10), radius=22, outline=(*accent[:3], 255), width=8)
-        draw.rounded_rectangle((30, 30, width - 30, height - 30), radius=16, outline=(*accent2[:3], 120), width=3)
+        draw.rounded_rectangle((12, 12, width - 12, height - 12), radius=18, outline=(*accent[:3], 205), width=5)
+        draw.rounded_rectangle((32, 32, width - 32, height - 32), radius=14, outline=(*accent2[:3], 82), width=2)
         return
-    draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=16, outline=(*accent[:3], 235), width=5)
+    draw.rounded_rectangle((13, 13, width - 13, height - 13), radius=14, outline=(*accent[:3], 190), width=3)
 
 
 def _draw_cover_impact_burst(
@@ -2063,7 +2213,7 @@ def _draw_cover_impact_burst(
         x2 = int(cx + cos(angle) * outer)
         y2 = int(cy + sin(angle) * outer)
         color = accent if index % 2 else accent2
-        draw.line((x1, y1, x2, y2), fill=(*color[:3], 74), width=5)
+        draw.line((x1, y1, x2, y2), fill=(*color[:3], 48), width=3)
 
 
 def _premium_cover_accent(title: str) -> tuple[int, int, int, int]:
@@ -2113,8 +2263,8 @@ def _premium_cover_hook(title: str, mood: str = "premium") -> str:
 
 def _draw_cover_text_shadow(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font: ImageFont.ImageFont) -> None:
     x, y = xy
-    for offset, alpha in ((10, 130), (6, 180), (3, 230)):
-        draw.text((x + offset, y + offset), text, fill=(0, 0, 0, alpha), font=font, stroke_width=8, stroke_fill=(0, 0, 0, alpha))
+    for offset, alpha in ((6, 82), (3, 132), (2, 178)):
+        draw.text((x + offset, y + offset), text, fill=(0, 0, 0, alpha), font=font, stroke_width=4, stroke_fill=(0, 0, 0, alpha))
 
 
 def _draw_premium_hook_badge(
@@ -2129,15 +2279,15 @@ def _draw_premium_hook_badge(
     x: int | None = None,
     y: int | None = None,
 ) -> None:
-    font = _load_cover_font(30)
-    text = "СМОТРИ ДО КОНЦА" if re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", title or "") else "WATCH TO THE END"
+    font = _load_cover_font(24)
+    text = text or ("СМОТРИ ДО КОНЦА" if re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", title or "") else "WATCH TO THE END")
     text = text or "WATCH TO THE END"
     text_w = _text_width(font, text)
     x = int(x if x is not None else (56 if text_left else width - text_w - 106))
     y = int(y if y is not None else height - 96)
-    draw.rounded_rectangle((x, y, x + text_w + 50, y + 56), radius=8, fill=(0, 0, 0, 205), outline=(*accent[:3], 220), width=2)
-    draw.rectangle((x, y, x + 12, y + 56), fill=warm)
-    draw.text((x + 28, y + 12), text, fill=(255, 255, 255, 255), font=font)
+    draw.rounded_rectangle((x, y, x + text_w + 42, y + 48), radius=7, fill=(0, 0, 0, 178), outline=(*accent[:3], 170), width=1)
+    draw.rectangle((x, y, x + 10, y + 48), fill=warm)
+    draw.text((x + 24, y + 11), text, fill=(255, 255, 255, 245), font=font)
 
 
 def _draw_subtle_face_focus(draw: ImageDraw.ImageDraw, point: tuple[int, int], accent: tuple[int, int, int, int]) -> None:
@@ -2157,9 +2307,9 @@ def _draw_subtle_face_focus(draw: ImageDraw.ImageDraw, point: tuple[int, int], a
 
 
 def _load_cover_font(size: int) -> ImageFont.ImageFont:
-    for name in ("arialbd.ttf", "segoeuib.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf"):
+    for name in _font_candidates("arialbd.ttf", "segoeuib.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf", "arial.ttf", "segoeui.ttf"):
         try:
-            return ImageFont.truetype(name, size)
+            return ImageFont.truetype(str(name), size)
         except OSError:
             continue
     return _load_font(size)
@@ -2174,11 +2324,16 @@ def _cover_copy(raw: str) -> CoverCopy:
         return CoverCopy("NEW VIDEO", "")
     headline = lines[0]
     description = " ".join(lines[1:]).strip()
-    if not description and len(headline) > 68:
+    if not description and ":" in headline:
+        head, _, tail = headline.partition(":")
+        if len(head.strip()) >= 10 and len(tail.strip()) >= 6:
+            headline = head.strip()
+            description = tail.strip()
+    if not description and len(headline) > 58:
         original = headline
-        head, _, tail = original[:68].rpartition(" ")
-        headline = head or headline[:68]
-        description = " ".join(part for part in (tail, original[68:]) if part).strip()
+        head, _, tail = original[:58].rpartition(" ")
+        headline = head or headline[:58]
+        description = " ".join(part for part in (tail, original[58:]) if part).strip()
     return CoverCopy(headline=headline, description=description)
 
 
@@ -2194,8 +2349,8 @@ def _strip_cover_copy_prefix(line: str) -> str:
 def _cover_title_text(title: str) -> str:
     value = re.sub(r"\s+", " ", title or "").strip()
     value = re.sub(r"[|#]+", " ", value).strip()
-    if len(value) > 54:
-        value = value[:54].rsplit(" ", 1)[0] or value[:54]
+    if len(value) > 60:
+        value = value[:60].rsplit(" ", 1)[0] or value[:60]
     return value.upper() or "NEW VIDEO"
 
 
@@ -2209,13 +2364,13 @@ def _cover_description_text(description: str) -> str:
 
 def _fit_cover_title(text: str, max_width: int, max_lines: int) -> tuple[ImageFont.ImageFont, list[str]]:
     fallback_lines: list[str] = []
-    fallback_font = _load_cover_font(68)
-    for size in (98, 92, 86, 80, 74, 68):
+    fallback_font = _load_cover_font(42)
+    for size in (68, 62, 56, 50, 46, 42):
         font = _load_cover_font(size)
         lines = _wrap_cover_text(text, font, max_width=max_width, max_lines=max_lines)
         fallback_font, fallback_lines = font, lines
         total_height = len(lines) * (size + 7)
-        if len(lines) <= max_lines and total_height <= 322 and all(_text_width(font, line) <= max_width for line in lines):
+        if len(lines) <= max_lines and total_height <= 224 and all(_text_width(font, line) <= max_width for line in lines):
             return font, lines
     return fallback_font, fallback_lines or [text[:18]]
 

@@ -5,13 +5,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}">
-    <script defer src="{% static 'studio/app.js' %}"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-score-ring">
+    <script defer src="{% static 'studio/app.js' %}?v=20260615-score-ring"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
       <div class="topbar-copy">
-        <p class="eyebrow">CherryX-Digital · Product / Design / Engineering / Launch</p>
+        <p class="eyebrow">CherryX-Digital &middot; Product / Design / Engineering / Launch</p>
         <h1>{{ display_name }} Studio</h1>
         {% if is_guest %}
           <p class="topbar-note">{% ui "guest_note" %}</p>
@@ -52,8 +52,10 @@
             </form>
           {% endif %}
           <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
-          <span>Image {{ max_image_mb }} MB</span>
-          <span>Video {{ max_video_mb }} MB</span>
+          <a class="cherryx-balance-badge" href="{{ cherryx_pay_url }}" data-icon="coins">
+            <b>{{ cherryx_balance }}</b>
+            <span>CherryX</span>
+          </a>
         </div>
       </div>
     </header>
@@ -89,7 +91,7 @@
                 <div>
                   <span>{{ plan.badge }}</span>
                   <strong>{{ plan.name }}</strong>
-                  <small>{{ plan.storage_text }} · {{ plan.period_days }} {% ui "days" %}</small>
+                <small>{{ plan.storage_text }} &middot; {{ plan.period_days }} {% ui "days" %}</small>
                 </div>
                 <p>{{ plan.description }}</p>
                 <ul>
@@ -138,19 +140,25 @@
 
     <main class="layout">
       <nav class="tabs" aria-label="{% ui "workspace" %}">
-        <button class="tab is-active" type="button" data-tab="convert">{% ui "converter" %}</button>
-        <button class="tab" type="button" data-tab="youtube">YouTube</button>
-        <button class="tab" type="button" data-tab="cover">{% ui "covers" %}</button>
-        <button class="tab" type="button" data-tab="subtitles">{% ui "subtitles" %}</button>
-        <button class="tab" type="button" data-tab="package">{% ui "package" %}</button>
-        <button class="tab" type="button" data-tab="resume">{% ui "resume" %}</button>
-        <a class="tab tab-link" href="{{ video_editor_url }}">{% ui "video_editor_nav" %}</a>
-        <a class="tab tab-link" href="{{ music_projects_url }}">{% ui "music_editor_nav" %}</a>
+        <button class="tab is-active" type="button" data-tab="convert" data-icon="refresh-cw">{% ui "converter" %}</button>
+        <button class="tab" type="button" data-tab="youtube" data-icon="youtube">YouTube</button>
+        <button class="tab" type="button" data-tab="cover" data-icon="image">{% ui "covers" %}</button>
+        <button class="tab" type="button" data-tab="subtitles" data-icon="captions">{% ui "subtitles" %}</button>
+        <button class="tab" type="button" data-tab="package" data-icon="package">{% ui "package" %}</button>
+        <button class="tab" type="button" data-tab="resume" data-icon="file-user">{% ui "resume" %}</button>
+        <button class="tab" type="button" data-tab="originality" data-icon="scan-text">{% ui "originality_check" %}</button>
+        <a class="tab tab-link" href="{{ video_editor_url }}" data-icon="clapperboard">{% ui "video_editor_nav" %}</a>
+        <a class="tab tab-link" href="{{ music_projects_url }}" data-icon="music-2">{% ui "music_editor_nav" %}</a>
         <div class="designer-switch-wrap">
           <a class="designer-switch" href="{{ design_projects_url }}" data-designer-launch aria-pressed="false">
             <span class="designer-switch-track" aria-hidden="true"><span></span></span>
             <span>
               <b>{% ui "design" %}</b>
+            </span>
+          </a>
+          <a class="cherryx-pay-nav" href="{{ cherryx_pay_url }}" data-icon="coins" aria-label="CherryX Pay">
+            <span>
+              <b>CherryX Pay</b>
             </span>
           </a>
         </div>
@@ -163,35 +171,35 @@
               <small>{% ui "total_jobs" %}</small>
               <strong data-account-stat="total_jobs">{{ account_stats.total_jobs }}</strong>
             </span>
-            <em class="dashboard-open">Открыть</em>
+            <em class="dashboard-open">{% ui "open" %}</em>
           </a>
           <a class="dashboard-card is-active-count" href="{% url 'studio:dashboard_detail' 'active' %}">
             <span>
               <small>{% ui "active_jobs" %}</small>
               <strong data-account-stat="active_jobs">{{ account_stats.active_jobs }}</strong>
             </span>
-            <em class="dashboard-open">Открыть</em>
+            <em class="dashboard-open">{% ui "open" %}</em>
           </a>
           <a class="dashboard-card is-completed-count" href="{% url 'studio:dashboard_detail' 'completed' %}">
             <span>
               <small>{% ui "completed" %}</small>
               <strong data-account-stat="completed_jobs">{{ account_stats.completed_jobs }}</strong>
             </span>
-            <em class="dashboard-open">Открыть</em>
+            <em class="dashboard-open">{% ui "open" %}</em>
           </a>
           <a class="dashboard-card is-files-count" href="{% url 'studio:dashboard_detail' 'files' %}">
             <span>
               <small>{% ui "files" %}</small>
               <strong data-account-stat="output_count">{{ account_stats.output_count }}</strong>
             </span>
-            <em class="dashboard-open">Открыть</em>
+            <em class="dashboard-open">{% ui "open" %}</em>
           </a>
           <a class="dashboard-card storage-card is-storage-count" href="{% url 'studio:dashboard_detail' 'storage' %}">
             <span>
               <small>{% ui "volume" %}</small>
               <strong data-account-stat="total_output_size_text">{{ account_stats.total_output_size_text }}</strong>
             </span>
-            <small>Доступно ещё <em data-account-stat="storage_available_text">{{ account_stats.storage_available_text }}</em></small>
+            <small>{% ui "billing_available_more" %} <em data-account-stat="storage_available_text">{{ account_stats.storage_available_text }}</em></small>
             <i><b style="width: {{ account_stats.storage_percent }}%"></b></i>
           </a>
         </section>
@@ -308,7 +316,7 @@
         <section class="tool-panel" id="tab-cover">
           <div class="section-title">
             <h2>{% ui "png_covers" %}</h2>
-            <span>1280 x 720 · {% ui "variants" %}</span>
+            <span>1280 x 720 &middot; {% ui "variants" %}</span>
           </div>
           <form class="job-form form-grid" data-endpoint="{% url 'studio:start_cover' %}">
             {% csrf_token %}
@@ -371,14 +379,31 @@
               <span>{% ui "name" %}</span>
               <input type="text" name="title" placeholder="subtitled" maxlength="80">
             </label>
-            <label class="field">
-              <span>{% ui "style" %}</span>
-              <select name="style">
-                {% for value, label in subtitle_styles %}
-                  <option value="{{ value }}">{{ label }}</option>
+            <fieldset class="subtitle-style-picker field-wide" data-subtitle-style-picker>
+              <legend>{% ui "style" %}</legend>
+              <input type="hidden" name="style" value="pop" data-subtitle-style-input>
+              <button class="subtitle-style-current" type="button" data-subtitle-style-current aria-expanded="false">
+                <span class="subtitle-style-swatch is-pop"><b>Pop</b></span>
+                <span>
+                  <b>Pop</b>
+                  <small>Bright, punchy and easy to read.</small>
+                </span>
+              </button>
+              <div class="subtitle-style-menu" data-subtitle-style-menu>
+                {% for style in subtitle_styles %}
+                  <article class="subtitle-style-card{% if style.code == 'pop' %} is-selected{% endif %}" data-subtitle-style-value="{{ style.code }}">
+                    <button type="button" data-subtitle-style-choice>
+                      <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
+                      <span class="subtitle-style-copy">
+                        <b>{{ style.label }}</b>
+                        <small>{{ style.short }}</small>
+                      </span>
+                    </button>
+                    <a href="{{ style.detail_url }}" target="_blank" rel="noopener" data-subtitle-style-details>{% ui "details" %}</a>
+                  </article>
                 {% endfor %}
-              </select>
-            </label>
+              </div>
+            </fieldset>
             <fieldset class="subtitle-language-picker field-wide">
               <legend>{% ui "language" %}</legend>
               <div class="subtitle-language-grid">
@@ -388,7 +413,7 @@
                     {% if language.flag %}
                       <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
                     {% else %}
-                      <span class="subtitle-language-auto">AUTO</span>
+                      <span class="subtitle-language-auto" aria-hidden="true">A</span>
                     {% endif %}
                     <span>{{ language.label }}</span>
                   </label>
@@ -430,14 +455,31 @@
               <span>{% ui "name" %}</span>
               <input type="text" name="title" placeholder="{% ui "publication_package" %}" maxlength="120">
             </label>
-            <label class="field">
-              <span>{% ui "subtitle_style" %}</span>
-              <select name="style">
-                {% for value, label in subtitle_styles %}
-                  <option value="{{ value }}">{{ label }}</option>
+            <fieldset class="subtitle-style-picker field-wide" data-subtitle-style-picker>
+              <legend>{% ui "subtitle_style" %}</legend>
+              <input type="hidden" name="style" value="pop" data-subtitle-style-input>
+              <button class="subtitle-style-current" type="button" data-subtitle-style-current aria-expanded="false">
+                <span class="subtitle-style-swatch is-pop"><b>Pop</b></span>
+                <span>
+                  <b>Pop</b>
+                  <small>Bright, punchy and easy to read.</small>
+                </span>
+              </button>
+              <div class="subtitle-style-menu" data-subtitle-style-menu>
+                {% for style in subtitle_styles %}
+                  <article class="subtitle-style-card{% if style.code == 'pop' %} is-selected{% endif %}" data-subtitle-style-value="{{ style.code }}">
+                    <button type="button" data-subtitle-style-choice>
+                      <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
+                      <span class="subtitle-style-copy">
+                        <b>{{ style.label }}</b>
+                        <small>{{ style.short }}</small>
+                      </span>
+                    </button>
+                    <a href="{{ style.detail_url }}" target="_blank" rel="noopener" data-subtitle-style-details>{% ui "details" %}</a>
+                  </article>
                 {% endfor %}
-              </select>
-            </label>
+              </div>
+            </fieldset>
             <fieldset class="subtitle-language-picker field-wide">
               <legend>{% ui "language" %}</legend>
               <div class="subtitle-language-grid">
@@ -447,7 +489,7 @@
                     {% if language.flag %}
                       <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
                     {% else %}
-                      <span class="subtitle-language-auto">AUTO</span>
+                      <span class="subtitle-language-auto" aria-hidden="true">A</span>
                     {% endif %}
                     <span>{{ language.label }}</span>
                   </label>
@@ -589,12 +631,66 @@
             </div>
           </form>
         </section>
+
+        <section class="tool-panel originality-panel" id="tab-originality">
+          <div class="section-title">
+            <h2>{% ui "originality_title" %}</h2>
+            <span>DOCX PDF TXT AI Risk</span>
+          </div>
+          <form class="originality-form" data-originality-form data-endpoint="{% url 'studio:start_originality' %}">
+            {% csrf_token %}
+            <div class="originality-mode-grid field-wide">
+              <label>
+                <input type="radio" name="mode" value="local" checked>
+                <span><b>Local</b><small>5 CherryX · до 20k chars · AI Risk</small></span>
+              </label>
+              <label>
+                <input type="radio" name="mode" value="web">
+                <span><b>Web</b><small>25 CherryX · 5 web probes · share report</small></span>
+              </label>
+              <label>
+                <input type="radio" name="mode" value="deep">
+                <span><b>Deep</b><small>60 CherryX · 20 probes · source map</small></span>
+              </label>
+            </div>
+            <div class="originality-compose">
+              <label class="field field-wide">
+                <span>{% ui "originality_text" %}</span>
+                <textarea name="text" rows="12" placeholder="{% ui "originality_placeholder" %}" data-originality-text></textarea>
+              </label>
+              <label class="field file-field compact-upload originality-upload">
+                <span>{% ui "originality_file" %}</span>
+                <input type="file" name="file" accept=".txt,.md,.rtf,.csv,.json,.html,.htm,.docx,.pdf,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-preview="originality-preview" data-document-preview-endpoint="{% url 'studio:originality_document_preview' %}">
+                <span class="file-dropzone">
+                  <span class="file-icon">TXT</span>
+                  <span class="file-copy">
+                    <strong>{% ui "originality_upload_title" %}</strong>
+                    <small>{% ui "originality_upload_hint" %}</small>
+                  </span>
+                  <span class="file-button">{% ui "choose_file" %}</span>
+                </span>
+                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+              </label>
+              <div class="media-preview originality-preview" id="originality-preview">
+                <span>{% ui "preview_file" %}</span>
+              </div>
+              <button class="primary-action originality-submit" type="submit" data-icon="scan-text">{% ui "originality_run" %}</button>
+            </div>
+          </form>
+          <section class="originality-result" data-originality-result hidden></section>
+        </section>
       </section>
 
       <aside class="jobs-panel" aria-live="polite">
         <div class="jobs-heading">
           <h2>{% ui "tasks" %}</h2>
           <span id="jobs-count">0</span>
+        </div>
+        <div class="jobs-filter" data-job-filters aria-label="{% ui "tasks" %}">
+          <button class="is-active" type="button" data-job-filter="all" data-icon="list-filter" data-tooltip="{% ui "all" %}" aria-label="{% ui "all" %}"></button>
+          <button type="button" data-job-filter="active" data-icon="activity" data-tooltip="{% ui "active" %}" aria-label="{% ui "active" %}"></button>
+          <button type="button" data-job-filter="completed" data-icon="check-check" data-tooltip="{% ui "completed" %}" aria-label="{% ui "completed" %}"></button>
+          <button type="button" data-job-filter="failed" data-icon="triangle-alert" data-tooltip="{% ui "failed" %}" aria-label="{% ui "failed" %}"></button>
         </div>
         {% if not has_access %}
           <div class="paywall-mini">
@@ -605,10 +701,16 @@
         {% endif %}
         <div class="empty-jobs" id="empty-jobs">{% ui "results_here" %}</div>
         <div class="jobs-list" id="jobs-list"></div>
-        <a class="jobs-all-link" href="{% url 'studio:dashboard_detail' 'all' %}">Открыть все задачи</a>
+        <a class="jobs-all-link" href="{% url 'studio:dashboard_detail' 'all' %}">{% ui "open_all_tasks" %}</a>
       </aside>
     </main>
     {{ app_messages|json_script:"app-messages" }}
+    <script>
+      window.STUDIO_ACCESS = {
+        hasAccess: {{ has_access|yesno:"true,false" }},
+        checkoutUrl: "{{ checkout_url|escapejs }}"
+      };
+    </script>
     {{ initial_jobs|json_script:"initial-jobs" }}
   </body>
 </html>

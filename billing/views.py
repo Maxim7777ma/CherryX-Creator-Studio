@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from django.contrib.auth import login
-from django.http import HttpRequest
+from django.contrib.auth.models import User
+from django.http import HttpRequest, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods
+from urllib.parse import urlencode
 
 from .forms import CheckoutForm
 from .models import CheckoutRecord
@@ -18,6 +20,9 @@ from studio.localization import localized_plan
 @require_GET
 def pricing(request: HttpRequest):
     language = getattr(request, "interface_language", "en")
+    next_url = request.GET.get("next") or reverse("studio:index")
+    if not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = reverse("studio:index")
     return render(
         request,
         "billing/pricing.html",
@@ -25,6 +30,9 @@ def pricing(request: HttpRequest):
             "plans": [localized_plan(plan, language) for plan in PLANS],
             "has_access": user_has_active_access(request.user),
             "active_until": active_access_until(request.user),
+            "current_plan_code": _current_access_plan_code(request),
+            "checkout_return_url": f"{reverse('billing:checkout')}?{urlencode({'next': next_url})}",
+            "focused_plan_code": request.GET.get("focus") or "",
         },
     )
 
@@ -73,14 +81,32 @@ def checkout(request: HttpRequest):
             "next_url": next_url,
             "has_access": user_has_active_access(request.user),
             "active_until": active_access_until(request.user),
+            "current_plan_code": _current_access_plan_code(request),
         },
     )
+
+
+@require_GET
+def check_email(request: HttpRequest) -> JsonResponse:
+    email = (request.GET.get("email") or "").strip().lower()
+    exists = bool(email) and (User.objects.filter(username=email).exists() or User.objects.filter(email=email).exists())
+    return JsonResponse({"exists": exists})
 
 
 def _session_guest_key(request: HttpRequest) -> str:
     if not request.session.session_key:
         request.session.save()
     return request.session.session_key or ""
+
+
+def _current_access_plan_code(request: HttpRequest) -> str:
+    if not request.user.is_authenticated:
+        return ""
+    try:
+        access = request.user.billing_access
+    except Exception:
+        return ""
+    return access.plan_code if access.is_active else ""
 
 
 def _checkout_price_context(request: HttpRequest, selected_plan, due_override: str | None = None) -> dict[str, object]:
