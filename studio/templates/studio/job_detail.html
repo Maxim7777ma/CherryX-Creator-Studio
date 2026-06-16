@@ -5,16 +5,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-score-ring">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-job-mobile">
   </head>
-  <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
+  <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page job-detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
         <h1>{{ job.title }}</h1>
       </div>
       <div class="limits account-bar">
-        {% include "studio/_language_switcher.html" %}
         <img class="account-avatar" src="{{ avatar_url }}" alt="">
         {% if is_guest %}
           <span>{% ui "guest_session" %}</span>

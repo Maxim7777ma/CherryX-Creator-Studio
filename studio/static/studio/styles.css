@@ -1678,7 +1678,7 @@ body.is-designer-workspace .studio-topbar h1 {
 }
 
 .workspace-share-dialog header button::before {
-  content: "×";
+  content: "Г—";
   color: var(--ink);
   font-size: 22px;
   line-height: 1;
@@ -2176,11 +2176,13 @@ body.is-designer-workspace .studio-topbar h1 {
   touch-action: none;
 }
 
+.designer-canvas-shell.is-pinching,
 .designer-canvas-shell.is-panning,
 .designer-canvas-shell.is-pannable {
   cursor: grab;
 }
 
+.designer-canvas-shell.is-pinching,
 .designer-canvas-shell.is-panning {
   cursor: grabbing;
 }
@@ -10783,6 +10785,488 @@ button.output-link {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+body.job-detail-page .detail-topbar .language-switcher {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  body.job-detail-page {
+    min-height: 100svh;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 10% 3%, color-mix(in srgb, var(--blue) 18%, transparent), transparent 32%),
+      radial-gradient(circle at 94% 24%, rgba(20, 184, 166, 0.14), transparent 28%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #f8fbff) 0, #eef8f7 52%, #f8fbff 100%);
+  }
+
+  body.job-detail-page .detail-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 65000;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px 5px;
+    border: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.93), rgba(255, 255, 255, 0.68));
+    box-shadow: none;
+    backdrop-filter: blur(18px);
+  }
+
+  body.job-detail-page .detail-topbar .topbar-copy,
+  body.job-detail-page .detail-topbar .account-bar,
+  body.job-detail-page .detail-main,
+  body.job-detail-page .detail-side,
+  body.job-detail-page .preview-card,
+  body.job-detail-page .preview-head > div:first-child {
+    min-width: 0;
+  }
+
+  body.job-detail-page .detail-topbar .eyebrow {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  body.job-detail-page .detail-topbar .back-link {
+    display: inline-block;
+    max-width: 154px;
+    overflow: hidden;
+    color: var(--blue);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.job-detail-page .detail-topbar h1 {
+    max-width: min(54vw, 220px);
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.job-detail-page .detail-topbar .account-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body.job-detail-page .detail-topbar .account-bar > span:not([data-job-progress-text]),
+  body.job-detail-page .detail-topbar .topbar-link:not(.detail-workspace-link):not(.is-primary) {
+    display: none;
+  }
+
+  body.job-detail-page .detail-topbar .account-avatar {
+    width: 34px;
+    height: 34px;
+    border: 2px solid rgba(255, 255, 255, 0.82);
+    border-radius: 14px;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--blue) 16%, transparent);
+  }
+
+  body.job-detail-page .detail-topbar [data-job-progress-text] {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--blue) 26%, rgba(255, 255, 255, 0.8));
+    border-radius: 999px;
+    padding: 0 10px;
+    background: rgba(255, 255, 255, 0.74);
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  body.job-detail-page .detail-topbar .detail-workspace-link,
+  body.job-detail-page .detail-topbar .topbar-link.is-primary {
+    min-width: 38px;
+    min-height: 38px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--blue) 28%, rgba(255, 255, 255, 0.82));
+    border-radius: 15px;
+    padding: 0;
+    font-size: 0;
+    box-shadow:
+      0 12px 28px color-mix(in srgb, var(--blue) 14%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+
+  body.job-detail-page .detail-topbar .detail-workspace-link {
+    background:
+      url("https://api.iconify.design/lucide/layout-dashboard.svg?color=%232563eb") center / 18px 18px no-repeat,
+      radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.95), transparent 36%),
+      color-mix(in srgb, var(--blue) 10%, #ffffff);
+  }
+
+  body.job-detail-page .detail-topbar .topbar-link.is-primary {
+    background:
+      url("https://api.iconify.design/lucide/credit-card.svg?color=white") center / 18px 18px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #60a5fa), var(--blue));
+  }
+
+  body.job-detail-page .detail-layout {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding: 10px 12px calc(22px + env(safe-area-inset-bottom));
+  }
+
+  body.job-detail-page .detail-main,
+  body.job-detail-page .detail-side {
+    display: contents;
+  }
+
+  body.job-detail-page .detail-panel,
+  body.job-detail-page .preview-card,
+  body.job-detail-page .paywall-hero {
+    border: 1px solid transparent;
+    border-radius: 24px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), color-mix(in srgb, var(--blue) 4%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 36%, #ffffff), rgba(20, 184, 166, 0.25), rgba(255, 255, 255, 0.78)) border-box;
+    box-shadow: 0 22px 58px color-mix(in srgb, var(--blue) 12%, transparent);
+  }
+
+  body.job-detail-page .detail-panel {
+    padding: 14px;
+  }
+
+  body.job-detail-page [data-detail-job] {
+    position: relative;
+    overflow: hidden;
+    padding: 17px;
+    background:
+      radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--blue) 14%, transparent), transparent 31%) padding-box,
+      linear-gradient(135deg, rgba(255, 255, 255, 0.97), color-mix(in srgb, var(--blue) 7%, #ffffff)) padding-box,
+      linear-gradient(135deg, var(--blue), rgba(20, 184, 166, 0.42), rgba(255, 255, 255, 0.82)) border-box;
+  }
+
+  body.job-detail-page [data-detail-job]::before {
+    content: "";
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 48px;
+    height: 48px;
+    border-radius: 17px;
+    background:
+      url("https://api.iconify.design/lucide/activity.svg?color=%232563eb") center / 23px 23px no-repeat,
+      color-mix(in srgb, var(--blue) 9%, #ffffff);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    opacity: 0.9;
+  }
+
+  body.job-detail-page .job-topline {
+    display: grid;
+    gap: 12px;
+    padding-right: 62px;
+  }
+
+  body.job-detail-page .detail-label {
+    width: fit-content;
+    margin: 0 0 7px;
+    border-radius: 999px;
+    padding: 5px 9px;
+    background: color-mix(in srgb, var(--blue) 10%, #ffffff);
+    color: var(--blue);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  body.job-detail-page .detail-status {
+    font-size: clamp(28px, 9vw, 40px);
+    line-height: 0.95;
+  }
+
+  body.job-detail-page .detail-actions,
+  body.job-detail-page .output-actions,
+  body.job-detail-page .originality-detail-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    max-width: calc(100vw - 58px);
+    overflow-x: auto;
+    padding: 1px 1px 5px;
+    scrollbar-width: none;
+  }
+
+  body.job-detail-page .detail-actions::-webkit-scrollbar,
+  body.job-detail-page .output-actions::-webkit-scrollbar,
+  body.job-detail-page .originality-detail-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.job-detail-page .detail-actions form,
+  body.job-detail-page .detail-actions a,
+  body.job-detail-page .output-actions a,
+  body.job-detail-page .output-actions button,
+  body.job-detail-page .originality-detail-actions a,
+  body.job-detail-page .originality-detail-actions button {
+    flex: 0 0 auto;
+  }
+
+  body.job-detail-page .secondary-action,
+  body.job-detail-page .danger-action,
+  body.job-detail-page .output-link.compact,
+  body.job-detail-page .primary-link {
+    min-height: 42px;
+    border-radius: 15px;
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+
+  body.job-detail-page .job-message {
+    display: grid;
+    gap: 8px;
+    margin: 14px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  body.job-detail-page .job-eta {
+    width: fit-content;
+    border-radius: 999px;
+    padding: 6px 9px;
+    background: color-mix(in srgb, var(--blue) 9%, #ffffff);
+    color: var(--blue);
+  }
+
+  body.job-detail-page .detail-progress {
+    height: 10px;
+    margin-top: 15px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blue) 10%, #e8eef9);
+  }
+
+  body.job-detail-page .preview-grid {
+    display: grid;
+    grid-auto-columns: minmax(82%, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    gap: 12px;
+    margin: 0 -14px;
+    overflow-x: auto;
+    padding: 0 14px 6px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  body.job-detail-page .preview-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.job-detail-page .preview-card {
+    scroll-snap-align: start;
+  }
+
+  body.job-detail-page .preview-head {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  body.job-detail-page .preview-head h3 {
+    overflow: hidden;
+    font-size: 16px;
+    line-height: 1.12;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.job-detail-page .preview-head p {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  body.job-detail-page .result-preview,
+  body.job-detail-page .embed-preview {
+    width: 100%;
+    max-height: min(54svh, 430px);
+  }
+
+  body.job-detail-page .embed-preview {
+    height: min(54svh, 430px);
+  }
+
+  body.job-detail-page .cx-player-controls {
+    grid-template-columns: 38px minmax(90px, 1fr) 38px 38px;
+    gap: 7px;
+  }
+
+  body.job-detail-page .cx-player-controls [data-player-back],
+  body.job-detail-page .cx-player-controls [data-player-forward],
+  body.job-detail-page .cx-player-controls [data-player-mute],
+  body.job-detail-page .cx-player-controls [data-player-volume] {
+    display: none;
+  }
+
+  body.job-detail-page .section-title {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  body.job-detail-page .section-title h2 {
+    margin: 0;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  body.job-detail-page .section-title span {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 6px 9px;
+    background: color-mix(in srgb, var(--blue) 8%, #ffffff);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 850;
+  }
+
+  body.job-detail-page .detail-side .detail-panel,
+  body.job-detail-page .detail-layout > aside.detail-side + * {
+    position: static;
+  }
+
+  body.job-detail-page .timeline {
+    gap: 9px;
+    max-height: 330px;
+    overflow: auto;
+    padding-right: 3px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--blue) 40%, #9db7ff) transparent;
+  }
+
+  body.job-detail-page .timeline li {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+    border: 1px solid color-mix(in srgb, var(--blue) 12%, var(--line));
+    border-radius: 16px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.66);
+  }
+
+  body.job-detail-page .timeline-dot {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    margin-top: 0;
+    place-items: center;
+    background: color-mix(in srgb, var(--blue) 10%, #ffffff);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 26%, transparent);
+  }
+
+  body.job-detail-page .timeline-dot::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: inherit;
+    background: var(--blue);
+  }
+
+  body.job-detail-page .timeline p:not(.timeline-meta) {
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.42;
+  }
+
+  body.job-detail-page .timeline-meta {
+    margin-bottom: 4px;
+    font-size: 11px;
+  }
+
+  body.job-detail-page .paywall-hero {
+    display: grid;
+    gap: 13px;
+    padding: 16px;
+  }
+
+  body.job-detail-page .paywall-hero h2 {
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  body.job-detail-page .originality-job-hero {
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+
+  body.job-detail-page .originality-detail-score {
+    --score-size: 76px;
+    --score-ring: 7px;
+  }
+
+  body.job-detail-page .originality-detail-score strong {
+    font-size: 27px;
+  }
+
+  body.job-detail-page .originality-detail-copy h2 {
+    font-size: 22px;
+  }
+
+  body.job-detail-page .originality-guidance,
+  body.job-detail-page .originality-web-plan,
+  body.job-detail-page .originality-report-list {
+    grid-template-columns: 1fr;
+  }
+
+  body.job-detail-page .originality-guidance article {
+    grid-template-columns: 38px minmax(0, 1fr);
+    padding: 13px;
+  }
+
+  body.job-detail-page .originality-email-form {
+    grid-template-columns: 1fr;
+  }
+
+  body.job-detail-page .originality-email-form input {
+    min-height: 46px;
+    font-size: 16px;
+  }
+
+  .theme-dark.job-detail-page {
+    background:
+      radial-gradient(circle at 14% 2%, color-mix(in srgb, var(--blue) 26%, transparent), transparent 34%),
+      linear-gradient(180deg, #10182a 0, #0a1020 58%, #070b16 100%);
+  }
+
+  .theme-dark.job-detail-page .detail-topbar,
+  .theme-dark.job-detail-page .detail-panel,
+  .theme-dark.job-detail-page .preview-card,
+  .theme-dark.job-detail-page .paywall-hero {
+    background:
+      linear-gradient(rgba(17, 26, 46, 0.94), rgba(17, 26, 46, 0.9)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 42%, #1e293b), rgba(20, 184, 166, 0.28), rgba(84, 102, 137, 0.38)) border-box;
+  }
+
+  .theme-dark.job-detail-page .timeline li {
+    background: rgba(8, 13, 26, 0.62);
+  }
 }
 
 .landing-page,
@@ -19705,7 +20189,12 @@ button.output-link {
   }
 
   body.designer-page .designer-canvas-shell.is-pannable {
-    touch-action: pan-x pan-y;
+    touch-action: none;
+  }
+
+  body.designer-page .designer-canvas-shell.is-pinching {
+    scroll-behavior: auto;
+    user-select: none;
   }
 
   body.designer-page .designer-ruler {
@@ -19928,5 +20417,1052 @@ button.output-link {
     background:
       linear-gradient(rgba(17, 26, 46, 0.94), rgba(17, 26, 46, 0.9)) padding-box,
       linear-gradient(135deg, color-mix(in srgb, var(--blue) 42%, #1e293b), rgba(20, 184, 166, 0.28), rgba(84, 102, 137, 0.38)) border-box;
+  }
+}
+
+@media (max-width: 760px) {
+  body.design-projects-page {
+    min-height: 100svh;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 12% 6%, color-mix(in srgb, var(--blue) 18%, transparent), transparent 34%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 9%, #f8fbff) 0, #eff8f6 52%, #f8fbff 100%);
+  }
+
+  body.design-projects-page .detail-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 65000;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px 4px;
+    border: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.68));
+    box-shadow: none;
+    backdrop-filter: blur(18px);
+  }
+
+  body.design-projects-page .detail-topbar .topbar-copy,
+  body.design-projects-page .detail-topbar .account-bar,
+  body.design-projects-page .video-project-empty,
+  body.design-projects-page .video-project-empty div,
+  body.design-projects-page .design-project-card,
+  body.design-projects-page .video-project-body {
+    min-width: 0;
+  }
+
+  body.design-projects-page .detail-topbar .eyebrow {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  body.design-projects-page .detail-topbar .back-link {
+    display: inline-block;
+    max-width: 142px;
+    overflow: hidden;
+    color: var(--blue);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.design-projects-page .detail-topbar h1 {
+    max-width: 154px;
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.design-projects-page .detail-topbar .account-bar {
+    right: clamp(12px, 17vw, 82px);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body.design-projects-page .detail-topbar .language-switcher {
+    display: none;
+  }
+
+  body.design-projects-page .detail-topbar .language-current {
+    max-width: 108px;
+    min-height: 34px;
+    padding: 6px 7px;
+    font-size: 12px;
+  }
+
+  body.design-projects-page .detail-topbar .language-current img {
+    width: 21px;
+    height: 15px;
+  }
+
+  body.design-projects-page .detail-topbar .language-current::after {
+    width: 20px;
+    height: 20px;
+    background-size: 12px 12px, auto, auto;
+  }
+
+  body.design-projects-page .detail-topbar .detail-workspace-link {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--blue) 28%, rgba(255, 255, 255, 0.82));
+    border-radius: 16px;
+    padding: 0;
+    font-size: 0;
+    background:
+      url("https://api.iconify.design/lucide/layout-dashboard.svg?color=%232563eb") center / 19px 19px no-repeat,
+      radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.95), transparent 36%),
+      color-mix(in srgb, var(--blue) 10%, #ffffff);
+    box-shadow:
+      0 12px 28px color-mix(in srgb, var(--blue) 14%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+
+  body.design-projects-page .detail-topbar .language-menu {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    top: auto;
+    bottom: max(18px, calc(env(safe-area-inset-bottom) + 18px));
+    width: auto;
+    max-width: none;
+    max-height: min(54svh, 470px);
+    border-radius: 24px;
+    transform: translateY(18px) scale(0.98);
+    transform-origin: bottom center;
+  }
+
+  body.design-projects-page .detail-topbar .language-switcher.is-open .language-menu {
+    transform: translateY(0) scale(1);
+  }
+
+  body.design-projects-page .design-projects-shell {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding: 10px 12px calc(94px + env(safe-area-inset-bottom));
+  }
+
+  body.design-projects-page .design-projects-shell .video-projects-head {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: end;
+    gap: 10px;
+    overflow: visible;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    padding: 17px;
+    background:
+      radial-gradient(circle at 85% 16%, color-mix(in srgb, var(--blue) 17%, transparent), transparent 30%) padding-box,
+      linear-gradient(135deg, rgba(255, 255, 255, 0.95), color-mix(in srgb, var(--blue) 7%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 46%, #ffffff), rgba(20, 184, 166, 0.32), rgba(255, 255, 255, 0.76)) border-box;
+    box-shadow: 0 22px 58px color-mix(in srgb, var(--blue) 14%, transparent);
+  }
+
+  body.design-projects-page .video-projects-head span {
+    display: inline-flex;
+    width: fit-content;
+    border-radius: 999px;
+    padding: 5px 9px;
+    background: color-mix(in srgb, var(--blue) 10%, #ffffff);
+    color: var(--blue);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  body.design-projects-page .video-projects-head strong {
+    margin-top: 7px;
+    font-size: clamp(30px, 10.5vw, 44px);
+    line-height: 0.94;
+  }
+
+  body.design-projects-page .video-projects-head small {
+    max-width: 190px;
+    font-size: 12px;
+  }
+
+  body.design-projects-page .video-projects-head > button[data-create-project] {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(14px, calc(env(safe-area-inset-bottom) + 14px));
+    z-index: 65012;
+    min-height: 56px;
+    border: 1px solid color-mix(in srgb, var(--blue) 20%, rgba(255, 255, 255, 0.74));
+    border-radius: 22px;
+    padding: 13px 18px;
+    background:
+      url("https://api.iconify.design/lucide/sparkles.svg?color=white") calc(50% - 66px) center / 19px 19px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #60a5fa), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 18px 44px color-mix(in srgb, var(--blue) 32%, transparent);
+    font-size: 15px;
+  }
+
+  body.design-projects-page .design-projects-shell:has(.design-project-empty:not([hidden])) .video-projects-head > button[data-create-project] {
+    display: none;
+  }
+
+  body.design-projects-page .design-project-mobile-filter-toggle {
+    position: absolute;
+    top: 17px;
+    right: clamp(18px, 18vw, 88px);
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    align-self: start;
+    justify-self: end;
+    border: 1px solid color-mix(in srgb, var(--blue) 30%, rgba(255, 255, 255, 0.82));
+    border-radius: 18px;
+    padding: 0;
+    background:
+      url("https://api.iconify.design/lucide/sliders-horizontal.svg?color=%232563eb") center / 21px 21px no-repeat,
+      radial-gradient(circle at 32% 20%, rgba(255, 255, 255, 0.98), transparent 36%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #ffffff), rgba(255, 255, 255, 0.84));
+    box-shadow:
+      0 16px 36px color-mix(in srgb, var(--blue) 16%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    font-size: 0;
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+
+  body.design-projects-page .design-project-mobile-filter-toggle:hover,
+  body.design-projects-page .design-project-mobile-filter-toggle:focus-visible,
+  body.design-projects-page .design-project-mobile-filter-toggle[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--blue) 54%, rgba(255, 255, 255, 0.82));
+    box-shadow:
+      0 18px 40px color-mix(in srgb, var(--blue) 22%, transparent),
+      0 0 0 5px color-mix(in srgb, var(--blue) 10%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    transform: translateY(-1px);
+  }
+
+  body.design-projects-page .design-project-mobile-filter-toggle::after {
+    content: "";
+    position: absolute;
+    right: 9px;
+    top: 9px;
+    width: 7px;
+    height: 7px;
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blue) 84%, #22c55e);
+    box-shadow: 0 5px 12px color-mix(in srgb, var(--blue) 20%, transparent);
+  }
+
+  body.design-projects-page .project-filter-bar {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px));
+    z-index: 65030;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(116px, 0.44fr);
+    gap: 10px;
+    max-height: min(62svh, 520px);
+    overflow: auto;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    padding: 14px;
+    background:
+      radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 30%) padding-box,
+      linear-gradient(145deg, #ffffff, #f8fbff) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 48%, #ffffff), rgba(20, 184, 166, 0.38), rgba(255, 255, 255, 0.8)) border-box;
+    box-shadow: 0 30px 82px rgba(15, 23, 42, 0.28);
+    opacity: 0;
+    overscroll-behavior: contain;
+    pointer-events: none;
+    transform: translateY(18px) scale(0.98);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  body.is-mobile-design-filter-open.design-projects-page .project-filter-bar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+
+  .design-project-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 65020;
+    display: none;
+    border: 0;
+    background: rgba(15, 23, 42, 0.22);
+    backdrop-filter: blur(10px);
+  }
+
+  body.is-mobile-design-filter-open .design-project-mobile-backdrop {
+    display: block;
+  }
+
+  body.design-projects-page .project-filter-bar label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  body.design-projects-page .project-filter-bar input,
+  body.design-projects-page .project-filter-bar select {
+    min-height: 48px;
+    border-radius: 15px;
+    font-size: 16px;
+  }
+
+  body.design-projects-page .project-filter-bar button,
+  body.design-projects-page .project-filter-bar a {
+    min-height: 44px;
+    border-radius: 15px;
+  }
+
+  body.design-projects-page .video-projects-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  body.design-projects-page .design-project-card {
+    display: grid;
+    grid-template-columns: minmax(108px, 35%) minmax(0, 1fr);
+    grid-template-areas: "thumb body" "thumb actions";
+    align-items: stretch;
+    gap: 10px;
+    min-height: 156px;
+    border: 1px solid transparent;
+    border-radius: 23px;
+    padding: 10px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), color-mix(in srgb, var(--blue) 4%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 30%, #ffffff), rgba(20, 184, 166, 0.22), rgba(255, 255, 255, 0.72)) border-box;
+    box-shadow: 0 20px 52px color-mix(in srgb, var(--blue) 11%, transparent);
+  }
+
+  body.design-projects-page .design-project-card:first-child {
+    grid-template-columns: 1fr;
+    grid-template-areas: "thumb" "body" "actions";
+    min-height: 0;
+    padding: 11px;
+  }
+
+  body.design-projects-page .design-project-card:hover,
+  body.design-projects-page .design-project-card.is-mobile-pressed {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--blue) 38%, transparent);
+    box-shadow: 0 24px 60px color-mix(in srgb, var(--blue) 16%, transparent);
+  }
+
+  body.design-projects-page .design-project-card.is-selected {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #ffffff), #ffffff) padding-box,
+      linear-gradient(135deg, var(--blue), rgba(20, 184, 166, 0.42), rgba(255, 255, 255, 0.72)) border-box;
+  }
+
+  body.design-projects-page .design-project-thumb {
+    grid-area: thumb;
+    min-height: 136px;
+    border-radius: 18px;
+    padding: 9px;
+  }
+
+  body.design-projects-page .design-project-card:first-child .design-project-thumb {
+    min-height: clamp(210px, 58vw, 270px);
+  }
+
+  body.design-projects-page .video-project-body {
+    grid-area: body;
+    align-content: start;
+    padding: 2px 4px 0 0;
+  }
+
+  body.design-projects-page .video-project-body strong {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 16px;
+    line-height: 1.12;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  body.design-projects-page .video-project-body span,
+  body.design-projects-page .design-project-thumb .design-project-thumb-badge,
+  body.design-projects-page .design-project-thumb b {
+    font-size: 11px;
+  }
+
+  body.design-projects-page .video-project-actions {
+    grid-area: actions;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(2, 44px);
+    align-self: end;
+    gap: 7px;
+  }
+
+  body.design-projects-page .video-project-actions a,
+  body.design-projects-page .video-project-actions button {
+    min-height: 42px;
+    border-radius: 15px;
+    padding: 8px 10px;
+  }
+
+  body.design-projects-page .video-project-actions a {
+    border-color: transparent;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #60a5fa), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 14px 30px color-mix(in srgb, var(--blue) 22%, transparent);
+  }
+
+  body.design-projects-page .video-project-actions button {
+    font-size: 0;
+  }
+
+  body.design-projects-page .video-project-actions button::before {
+    content: "";
+    width: 18px;
+    height: 18px;
+    background: currentColor;
+    mask: var(--project-action-icon) center / contain no-repeat;
+    -webkit-mask: var(--project-action-icon) center / contain no-repeat;
+  }
+
+  body.design-projects-page .video-project-actions button[data-duplicate-project] {
+    --project-action-icon: url("https://api.iconify.design/lucide/copy-plus.svg");
+    color: var(--blue);
+  }
+
+  body.design-projects-page .video-project-actions button[data-delete-project] {
+    --project-action-icon: url("https://api.iconify.design/lucide/trash-2.svg");
+    color: var(--red);
+  }
+
+  body.design-projects-page .video-project-select {
+    top: 18px;
+    right: 18px;
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+  }
+
+  body.design-projects-page .video-project-bulk {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px));
+    z-index: 65014;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  body.design-projects-page .video-project-bulk[hidden] {
+    display: none;
+  }
+
+  body.design-projects-page .video-project-bulk div,
+  body.design-projects-page .video-project-bulk div:first-child {
+    min-width: 0;
+    width: auto;
+  }
+
+  body.design-projects-page .video-project-bulk strong {
+    display: none;
+  }
+
+  body.design-projects-page .video-project-bulk button {
+    min-height: 38px;
+    border-radius: 14px;
+    padding: 8px 10px;
+  }
+
+  body.design-projects-page .video-project-empty {
+    display: grid;
+    gap: 12px;
+    max-width: 100%;
+    overflow: hidden;
+    border-radius: 23px;
+    padding: 18px;
+    text-align: left;
+  }
+
+  body.design-projects-page .video-project-empty[hidden] {
+    display: none;
+  }
+
+  body.design-projects-page .video-project-empty div {
+    display: grid;
+    gap: 4px;
+  }
+
+  body.design-projects-page .video-project-empty strong,
+  body.design-projects-page .video-project-empty span {
+    display: block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  body.design-projects-page .video-project-empty span {
+    line-height: 1.45;
+  }
+
+  body.design-projects-page .video-project-empty button {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    border-radius: 16px;
+    background: var(--blue);
+    color: #ffffff;
+  }
+
+  body.design-projects-page .project-pagination {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding: 2px 0 4px;
+    scrollbar-width: none;
+  }
+
+  body.design-projects-page .project-pagination::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.design-projects-page .project-delete-modal {
+    place-items: end center;
+    padding: 14px;
+    z-index: 66000;
+  }
+
+  body.design-projects-page .project-delete-backdrop {
+    background: rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(10px);
+  }
+
+  body.design-projects-page .project-delete-dialog {
+    width: 100%;
+    border-radius: 24px;
+    padding: 18px;
+    transform-origin: bottom center;
+  }
+
+  body.design-projects-page .project-delete-dialog h2 {
+    font-size: 22px;
+  }
+
+  body.design-projects-page .project-delete-dialog footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .theme-dark.design-projects-page .detail-topbar,
+  .theme-dark.design-projects-page .project-filter-bar,
+  .theme-dark.design-projects-page .design-project-card,
+  .theme-dark.design-projects-page .design-projects-shell .video-projects-head {
+    background:
+      linear-gradient(rgba(17, 26, 46, 0.94), rgba(17, 26, 46, 0.9)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 42%, #1e293b), rgba(20, 184, 166, 0.28), rgba(84, 102, 137, 0.38)) border-box;
+  }
+}
+
+body.design-projects-page .detail-topbar .language-switcher {
+  display: none;
+}
+
+body.design-projects-page .design-project-mobile-filter-toggle {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  body.design-projects-page .design-project-mobile-filter-toggle {
+    display: inline-grid;
+    place-items: center;
+  }
+}
+
+body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  body.video-projects-page:not(.design-projects-page) {
+    min-height: 100svh;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 12% 6%, color-mix(in srgb, var(--blue) 16%, transparent), transparent 34%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #f8fbff) 0, #eef8f6 54%, #f8fbff 100%);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 65000;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px 4px;
+    border: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.68));
+    box-shadow: none;
+    backdrop-filter: blur(18px);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .topbar-copy {
+    min-width: 0;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .eyebrow {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .back-link {
+    display: inline-block;
+    max-width: 142px;
+    overflow: hidden;
+    color: var(--blue);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar h1 {
+    max-width: 164px;
+    margin: 2px 0 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .account-bar {
+    right: clamp(12px, 17vw, 82px);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .language-switcher {
+    display: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .detail-topbar .detail-workspace-link {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--blue) 28%, rgba(255, 255, 255, 0.82));
+    border-radius: 16px;
+    padding: 0;
+    font-size: 0;
+    background:
+      url("https://api.iconify.design/lucide/layout-dashboard.svg?color=%232563eb") center / 19px 19px no-repeat,
+      radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.95), transparent 36%),
+      color-mix(in srgb, var(--blue) 10%, #ffffff);
+    box-shadow:
+      0 12px 28px color-mix(in srgb, var(--blue) 14%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-shell {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding: 10px 12px calc(96px + env(safe-area-inset-bottom));
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-head {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: end;
+    gap: 10px;
+    overflow: visible;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    padding: 17px;
+    background:
+      radial-gradient(circle at 85% 16%, color-mix(in srgb, var(--blue) 17%, transparent), transparent 30%) padding-box,
+      linear-gradient(135deg, rgba(255, 255, 255, 0.95), color-mix(in srgb, var(--blue) 7%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 44%, #ffffff), rgba(20, 184, 166, 0.3), rgba(255, 255, 255, 0.76)) border-box;
+    box-shadow: 0 22px 58px color-mix(in srgb, var(--blue) 14%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-head span {
+    display: inline-flex;
+    width: fit-content;
+    border-radius: 999px;
+    padding: 5px 9px;
+    background: color-mix(in srgb, var(--blue) 10%, #ffffff);
+    color: var(--blue);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-head strong {
+    margin-top: 7px;
+    font-size: clamp(30px, 10.5vw, 44px);
+    line-height: 0.94;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-head small {
+    max-width: 190px;
+    font-size: 12px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle {
+    position: absolute;
+    top: 17px;
+    right: clamp(18px, 18vw, 88px);
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    border: 1px solid color-mix(in srgb, var(--blue) 30%, rgba(255, 255, 255, 0.82));
+    border-radius: 18px;
+    padding: 0;
+    background:
+      url("https://api.iconify.design/lucide/sliders-horizontal.svg?color=%232563eb") center / 21px 21px no-repeat,
+      radial-gradient(circle at 32% 20%, rgba(255, 255, 255, 0.98), transparent 36%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #ffffff), rgba(255, 255, 255, 0.84));
+    box-shadow:
+      0 16px 36px color-mix(in srgb, var(--blue) 16%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    font-size: 0;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle::after {
+    content: "";
+    position: absolute;
+    right: 9px;
+    top: 9px;
+    width: 7px;
+    height: 7px;
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blue) 84%, #22c55e);
+    box-shadow: 0 5px 12px color-mix(in srgb, var(--blue) 20%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle:hover,
+  body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle:focus-visible,
+  body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter-toggle[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--blue) 54%, rgba(255, 255, 255, 0.82));
+    box-shadow:
+      0 18px 40px color-mix(in srgb, var(--blue) 22%, transparent),
+      0 0 0 5px color-mix(in srgb, var(--blue) 10%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    transform: translateY(-1px);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-head > button[data-create-project] {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(14px, calc(env(safe-area-inset-bottom) + 14px));
+    z-index: 65012;
+    min-height: 56px;
+    border: 1px solid color-mix(in srgb, var(--blue) 20%, rgba(255, 255, 255, 0.74));
+    border-radius: 22px;
+    padding: 13px 18px;
+    background:
+      url("https://api.iconify.design/lucide/clapperboard.svg?color=white") calc(50% - 76px) center / 19px 19px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #60a5fa), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 18px 44px color-mix(in srgb, var(--blue) 32%, transparent);
+    font-size: 15px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-shell:has(.video-project-empty:not([hidden])) .video-projects-head > button[data-create-project] {
+    display: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px));
+    z-index: 65030;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(116px, 0.44fr);
+    gap: 10px;
+    max-height: min(62svh, 520px);
+    overflow: auto;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    padding: 14px;
+    background:
+      radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 30%) padding-box,
+      linear-gradient(145deg, #ffffff, #f8fbff) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 48%, #ffffff), rgba(20, 184, 166, 0.38), rgba(255, 255, 255, 0.8)) border-box;
+    box-shadow: 0 30px 82px rgba(15, 23, 42, 0.28);
+    opacity: 0;
+    overscroll-behavior: contain;
+    pointer-events: none;
+    transform: translateY(18px) scale(0.98);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  body.is-mobile-video-filter-open.video-projects-page:not(.design-projects-page) .project-filter-bar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+
+  .video-project-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 65020;
+    display: none;
+    border: 0;
+    background: rgba(15, 23, 42, 0.22);
+    backdrop-filter: blur(10px);
+  }
+
+  body.is-mobile-video-filter-open .video-project-mobile-backdrop {
+    display: block;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar input,
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar select {
+    min-height: 48px;
+    border-radius: 15px;
+    font-size: 16px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar button,
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar a {
+    min-height: 44px;
+    border-radius: 15px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-projects-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-card {
+    display: grid;
+    gap: 10px;
+    min-height: 0;
+    border: 1px solid transparent;
+    border-radius: 23px;
+    padding: 10px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), color-mix(in srgb, var(--blue) 4%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 30%, #ffffff), rgba(20, 184, 166, 0.22), rgba(255, 255, 255, 0.72)) border-box;
+    box-shadow: 0 20px 52px color-mix(in srgb, var(--blue) 11%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-card:hover,
+  body.video-projects-page:not(.design-projects-page) .video-project-card.is-mobile-pressed {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--blue) 38%, transparent);
+    box-shadow: 0 24px 60px color-mix(in srgb, var(--blue) 16%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-thumb {
+    min-height: clamp(186px, 53vw, 245px);
+    border-radius: 18px;
+    padding: 9px;
+    background-size: cover;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-thumb span {
+    max-width: calc(100% - 44px);
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-thumb b {
+    max-width: 100%;
+    padding: 6px 8px;
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-body {
+    min-width: 0;
+    padding: 0 2px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-body strong {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 17px;
+    line-height: 1.12;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-body span {
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 7px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-actions a,
+  body.video-projects-page:not(.design-projects-page) .video-project-actions button {
+    min-height: 44px;
+    border-radius: 15px;
+    padding: 8px 10px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-actions a {
+    border-color: transparent;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #60a5fa), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 14px 30px color-mix(in srgb, var(--blue) 22%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-actions button {
+    font-size: 0;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-actions button::before {
+    content: "";
+    width: 18px;
+    height: 18px;
+    background: currentColor;
+    mask: url("https://api.iconify.design/lucide/trash-2.svg") center / contain no-repeat;
+    -webkit-mask: url("https://api.iconify.design/lucide/trash-2.svg") center / contain no-repeat;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-select {
+    top: 18px;
+    right: 18px;
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-bulk {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px));
+    z-index: 65014;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-bulk[hidden] {
+    display: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-bulk div,
+  body.video-projects-page:not(.design-projects-page) .video-project-bulk div:first-child {
+    min-width: 0;
+    width: auto;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-bulk strong {
+    display: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-empty {
+    display: grid;
+    gap: 12px;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 23px;
+    padding: 18px;
+    text-align: left;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-empty[hidden] {
+    display: none;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-empty div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-empty strong,
+  body.video-projects-page:not(.design-projects-page) .video-project-empty span {
+    display: block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .video-project-empty button {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    border-radius: 16px;
+    background: var(--blue);
+    color: #ffffff;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-delete-modal {
+    place-items: end center;
+    padding: 14px;
+    z-index: 66000;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-delete-backdrop {
+    background: rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(10px);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-delete-dialog {
+    width: 100%;
+    border-radius: 24px;
+    padding: 18px;
+    transform-origin: bottom center;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-delete-dialog footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 }

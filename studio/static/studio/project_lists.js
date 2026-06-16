@@ -237,6 +237,155 @@
       return `${base}${joiner}project=${id}`;
     };
 
+    const setupMobileDesignProjects = () => {
+      if (!root.matches("[data-design-projects]") || root.dataset.mobileDesignProjectsReady === "1") return;
+      root.dataset.mobileDesignProjectsReady = "1";
+      const media = window.matchMedia("(max-width: 760px)");
+      const head = root.querySelector(".video-projects-head");
+      let filterToggle = root.querySelector("[data-mobile-project-filters]");
+      let backdrop = document.querySelector("[data-design-projects-mobile-backdrop]");
+
+      if (head && !filterToggle) {
+        filterToggle = document.createElement("button");
+        filterToggle.type = "button";
+        filterToggle.className = "design-project-mobile-filter-toggle";
+        filterToggle.dataset.mobileProjectFilters = "";
+        filterToggle.setAttribute("aria-expanded", "false");
+        filterToggle.setAttribute("aria-label", t("filters", "Filters"));
+        filterToggle.innerHTML = "";
+        head.appendChild(filterToggle);
+      }
+
+      if (!backdrop) {
+        backdrop = document.createElement("button");
+        backdrop.type = "button";
+        backdrop.className = "design-project-mobile-backdrop";
+        backdrop.dataset.designProjectsMobileBackdrop = "";
+        backdrop.setAttribute("aria-label", t("close", "Close"));
+        document.body.appendChild(backdrop);
+      }
+
+      const closeFilters = () => {
+        document.body.classList.remove("is-mobile-design-filter-open");
+        filterToggle?.setAttribute("aria-expanded", "false");
+      };
+
+      const syncMode = () => {
+        document.body.classList.toggle("is-mobile-design-projects", media.matches);
+        if (!media.matches) closeFilters();
+      };
+
+      filterToggle?.addEventListener("click", () => {
+        if (!media.matches) return;
+        const open = !document.body.classList.contains("is-mobile-design-filter-open");
+        document.body.classList.toggle("is-mobile-design-filter-open", open);
+        filterToggle.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) {
+          window.setTimeout(() => filters.querySelector("input, select, button")?.focus({preventScroll: true}), 80);
+        }
+      });
+
+      backdrop.addEventListener("click", closeFilters);
+      filters.addEventListener("submit", closeFilters);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeFilters();
+      });
+
+      root.addEventListener("pointerdown", (event) => {
+        if (!media.matches) return;
+        const card = event.target instanceof Element ? event.target.closest(".design-project-card") : null;
+        if (!card) return;
+        card.classList.add("is-mobile-pressed");
+      }, {passive: true});
+
+      root.addEventListener("pointerup", () => {
+        if (!media.matches) return;
+        root.querySelectorAll(".design-project-card.is-mobile-pressed").forEach((card) => card.classList.remove("is-mobile-pressed"));
+      }, {passive: true});
+
+      root.addEventListener("project-list:updated", () => {
+        if (!media.matches) return;
+        window.requestAnimationFrame(() => {
+          root.querySelector("[data-project-grid]")?.scrollIntoView({block: "start", behavior: "smooth"});
+        });
+      });
+
+      syncMode();
+      media.addEventListener?.("change", syncMode);
+    };
+
+    const setupMobileVideoProjects = () => {
+      if (!root.matches("[data-video-projects]") || root.dataset.mobileVideoProjectsReady === "1") return;
+      root.dataset.mobileVideoProjectsReady = "1";
+      const media = window.matchMedia("(max-width: 760px)");
+      const head = root.querySelector(".video-projects-head");
+      let filterToggle = root.querySelector("[data-mobile-project-filters]");
+      let backdrop = document.querySelector("[data-video-projects-mobile-backdrop]");
+
+      if (head && !filterToggle) {
+        filterToggle = document.createElement("button");
+        filterToggle.type = "button";
+        filterToggle.className = "video-project-mobile-filter-toggle";
+        filterToggle.dataset.mobileProjectFilters = "";
+        filterToggle.setAttribute("aria-expanded", "false");
+        filterToggle.setAttribute("aria-label", t("filters", "Filters"));
+        head.appendChild(filterToggle);
+      }
+
+      if (!backdrop) {
+        backdrop = document.createElement("button");
+        backdrop.type = "button";
+        backdrop.className = "video-project-mobile-backdrop";
+        backdrop.dataset.videoProjectsMobileBackdrop = "";
+        backdrop.setAttribute("aria-label", t("close", "Close"));
+        document.body.appendChild(backdrop);
+      }
+
+      const closeFilters = () => {
+        document.body.classList.remove("is-mobile-video-filter-open");
+        filterToggle?.setAttribute("aria-expanded", "false");
+      };
+
+      const syncMode = () => {
+        document.body.classList.toggle("is-mobile-video-projects", media.matches);
+        if (!media.matches) closeFilters();
+      };
+
+      filterToggle?.addEventListener("click", () => {
+        if (!media.matches) return;
+        const open = !document.body.classList.contains("is-mobile-video-filter-open");
+        document.body.classList.toggle("is-mobile-video-filter-open", open);
+        filterToggle.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) window.setTimeout(() => filters.querySelector("input, select, button")?.focus({ preventScroll: true }), 80);
+      });
+
+      backdrop.addEventListener("click", closeFilters);
+      filters.addEventListener("submit", closeFilters);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeFilters();
+      });
+
+      root.addEventListener("pointerdown", (event) => {
+        if (!media.matches) return;
+        const card = event.target instanceof Element ? event.target.closest(".video-project-card") : null;
+        if (!card || card.classList.contains("design-project-card")) return;
+        card.classList.add("is-mobile-pressed");
+      }, { passive: true });
+
+      root.addEventListener("pointerup", () => {
+        if (!media.matches) return;
+        root.querySelectorAll(".video-project-card.is-mobile-pressed").forEach((card) => card.classList.remove("is-mobile-pressed"));
+      }, { passive: true });
+
+      root.addEventListener("project-list:updated", () => {
+        if (!media.matches) return;
+        window.requestAnimationFrame(() => root.querySelector("[data-project-grid]")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      });
+
+      syncMode();
+      media.addEventListener?.("change", syncMode);
+    };
+
     root.querySelectorAll("[data-create-project]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (root.matches("[data-music-projects]")) return;
@@ -310,5 +459,7 @@
     });
     enhanceCards();
     updateBulk();
+    setupMobileDesignProjects();
+    setupMobileVideoProjects();
   });
 })();

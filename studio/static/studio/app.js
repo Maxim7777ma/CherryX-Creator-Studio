@@ -880,6 +880,8 @@ function setupDesignerPanel(panel) {
   let rotateState = null;
   let marqueeState = null;
   let panState = null;
+  const touchPointers = new Map();
+  let pinchState = null;
   let zoom = 1;
   let planeWidth = DESIGN_WIDTH;
   let planeHeight = DESIGN_HEIGHT;
@@ -2054,6 +2056,88 @@ function setupDesignerPanelV2(panel) {
     }
     if (shouldPersist) persist();
   };
+
+  const touchPointList = () => [...touchPointers.values()];
+
+  const touchDistance = (points) => {
+    if (points.length < 2) return 0;
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  };
+
+  const touchCenter = (points) => {
+    const shellRect = shell.getBoundingClientRect();
+    if (points.length < 2) return { x: shell.clientWidth / 2, y: shell.clientHeight / 2 };
+    return {
+      x: (points[0].x + points[1].x) / 2 - shellRect.left,
+      y: (points[0].y + points[1].y) / 2 - shellRect.top,
+    };
+  };
+
+  const cancelCanvasGestureWork = () => {
+    if (drawState) {
+      const vector = vectorById(drawState.id);
+      if (vector && vector.points.length <= 2) {
+        state.vectors = vectors().filter((item) => item.id !== vector.id);
+        selectOnly("");
+      }
+    }
+    renderGuides();
+    drawState = null;
+    dragState = null;
+    pointDragState = null;
+    resizeState = null;
+    rotateState = null;
+    marqueeState = null;
+    cropDragState = null;
+    cropScaleState = null;
+    panState = null;
+    setTargetFrame("");
+    shell.classList.remove("is-panning");
+    render();
+  };
+
+  const beginPinchZoomFromPoints = (points) => {
+    if (points.length < 2) return;
+    const distance = touchDistance(points);
+    if (distance < 8) return;
+    cancelCanvasGestureWork();
+    const center = touchCenter(points);
+    pinchState = {
+      startDistance: distance,
+      startZoom: zoom,
+      lastCenter: center,
+    };
+    shell.classList.add("is-pinching");
+  };
+
+  const beginPinchZoom = () => beginPinchZoomFromPoints(touchPointList());
+
+  const updatePinchZoomFromPoints = (points, event) => {
+    if (!pinchState || points.length < 2) return false;
+    const distance = touchDistance(points);
+    if (distance < 8 || pinchState.startDistance < 8) return true;
+    const center = touchCenter(points);
+    const nextZoom = pinchState.startZoom * (distance / pinchState.startDistance);
+    applyZoom(nextZoom, center);
+    if (pinchState.lastCenter) {
+      shell.scrollLeft -= center.x - pinchState.lastCenter.x;
+      shell.scrollTop -= center.y - pinchState.lastCenter.y;
+    }
+    pinchState.lastCenter = center;
+    if (event) event.preventDefault();
+    return true;
+  };
+
+  const updatePinchZoom = (event) => updatePinchZoomFromPoints(touchPointList(), event);
+
+  const endPinchZoom = () => {
+    if (touchPointers.size >= 2) return;
+    if (pinchState) persist();
+    pinchState = null;
+    shell.classList.remove("is-pinching");
+  };
+
+  const touchEventPoints = (event) => [...event.touches].map((touch) => ({ x: touch.clientX, y: touch.clientY }));
 
   const fitZoom = () => {
     const target = { x: 0, y: 0, w: DESIGN_WIDTH, h: DESIGN_HEIGHT };
@@ -3985,6 +4069,7 @@ function setupDesignerPanelV2(panel) {
   });
 
   plane.addEventListener("pointerdown", (event) => {
+    if (pinchState) return;
     const isEmptyCanvasTarget = event.target === plane || event.target === vectorLayer;
     if (!isEmptyCanvasTarget && tool === "select") return;
     if (spaceDown || event.button === 1) return;
@@ -4030,6 +4115,7 @@ function setupDesignerPanelV2(panel) {
   });
 
   plane.addEventListener("pointermove", (event) => {
+    if (pinchState) return;
     if (cropDragState) {
       const object = objectById(cropDragState.id);
       if (object && object.type === "image") {
@@ -4172,6 +4258,7 @@ function setupDesignerPanelV2(panel) {
   });
 
   plane.addEventListener("pointerup", () => {
+    if (pinchState) return;
     renderGuides();
     const activeCropId = (cropDragState && cropDragState.id) || (cropScaleState && cropScaleState.id) || "";
     if (marqueeState) {
@@ -4219,6 +4306,60 @@ function setupDesignerPanelV2(panel) {
     if (shell.setPointerCapture) shell.setPointerCapture(event.pointerId);
     event.preventDefault();
   };
+
+  shell.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch") return;
+    touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (touchPointers.size >= 2) {
+      beginPinchZoom();
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, { capture: true, passive: false });
+
+  shell.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "touch" || !touchPointers.has(event.pointerId)) return;
+    touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (updatePinchZoom(event)) {
+      event.stopPropagation();
+    }
+  }, { capture: true, passive: false });
+
+  const forgetTouchPointer = (event) => {
+    if (event.pointerType !== "touch") return;
+    touchPointers.delete(event.pointerId);
+    endPinchZoom();
+  };
+
+  shell.addEventListener("pointerup", forgetTouchPointer, { capture: true });
+  shell.addEventListener("pointercancel", forgetTouchPointer, { capture: true });
+  shell.addEventListener("lostpointercapture", forgetTouchPointer, { capture: true });
+
+  shell.addEventListener("touchstart", (event) => {
+    if (event.touches.length < 2) return;
+    beginPinchZoomFromPoints(touchEventPoints(event));
+    event.preventDefault();
+  }, { passive: false });
+
+  shell.addEventListener("touchmove", (event) => {
+    if (event.touches.length < 2 || !pinchState) return;
+    updatePinchZoomFromPoints(touchEventPoints(event), event);
+  }, { passive: false });
+
+  const finishTouchPinch = (event) => {
+    if (event.touches && event.touches.length >= 2) return;
+    touchPointers.clear();
+    endPinchZoom();
+  };
+
+  shell.addEventListener("touchend", finishTouchPinch, { passive: true });
+  shell.addEventListener("touchcancel", finishTouchPinch, { passive: true });
+  document.addEventListener("touchend", finishTouchPinch, { passive: true });
+  document.addEventListener("touchcancel", finishTouchPinch, { passive: true });
+  window.addEventListener("blur", () => {
+    touchPointers.clear();
+    endPinchZoom();
+  });
 
   shell.addEventListener("pointerdown", (event) => {
     const canPan = tool === "pan" || spaceDown || event.button === 1;
