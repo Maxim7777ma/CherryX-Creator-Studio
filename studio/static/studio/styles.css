@@ -12222,8 +12222,8 @@ body.job-detail-page .detail-topbar .language-switcher {
     position: relative;
     overflow: hidden;
     display: grid;
-    gap: 12px;
-    padding: 16px;
+    gap: 10px;
+    padding: 14px;
     background:
       radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--blue) 16%, transparent), transparent 29%) padding-box,
       radial-gradient(circle at 0% 82%, rgba(20, 184, 166, 0.11), transparent 34%) padding-box,
@@ -12235,36 +12235,26 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page [data-detail-job]::before {
-    content: "";
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    width: 42px;
-    height: 42px;
-    border: 1px solid color-mix(in srgb, var(--blue) 14%, #ffffff);
-    border-radius: 16px;
-    background:
-      url("https://api.iconify.design/lucide/activity.svg?color=%232563eb") center / 21px 21px no-repeat,
-      linear-gradient(180deg, rgba(255,255,255,.94), color-mix(in srgb, var(--blue) 8%, #ffffff));
-    box-shadow:
-      0 12px 28px color-mix(in srgb, var(--blue) 12%, transparent),
-      inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    opacity: 0.9;
+    display: none;
   }
 
   body.job-detail-page .job-topline {
-    display: grid;
-    gap: 13px;
-    padding-right: 0;
+    display: contents;
   }
 
   body.job-detail-page .job-topline > div:first-child {
-    padding-right: 52px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    order: 1;
+    padding: 0;
   }
 
   body.job-detail-page .detail-label {
+    grid-column: 1;
     width: fit-content;
-    margin: 0 0 7px;
+    margin: 0;
     border-radius: 999px;
     padding: 5px 9px;
     background: color-mix(in srgb, var(--blue) 10%, #ffffff);
@@ -12276,9 +12266,16 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .detail-status {
-    font-size: clamp(30px, 8.8vw, 38px);
+    grid-column: 1;
+    margin-top: -2px;
+    font-size: clamp(31px, 8.4vw, 38px);
     line-height: 0.98;
     letter-spacing: 0;
+  }
+
+  body.job-detail-page .job-topline > div:first-child::after {
+    content: attr(data-progress);
+    display: none;
   }
 
   body.job-detail-page .detail-actions,
@@ -12290,6 +12287,10 @@ body.job-detail-page .detail-topbar .language-switcher {
     overflow: visible;
     padding: 0;
     scrollbar-width: none;
+  }
+
+  body.job-detail-page .detail-actions {
+    order: 4;
   }
 
   body.job-detail-page .output-actions {
@@ -12309,9 +12310,10 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .job-state-summary {
+    order: 3;
     display: grid;
     grid-template-columns: .8fr 1.3fr .7fr;
-    gap: 8px;
+    gap: 7px;
     min-width: 0;
   }
 
@@ -12320,10 +12322,10 @@ body.job-detail-page .detail-topbar .language-switcher {
     align-content: center;
     gap: 3px;
     min-width: 0;
-    min-height: 58px;
+    min-height: 52px;
     border: 1px solid color-mix(in srgb, var(--blue) 12%, #dbeafe);
-    border-radius: 16px;
-    padding: 10px;
+    border-radius: 15px;
+    padding: 9px;
     background:
       linear-gradient(180deg, rgba(255,255,255,.84), color-mix(in srgb, var(--blue) 4%, #ffffff));
     box-shadow: inset 0 1px 0 rgba(255,255,255,.9);
@@ -12339,7 +12341,7 @@ body.job-detail-page .detail-topbar .language-switcher {
 
   body.job-detail-page .job-state-summary b {
     color: var(--ink);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 950;
     line-height: 1.05;
   }
@@ -12376,8 +12378,11 @@ body.job-detail-page .detail-topbar .language-switcher {
   body.job-detail-page .detail-actions .danger-action {
     min-height: 38px;
     border-color: color-mix(in srgb, #ef4444 18%, #fecaca);
+    border-radius: 14px;
     color: #b91c1c;
-    background: color-mix(in srgb, #ef4444 8%, #ffffff);
+    background:
+      url("https://api.iconify.design/lucide/trash-2.svg?color=%23b91c1c") calc(50% - 70px) center / 15px 15px no-repeat,
+      color-mix(in srgb, #ef4444 8%, #ffffff);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.86);
   }
 
@@ -12413,6 +12418,7 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .job-message {
+    order: 2;
     display: inline-flex;
     width: fit-content;
     max-width: 100%;
@@ -12421,7 +12427,7 @@ body.job-detail-page .detail-topbar .language-switcher {
     margin: 0;
     border: 1px solid color-mix(in srgb, var(--blue) 12%, #dbeafe);
     border-radius: 999px;
-    padding: 7px 10px;
+    padding: 6px 10px;
     background: rgba(255,255,255,.66);
     color: var(--muted);
     font-size: 12px;
@@ -12448,6 +12454,7 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .detail-progress {
+    order: 5;
     height: 9px;
     margin-top: 0;
     border-radius: 999px;
