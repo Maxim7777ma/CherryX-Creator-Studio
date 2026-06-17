@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "design_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-project-bars-flow">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-design-filter-custom">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page design-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -31,11 +31,11 @@
       </section>
 
       <form class="project-filter-bar" method="get" data-project-filters>
-        <label>
+        <label class="project-filter-search">
           <span>{% ui "project_search" %}</span>
           <input type="search" name="q" value="{{ project_listing.query }}" placeholder="{% ui "project_search_placeholder" %}">
         </label>
-        <label>
+        <label class="project-filter-sort">
           <span>{% ui "sort" %}</span>
           <select name="sort">
             <option value="updated" {% if project_listing.sort == "updated" %}selected{% endif %}>{% ui "recent" %}</option>
@@ -132,7 +132,7 @@
         </footer>
       </section>
     </div>
-    <script defer src="{% static 'studio/project_lists.js' %}?v=20260616-design-projects-mobile-filter4"></script>
+    <script defer src="{% static 'studio/project_lists.js' %}?v=20260617-design-filter-custom"></script>
   </body>
 </html>
 

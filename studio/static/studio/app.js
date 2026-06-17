@@ -5807,6 +5807,9 @@ function renderJob(job) {
 
   card.className = `job-card ${job.status === "failed" ? "is-failed" : ""}`;
   card.dataset.jobStatus = job.status || "";
+  const primaryAction = job.detail_url
+    ? `<a class="job-primary-action" href="${escapeHtml(job.detail_url)}">${escapeHtml(i18n.open || "Open")}</a>`
+    : "";
   card.innerHTML = `
     <div class="job-topline">
       <p class="job-title">${escapeHtml(job.title || i18n.task || "Task")}</p>
@@ -5823,6 +5826,7 @@ function renderJob(job) {
     <div class="progress" aria-label="progress">
       <span style="width: ${Number(job.progress || 0)}%"></span>
     </div>
+    ${primaryAction ? `<div class="job-card-footer">${primaryAction}</div>` : ""}
     ${renderOutputs(job.outputs || [])}
   `;
   updateJobsPanel();
@@ -5833,9 +5837,6 @@ function renderJobActionMenu(job) {
   const access = window.STUDIO_ACCESS || {};
   const hasAccess = access.hasAccess === true;
   const checkoutUrl = access.checkoutUrl || "/billing/checkout/";
-  if (job.detail_url) {
-    actions.push(`<a class="job-action-item" href="${escapeHtml(job.detail_url)}" data-icon="external-link"><span>${escapeHtml(i18n.open || "Open")}</span></a>`);
-  }
   if (job.repeatable && job.repeat_url) {
     actions.push(`<button class="job-action-item" type="button" data-repeat-url="${escapeHtml(job.repeat_url)}" data-icon="rotate-ccw"><span>${escapeHtml(i18n.repeat || "Repeat")}</span></button>`);
   }

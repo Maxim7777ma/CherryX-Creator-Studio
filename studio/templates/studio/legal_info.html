@@ -1,0 +1,54 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% ui "merchant_legal_title" %} - CherryX Creator Studio</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-legal-page">
+  </head>
+  <body class="landing-page legal-info-page">
+    <header class="landing-nav">
+      <div>
+        <p class="eyebrow">CherryX-Digital</p>
+        <strong>Creator Studio</strong>
+      </div>
+      <nav>
+        {% include "studio/_language_switcher.html" %}
+        <a data-icon="arrow-left" href="{% url 'studio:landing' %}">{% ui "back" %}</a>
+        <a class="nav-primary" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+      </nav>
+    </header>
+
+    <main class="legal-info-shell legal-index-shell">
+      <section class="legal-info-hero">
+        <p class="eyebrow">{% ui "merchant_legal_label" %}</p>
+        <h1>{% ui "merchant_legal_title" %}</h1>
+        <p>{% ui "merchant_legal_copy" %}</p>
+      </section>
+
+      <section class="legal-document-list" aria-label="{% ui "merchant_legal_title" %}">
+        <a href="{% url 'studio:legal_terms' %}" data-icon="file-text">
+          <span>{% ui "merchant_terms_label" %}</span>
+          <strong>{% ui "merchant_terms_title" %}</strong>
+          <p>{% ui "merchant_terms_summary" %}</p>
+        </a>
+        <a href="{% url 'studio:legal_refund' %}" data-icon="undo-2">
+          <span>{% ui "merchant_refund_label" %}</span>
+          <strong>{% ui "merchant_refund_title" %}</strong>
+          <p>{% ui "merchant_refund_summary" %}</p>
+        </a>
+        <a href="{% url 'studio:legal_contacts' %}" data-icon="badge-info">
+          <span>{% ui "merchant_contacts_label" %}</span>
+          <strong>{% ui "merchant_contacts_title" %}</strong>
+          <p>{% ui "merchant_contacts_summary" %}</p>
+        </a>
+        <a href="{% url 'studio:documentation' %}" data-icon="book-open">
+          <span>{% ui "documentation_label" %}</span>
+          <strong>{% ui "documentation_title" %}</strong>
+          <p>{% ui "documentation_summary" %}</p>
+        </a>
+      </section>
+    </main>
+  </body>
+</html>

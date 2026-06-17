@@ -45,6 +45,8 @@ from src.job_service import job_service as actions
 from src.video_tools import ffmpeg_path, inspect_video
 from src.youtube_tools import SubtitleUnavailableError, normalize_subtitle_language, transcribe_subtitle_cues
 from .forms import AccountSettingsForm, EmailLoginForm, RegisterForm
+from .documentation_content import documentation_content
+from .legal_documents import legal_document_content
 from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, repair_mojibake, translate
 from .models import AccountProfile, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 
@@ -101,6 +103,35 @@ def landing(request: HttpRequest):
     if request.user.is_authenticated:
         return redirect("studio:index")
     return render(request, "studio/landing.html")
+
+
+@require_GET
+def legal_info(request: HttpRequest):
+    return render(request, "studio/legal_info.html")
+
+
+@require_GET
+def legal_terms(request: HttpRequest):
+    language = getattr(request, "interface_language", "en")
+    return render(request, "studio/legal_document.html", {"document_type": "terms", "legal_doc": legal_document_content("terms", language)})
+
+
+@require_GET
+def legal_refund(request: HttpRequest):
+    language = getattr(request, "interface_language", "en")
+    return render(request, "studio/legal_document.html", {"document_type": "refund", "legal_doc": legal_document_content("refund", language)})
+
+
+@require_GET
+def legal_contacts(request: HttpRequest):
+    language = getattr(request, "interface_language", "en")
+    return render(request, "studio/legal_document.html", {"document_type": "contacts", "legal_doc": legal_document_content("contacts", language)})
+
+
+@require_GET
+def documentation(request: HttpRequest):
+    language = getattr(request, "interface_language", "en")
+    return render(request, "studio/documentation.html", {"docs": documentation_content(language)})
 
 
 @require_GET

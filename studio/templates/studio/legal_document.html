@@ -1,0 +1,92 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>
+      {% if document_type == "terms" %}{% ui "merchant_terms_title" %}{% elif document_type == "refund" %}{% ui "merchant_refund_title" %}{% else %}{% ui "merchant_contacts_title" %}{% endif %}
+      - CherryX Creator Studio
+    </title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-documents-2">
+  </head>
+  <body class="landing-page legal-info-page legal-document-page">
+    <header class="landing-nav">
+      <div>
+        <p class="eyebrow">CherryX-Digital</p>
+        <strong>Creator Studio</strong>
+      </div>
+      <nav>
+        {% include "studio/_language_switcher.html" %}
+        <a data-icon="file-text" href="{% url 'studio:legal_info' %}">{% ui "merchant_legal_label" %}</a>
+        <a class="nav-primary" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+      </nav>
+    </header>
+
+    <main class="legal-info-shell">
+      <nav class="legal-breadcrumbs" aria-label="{% ui "merchant_legal_title" %}">
+        <a href="{% url 'studio:landing' %}">CherryX</a>
+        <span>/</span>
+        <a href="{% url 'studio:legal_info' %}">{% ui "merchant_legal_label" %}</a>
+      </nav>
+
+      <article class="legal-document">
+        <header class="legal-document-hero">
+          <span class="legal-document-kicker">
+            {% if document_type == "terms" %}{% ui "merchant_terms_label" %}{% elif document_type == "refund" %}{% ui "merchant_refund_label" %}{% else %}{% ui "merchant_contacts_label" %}{% endif %}
+          </span>
+          <h1>
+            {% if document_type == "terms" %}{% ui "merchant_terms_title" %}{% elif document_type == "refund" %}{% ui "merchant_refund_title" %}{% else %}{% ui "merchant_contacts_title" %}{% endif %}
+          </h1>
+          <p>
+            {% if document_type == "terms" %}{% ui "merchant_terms_copy" %}{% elif document_type == "refund" %}{% ui "merchant_refund_copy" %}{% else %}{% ui "merchant_business_name" %}. {% ui "merchant_remote_copy" %}{% endif %}
+          </p>
+          <dl>
+            <div>
+              <dt>{% ui "legal_provider_label" %}</dt>
+              <dd>{% ui "merchant_business_name" %}</dd>
+            </div>
+            <div>
+              <dt>{% ui "merchant_tax_id" %}</dt>
+              <dd>3795908055</dd>
+            </div>
+            <div>
+              <dt>{% ui "legal_service_type_label" %}</dt>
+              <dd>{{ legal_doc.meta_service_type }}</dd>
+            </div>
+          </dl>
+        </header>
+
+        {% for section in legal_doc.sections %}
+          <section class="legal-document-section">
+            <h2>{{ section.title }}</h2>
+            {% for paragraph in section.paragraphs %}
+              <p>{{ paragraph }}</p>
+            {% endfor %}
+            {% if section.items %}
+              <ol>
+                {% for item in section.items %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ol>
+            {% endif %}
+            {% for paragraph in section.after %}
+              <p>{{ paragraph }}</p>
+            {% endfor %}
+          </section>
+        {% endfor %}
+
+        <section class="legal-document-section">
+          <h2>{% ui "legal_provider_contacts_title" %}</h2>
+          <ul class="legal-contact-list">
+            <li><strong>{% ui "merchant_business_name" %}</strong></li>
+            <li>{% ui "merchant_tax_id" %}: 3795908055</li>
+            <li>Email: <a href="mailto:cherryxdigital@gmail.com">cherryxdigital@gmail.com</a></li>
+            <li>{% ui "merchant_phone" %}: <a href="tel:+380963635905">+380 (96) 363-59-05</a></li>
+            <li>{% ui "merchant_remote_copy" %}</li>
+          </ul>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

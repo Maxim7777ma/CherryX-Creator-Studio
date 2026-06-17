@@ -69,6 +69,71 @@
       });
     };
 
+    const setupSortDropdown = () => {
+      const sortSelect = filters.querySelector('select[name="sort"]');
+      if (!sortSelect || filters.querySelector("[data-mobile-sort-dropdown]")) return;
+      sortSelect.dataset.nativeProjectSort = "";
+      sortSelect.closest("label")?.classList.add("project-filter-sort", "has-custom-sort-dropdown");
+      const sortDropdown = document.createElement("div");
+      sortDropdown.className = "project-sort-dropdown";
+      sortDropdown.dataset.mobileSortDropdown = "";
+      sortDropdown.innerHTML = `
+        <button class="project-sort-trigger" type="button" data-mobile-sort-trigger aria-haspopup="listbox" aria-expanded="false">
+          <span data-mobile-sort-current></span>
+        </button>
+        <div class="project-sort-menu" role="listbox" data-mobile-sort-menu></div>
+      `;
+      sortSelect.insertAdjacentElement("afterend", sortDropdown);
+
+      const trigger = sortDropdown.querySelector("[data-mobile-sort-trigger]");
+      const current = sortDropdown.querySelector("[data-mobile-sort-current]");
+      const menu = sortDropdown.querySelector("[data-mobile-sort-menu]");
+      const closeSort = () => {
+        sortDropdown.classList.remove("is-open");
+        trigger?.setAttribute("aria-expanded", "false");
+      };
+      const renderSort = () => {
+        if (!menu || !current) return;
+        const options = Array.from(sortSelect.options);
+        const selected = options.find((option) => option.value === sortSelect.value) || options[0];
+        current.textContent = selected?.textContent?.trim() || "";
+        menu.innerHTML = "";
+        options.forEach((option) => {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "project-sort-option";
+          item.dataset.sortValue = option.value;
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", option.value === sortSelect.value ? "true" : "false");
+          item.textContent = option.textContent.trim();
+          item.addEventListener("click", () => {
+            sortSelect.value = option.value;
+            sortSelect.dispatchEvent(new Event("change", {bubbles: true}));
+            renderSort();
+            closeSort();
+          });
+          menu.appendChild(item);
+        });
+      };
+      trigger?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (trigger.disabled) return;
+        const open = !sortDropdown.classList.contains("is-open");
+        filters.querySelectorAll("[data-mobile-sort-dropdown].is-open").forEach((dropdown) => {
+          if (dropdown !== sortDropdown) dropdown.classList.remove("is-open");
+        });
+        sortDropdown.classList.toggle("is-open", open);
+        trigger.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      sortDropdown.addEventListener("click", (event) => event.stopPropagation());
+      sortSelect.addEventListener("change", renderSort);
+      document.addEventListener("click", closeSort);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeSort();
+      });
+      renderSort();
+    };
+
     const syncFromDocument = (doc, mode) => {
       const nextGrid = doc.querySelector("[data-project-grid]");
       const nextEmpty = doc.querySelector("[data-project-empty]");
@@ -242,8 +307,10 @@
       root.dataset.mobileDesignProjectsReady = "1";
       const media = window.matchMedia("(max-width: 760px)");
       const head = root.querySelector(".video-projects-head");
+      const sortSelect = filters.querySelector('.project-filter-sort select[name="sort"]');
       let filterToggle = root.querySelector("[data-mobile-project-filters]");
       let backdrop = document.querySelector("[data-design-projects-mobile-backdrop]");
+      let sortDropdown = filters.querySelector("[data-mobile-sort-dropdown]");
 
       if (head && !filterToggle) {
         filterToggle = document.createElement("button");
@@ -265,9 +332,74 @@
         document.body.appendChild(backdrop);
       }
 
+      if (sortSelect && !sortDropdown) {
+        sortSelect.dataset.nativeProjectSort = "";
+        sortSelect.closest(".project-filter-sort")?.classList.add("has-custom-sort-dropdown");
+        sortDropdown = document.createElement("div");
+        sortDropdown.className = "project-sort-dropdown";
+        sortDropdown.dataset.mobileSortDropdown = "";
+        sortDropdown.innerHTML = `
+          <button class="project-sort-trigger" type="button" data-mobile-sort-trigger aria-haspopup="listbox" aria-expanded="false">
+            <span data-mobile-sort-current></span>
+          </button>
+          <div class="project-sort-menu" role="listbox" data-mobile-sort-menu></div>
+        `;
+        sortSelect.insertAdjacentElement("afterend", sortDropdown);
+
+        const trigger = sortDropdown.querySelector("[data-mobile-sort-trigger]");
+        const current = sortDropdown.querySelector("[data-mobile-sort-current]");
+        const menu = sortDropdown.querySelector("[data-mobile-sort-menu]");
+        const closeSort = () => {
+          sortDropdown?.classList.remove("is-open");
+          trigger?.setAttribute("aria-expanded", "false");
+        };
+        const renderSort = () => {
+          if (!menu || !current) return;
+          const options = Array.from(sortSelect.options);
+          const selected = options.find((option) => option.value === sortSelect.value) || options[0];
+          current.textContent = selected?.textContent?.trim() || "";
+          menu.innerHTML = "";
+          options.forEach((option) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "project-sort-option";
+            item.dataset.sortValue = option.value;
+            item.setAttribute("role", "option");
+            item.setAttribute("aria-selected", option.value === sortSelect.value ? "true" : "false");
+            item.textContent = option.textContent.trim();
+            item.addEventListener("click", () => {
+              sortSelect.value = option.value;
+              sortSelect.dispatchEvent(new Event("change", {bubbles: true}));
+              renderSort();
+              closeSort();
+            });
+            menu.appendChild(item);
+          });
+        };
+        trigger?.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (trigger.disabled) return;
+          const open = !sortDropdown.classList.contains("is-open");
+          filters.querySelectorAll("[data-mobile-sort-dropdown].is-open").forEach((dropdown) => {
+            if (dropdown !== sortDropdown) dropdown.classList.remove("is-open");
+          });
+          sortDropdown.classList.toggle("is-open", open);
+          trigger.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+        sortDropdown.addEventListener("click", (event) => event.stopPropagation());
+        sortSelect.addEventListener("change", renderSort);
+        document.addEventListener("click", closeSort);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeSort();
+        });
+        renderSort();
+      }
+
       const closeFilters = () => {
         document.body.classList.remove("is-mobile-design-filter-open");
         filterToggle?.setAttribute("aria-expanded", "false");
+        sortDropdown?.classList.remove("is-open");
+        sortDropdown?.querySelector("[data-mobile-sort-trigger]")?.setAttribute("aria-expanded", "false");
       };
 
       const syncMode = () => {
@@ -281,7 +413,7 @@
         document.body.classList.toggle("is-mobile-design-filter-open", open);
         filterToggle.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) {
-          window.setTimeout(() => filters.querySelector("input, select, button")?.focus({preventScroll: true}), 80);
+          window.setTimeout(() => filters.querySelector("input, [data-mobile-sort-trigger], button")?.focus({preventScroll: true}), 80);
         }
       });
 
@@ -459,6 +591,7 @@
     });
     enhanceCards();
     updateBulk();
+    setupSortDropdown();
     setupMobileDesignProjects();
     setupMobileVideoProjects();
   });

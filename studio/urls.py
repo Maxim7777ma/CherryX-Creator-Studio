@@ -9,6 +9,11 @@ app_name = "studio"
 
 urlpatterns = [
     path("", views.landing, name="landing"),
+    path("legal/", views.legal_info, name="legal_info"),
+    path("legal/terms/", views.legal_terms, name="legal_terms"),
+    path("legal/refund/", views.legal_refund, name="legal_refund"),
+    path("legal/contacts/", views.legal_contacts, name="legal_contacts"),
+    path("docs/", views.documentation, name="documentation"),
     path("favicon.ico", views.favicon, name="favicon"),
     path("app/", views.index, name="index"),
     path("app/subtitle-styles/<str:style>/", views.subtitle_style_detail, name="subtitle_style_detail"),

@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-mobile-account-avatar">
-    <script defer src="{% static 'studio/app.js' %}?v=20260616-mobile-account-avatar"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-resume-template-cards-polish">
+    <script defer src="{% static 'studio/app.js' %}?v=20260617-resume-template-cards-polish"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
@@ -594,10 +594,12 @@
                 {% endfor %}
                 <div class="resume-template-picker field-wide" data-template-picker>
                   {% for value, label in resume_templates %}
-                    <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-template-value="{{ value }}" title="{{ label }}: {% ui "template_hint" %}">
-                      <span>{{ forloop.counter }}</span>
+                    <button class="resume-template-card is-{{ value }}{% if forloop.first %} is-selected{% endif %}" type="button" data-template-value="{{ value }}" title="{{ label }}">
+                      <span class="resume-template-number">{{ forloop.counter }}</span>
+                      <span class="resume-template-preview" aria-hidden="true">
+                        <img src="{% static 'studio/resume_previews/resume_template_' %}{{ value }}.png?v=20260617-photo-fit" alt="">
+                      </span>
                       <strong>{{ label }}</strong>
-                      <small>{% ui "template_hint" %}</small>
                     </button>
                   {% endfor %}
                 </div>
@@ -643,20 +645,7 @@
           </div>
           <form class="originality-form" data-originality-form data-endpoint="{% url 'studio:start_originality' %}">
             {% csrf_token %}
-            <div class="originality-mode-grid field-wide">
-              <label>
-                <input type="radio" name="mode" value="local" checked>
-                <span><b>Local</b><small>5 CherryX · до 20k chars · AI Risk</small></span>
-              </label>
-              <label>
-                <input type="radio" name="mode" value="web">
-                <span><b>Web</b><small>25 CherryX · 5 web probes · share report</small></span>
-              </label>
-              <label>
-                <input type="radio" name="mode" value="deep">
-                <span><b>Deep</b><small>60 CherryX · 20 probes · source map</small></span>
-              </label>
-            </div>
+            <input type="hidden" name="mode" value="local">
             <div class="originality-compose">
               <label class="field field-wide">
                 <span>{% ui "originality_text" %}</span>

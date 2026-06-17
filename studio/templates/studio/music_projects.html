@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "music_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-sort-custom">
     <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page music-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -31,11 +31,11 @@
       </section>
 
       <form class="project-filter-bar" method="get" data-project-filters>
-        <label>
+        <label class="project-filter-search">
           <span>{% ui "project_search" %}</span>
           <input type="search" name="q" value="{{ project_listing.query }}" placeholder="{% ui "project_search_placeholder" %}">
         </label>
-        <label>
+        <label class="project-filter-sort">
           <span>{% ui "sort" %}</span>
           <select name="sort">
             <option value="updated" {% if project_listing.sort == "updated" %}selected{% endif %}>{% ui "recent" %}</option>
@@ -163,6 +163,6 @@
     <script>
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
     </script>
-    <script defer src="{% static 'studio/music_projects.js' %}"></script>
+    <script defer src="{% static 'studio/music_projects.js' %}?v=20260617-project-sort-custom"></script>
   </body>
 </html>

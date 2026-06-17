@@ -1,0 +1,180 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ docs.title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ docs.seo }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:documentation' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-docs-page-2">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "name": "{{ docs.title|escapejs }}",
+        "description": "{{ docs.seo|escapejs }}",
+        "step": [
+          {% for item in docs.quick %}
+            {"@type": "HowToStep", "name": "{{ item.0|escapejs }}", "text": "{{ item.1|escapejs }}"}{% if not forloop.last %},{% endif %}
+          {% endfor %}
+        ]
+      }
+    </script>
+  </head>
+  <body class="landing-page legal-info-page docs-page">
+    <header class="landing-nav">
+      <div>
+        <p class="eyebrow">CherryX-Digital</p>
+        <strong>Creator Studio</strong>
+      </div>
+      <nav>
+        {% include "studio/_language_switcher.html" %}
+        <a data-icon="arrow-left" href="{% url 'studio:legal_info' %}">{% ui "merchant_legal_label" %}</a>
+        <a class="nav-primary" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "try_free" %}</a>
+      </nav>
+    </header>
+
+    <main class="docs-shell">
+      <section class="docs-hero">
+        <div class="docs-hero-copy">
+          <p class="eyebrow">{{ docs.label }}</p>
+          <h1>{{ docs.title }}</h1>
+          <p>{{ docs.description }}</p>
+          <div class="docs-actions">
+            <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
+            <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+          </div>
+        </div>
+        <div class="docs-hero-visual" aria-hidden="true">
+          <div class="docs-flow-node is-main" data-icon="layout-dashboard">
+            <strong>Workspace</strong>
+            <span>Upload · Process · Download</span>
+          </div>
+          <div class="docs-flow-grid">
+            <span data-icon="video">Video</span>
+            <span data-icon="image">Covers</span>
+            <span data-icon="captions">Subtitles</span>
+            <span data-icon="file-text">PDF</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="docs-layout">
+        <aside class="docs-toc" aria-label="{{ docs.label }}">
+          <strong>{% ui "documentation_toc" %}</strong>
+          {% for section in docs.sections %}
+            <button type="button" class="{% if forloop.first %}is-active{% endif %}" data-doc-target="section-{{ forloop.counter }}">
+              <span>{{ forloop.counter|stringformat:"02d" }}</span>
+              {{ section.0 }}
+            </button>
+            {% if section.2 %}
+              <div class="docs-toc-subitems">
+                {% for item in section.2 %}
+                  <small>{{ item.0 }}</small>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endfor %}
+          <button type="button" data-doc-target="video-lessons"><span>V</span>{{ docs.videos_title }}</button>
+          <button type="button" data-doc-target="faq"><span>?</span>{% ui "documentation_faq" %}</button>
+        </aside>
+
+        <div class="docs-content">
+          {% for section in docs.sections %}
+            <section id="section-{{ forloop.counter }}" class="docs-section docs-panel {% if forloop.first %}is-active{% endif %}" data-doc-panel="section-{{ forloop.counter }}">
+              <header class="docs-section-head">
+                <span>{{ forloop.counter|stringformat:"02d" }}</span>
+                <h2>{{ section.0 }}</h2>
+              </header>
+              <div class="docs-section-body">
+                {% for paragraph in section.1 %}
+                  <p>{{ paragraph }}</p>
+                {% endfor %}
+              </div>
+              {% if section.2 %}
+                <div class="docs-subsection-grid">
+                  {% for item in section.2 %}
+                    <article>
+                      <strong>{{ item.0 }}</strong>
+                      <p>{{ item.1 }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </section>
+          {% endfor %}
+
+          <section id="video-lessons" class="docs-section docs-video-section docs-panel" data-doc-panel="video-lessons">
+            <header class="docs-section-head">
+              <span>V</span>
+              <h2>{{ docs.videos_title }}</h2>
+            </header>
+            <div class="docs-section-body">
+              <p>{{ docs.videos_copy }}</p>
+            </div>
+            <div class="docs-video-grid">
+              {% for video in docs.videos %}
+                <article class="docs-video-card">
+                  <div class="docs-video-frame">
+                    {% if video.2 %}
+                      <iframe src="https://www.youtube.com/embed/{{ video.2 }}" title="{{ video.0 }}" loading="lazy" allowfullscreen></iframe>
+                    {% else %}
+                      <div class="docs-video-placeholder" data-icon="play-circle">
+                        <span>{% ui "documentation_video_placeholder" %}</span>
+                      </div>
+                    {% endif %}
+                  </div>
+                  <strong>{{ video.0 }}</strong>
+                  <p>{{ video.1 }}</p>
+                </article>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section id="faq" class="docs-section docs-faq docs-panel" data-doc-panel="faq">
+            <header class="docs-section-head">
+              <span>?</span>
+              <h2>{% ui "documentation_faq" %}</h2>
+            </header>
+            {% for item in docs.faq %}
+              <details>
+                <summary>{{ item.0 }}</summary>
+                <p>{{ item.1 }}</p>
+              </details>
+            {% endfor %}
+          </section>
+        </div>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const body = document.body;
+        const buttons = [...document.querySelectorAll("[data-doc-target]")];
+        const panels = [...document.querySelectorAll("[data-doc-panel]")];
+        if (!buttons.length || !panels.length) return;
+
+        body.classList.add("docs-js");
+
+        const activate = (id, updateHash = true) => {
+          const panel = panels.find((item) => item.dataset.docPanel === id) || panels[0];
+          if (!panel) return;
+          const targetId = panel.dataset.docPanel;
+          panels.forEach((item) => item.classList.toggle("is-active", item === panel));
+          buttons.forEach((item) => item.classList.toggle("is-active", item.dataset.docTarget === targetId));
+          if (updateHash) history.replaceState(null, "", `#${targetId}`);
+          panel.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+
+        buttons.forEach((button) => {
+          button.addEventListener("click", () => activate(button.dataset.docTarget));
+        });
+
+        const initial = (location.hash || "").replace("#", "");
+        if (initial) {
+          window.setTimeout(() => activate(initial, false), 80);
+        }
+      })();
+    </script>
+  </body>
+</html>

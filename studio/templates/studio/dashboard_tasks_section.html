@@ -9,16 +9,6 @@
       <article class="stats-row stats-job-row is-{{ job.status }}">
         <span>
           <b>{{ job.title }}</b>
-          {% if job.ai_summary %}
-            <div class="ai-meta-row is-compact">
-              {% for meta in job.ai_summary %}
-                <span class="ai-meta-chip is-{{ meta.status|default:'unknown' }}" title="{{ meta.reason }}">
-                  <b>{{ meta.label }}</b>
-                  <small>{{ meta.detail }}</small>
-                </span>
-              {% endfor %}
-            </div>
-          {% endif %}
           <small>{{ job.message }}{% if job.error %} · {{ job.error }}{% endif %}</small>
         </span>
         <strong>

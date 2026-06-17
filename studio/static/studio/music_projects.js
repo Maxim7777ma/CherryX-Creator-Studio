@@ -56,6 +56,7 @@
   const deleteSelected = root.querySelector("[data-delete-selected]");
   const grid = root.querySelector("[data-project-grid]");
   const emptyState = root.querySelector("[data-project-empty]");
+  const filters = root.querySelector("[data-project-filters]");
   const modal = document.querySelector("[data-delete-modal]");
   const modalTitle = modal?.querySelector("[data-modal-title]");
   const modalCopy = modal?.querySelector("[data-modal-copy]");
@@ -91,6 +92,71 @@
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+
+  const setupSortDropdown = () => {
+    const sortSelect = filters?.querySelector('select[name="sort"]');
+    if (!sortSelect || filters.querySelector("[data-mobile-sort-dropdown]")) return;
+    sortSelect.dataset.nativeProjectSort = "";
+    sortSelect.closest("label")?.classList.add("project-filter-sort", "has-custom-sort-dropdown");
+    const sortDropdown = document.createElement("div");
+    sortDropdown.className = "project-sort-dropdown";
+    sortDropdown.dataset.mobileSortDropdown = "";
+    sortDropdown.innerHTML = `
+      <button class="project-sort-trigger" type="button" data-mobile-sort-trigger aria-haspopup="listbox" aria-expanded="false">
+        <span data-mobile-sort-current></span>
+      </button>
+      <div class="project-sort-menu" role="listbox" data-mobile-sort-menu></div>
+    `;
+    sortSelect.insertAdjacentElement("afterend", sortDropdown);
+
+    const trigger = sortDropdown.querySelector("[data-mobile-sort-trigger]");
+    const current = sortDropdown.querySelector("[data-mobile-sort-current]");
+    const menu = sortDropdown.querySelector("[data-mobile-sort-menu]");
+    const closeSort = () => {
+      sortDropdown.classList.remove("is-open");
+      trigger?.setAttribute("aria-expanded", "false");
+    };
+    const renderSort = () => {
+      if (!menu || !current) return;
+      const options = Array.from(sortSelect.options);
+      const selected = options.find((option) => option.value === sortSelect.value) || options[0];
+      current.textContent = selected?.textContent?.trim() || "";
+      menu.innerHTML = "";
+      options.forEach((option) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "project-sort-option";
+        item.dataset.sortValue = option.value;
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", option.value === sortSelect.value ? "true" : "false");
+        item.textContent = option.textContent.trim();
+        item.addEventListener("click", () => {
+          sortSelect.value = option.value;
+          sortSelect.dispatchEvent(new Event("change", {bubbles: true}));
+          renderSort();
+          closeSort();
+        });
+        menu.appendChild(item);
+      });
+    };
+    trigger?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (trigger.disabled) return;
+      const open = !sortDropdown.classList.contains("is-open");
+      filters.querySelectorAll("[data-mobile-sort-dropdown].is-open").forEach((dropdown) => {
+        if (dropdown !== sortDropdown) dropdown.classList.remove("is-open");
+      });
+      sortDropdown.classList.toggle("is-open", open);
+      trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    sortDropdown.addEventListener("click", (event) => event.stopPropagation());
+    sortSelect.addEventListener("change", renderSort);
+    document.addEventListener("click", closeSort);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSort();
+    });
+    renderSort();
+  };
 
   const cards = () => [...root.querySelectorAll("[data-project-id]")];
   const selectedCards = () => cards().filter((card) => card.querySelector("[data-project-select]")?.checked);
@@ -362,4 +428,5 @@
 
   updateBulkBar();
   updateEmptyState();
+  setupSortDropdown();
 })();

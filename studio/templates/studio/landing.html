@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-legal-page">
   </head>
   <body class="landing-page">
     <header class="landing-nav">
@@ -30,11 +30,17 @@
           <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
         </div>
         <div class="brand-pills">
-          <span data-icon="box">Product</span>
-          <span data-icon="palette">Design</span>
-          <span data-icon="code-2">Engineering</span>
-          <span data-icon="rocket">Launch</span>
+          <button type="button" data-icon="box" data-landing-pill="product">{% ui "landing_pill_product_label" %}</button>
+          <button type="button" data-icon="palette" data-landing-pill="design">{% ui "landing_pill_design_label" %}</button>
+          <button type="button" data-icon="code-2" data-landing-pill="engineering">{% ui "landing_pill_engineering_label" %}</button>
+          <button type="button" data-icon="rocket" data-landing-pill="launch">{% ui "landing_pill_launch_label" %}</button>
         </div>
+        <nav class="merchant-link-strip" aria-label="{% ui "merchant_legal_title" %}">
+          <a href="{% url 'studio:legal_terms' %}" data-icon="file-text">{% ui "merchant_terms_title" %}</a>
+          <a href="{% url 'studio:legal_refund' %}" data-icon="undo-2">{% ui "merchant_refund_title" %}</a>
+          <a href="{% url 'studio:legal_contacts' %}" data-icon="badge-info">{% ui "merchant_contacts_title" %}</a>
+          <a href="{% url 'studio:documentation' %}" data-icon="book-open">{% ui "documentation_title" %}</a>
+        </nav>
       </section>
 
       <section class="landing-console" aria-label="Studio modules">
@@ -90,6 +96,101 @@
         <span>Resume</span>
       </a>
     </footer>
+
+    <div class="landing-pill-modal" data-landing-pill-modal hidden>
+      <button class="landing-pill-backdrop" type="button" data-landing-pill-close aria-label="{% ui "landing_modal_close" %}"></button>
+      <section class="landing-pill-dialog" role="dialog" aria-modal="true" aria-label="CherryX Creator Studio" tabindex="-1">
+        <button class="landing-pill-close" type="button" data-landing-pill-close data-icon="x" aria-label="{% ui "landing_modal_close" %}"></button>
+
+        <article class="landing-pill-panel is-active" data-landing-pill-panel="product">
+          <div class="landing-pill-text">
+            <span class="landing-pill-kicker" data-icon="box">{% ui "landing_pill_product_label" %}</span>
+            <h2>{% ui "landing_modal_product_title" %}</h2>
+            <p>{% ui "landing_modal_product_copy" %}</p>
+            <ul>
+              <li>{% ui "landing_modal_point_upload" %}</li>
+              <li>{% ui "landing_modal_point_process" %}</li>
+              <li>{% ui "landing_modal_point_download" %}</li>
+            </ul>
+          </div>
+          <div class="landing-pill-visual is-product" aria-hidden="true">
+            <div class="landing-visual-head"><strong>{% ui "landing_modal_visual_product_head" %}</strong><small>{% ui "landing_pill_product_label" %}</small></div>
+            <div class="landing-visual-grid">
+              <span data-icon="refresh-cw"><b>{% ui "landing_modal_product_card_convert" %}</b><small>{% ui "landing_modal_product_card_convert_copy" %}</small></span>
+              <span data-icon="image"><b>{% ui "landing_modal_product_card_covers" %}</b><small>{% ui "landing_modal_product_card_covers_copy" %}</small></span>
+              <span data-icon="captions"><b>{% ui "landing_modal_product_card_subtitles" %}</b><small>{% ui "landing_modal_product_card_subtitles_copy" %}</small></span>
+              <span data-icon="file-text"><b>{% ui "landing_modal_product_card_docs" %}</b><small>{% ui "landing_modal_product_card_docs_copy" %}</small></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="landing-pill-panel" data-landing-pill-panel="design">
+          <div class="landing-pill-text">
+            <span class="landing-pill-kicker" data-icon="palette">{% ui "landing_pill_design_label" %}</span>
+            <h2>{% ui "landing_modal_design_title" %}</h2>
+            <p>{% ui "landing_modal_design_copy" %}</p>
+            <ul>
+              <li>{% ui "landing_modal_design_card_covers" %}</li>
+              <li>{% ui "landing_modal_design_card_resume" %}</li>
+              <li>{% ui "landing_modal_design_card_boards" %}</li>
+            </ul>
+          </div>
+          <div class="landing-pill-visual is-design" aria-hidden="true">
+            <div class="landing-visual-head"><strong>{% ui "landing_modal_visual_design_head" %}</strong><small>{% ui "landing_pill_design_label" %}</small></div>
+            <div class="landing-visual-grid">
+              <span class="design-preview-main"><b>{% ui "landing_modal_design_card_covers" %}</b></span>
+              <span><b>{% ui "landing_modal_design_card_resume" %}</b></span>
+              <span><b>{% ui "landing_modal_design_card_boards" %}</b></span>
+              <span><b>{% ui "landing_modal_design_card_export" %}</b></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="landing-pill-panel" data-landing-pill-panel="engineering">
+          <div class="landing-pill-text">
+            <span class="landing-pill-kicker" data-icon="code-2">{% ui "landing_pill_engineering_label" %}</span>
+            <h2>{% ui "landing_modal_engineering_title" %}</h2>
+            <p>{% ui "landing_modal_engineering_copy" %}</p>
+            <ul>
+              <li>{% ui "landing_modal_engineering_card_queue" %}</li>
+              <li>{% ui "landing_modal_engineering_card_storage" %}</li>
+              <li>{% ui "landing_modal_engineering_card_limits" %}</li>
+            </ul>
+          </div>
+          <div class="landing-pill-visual is-engineering" aria-hidden="true">
+            <div class="landing-visual-head"><strong>{% ui "landing_modal_visual_engineering_head" %}</strong><small>{% ui "landing_pill_engineering_label" %}</small></div>
+            <div class="landing-visual-grid">
+              <span><b>{% ui "landing_modal_engineering_card_queue" %}</b><small>01</small></span>
+              <span><b>{% ui "landing_modal_engineering_card_preview" %}</b><small>02</small></span>
+              <span><b>{% ui "landing_modal_engineering_card_storage" %}</b><small>03</small></span>
+              <span><b>{% ui "landing_modal_engineering_card_download" %}</b><small>04</small></span>
+            </div>
+          </div>
+        </article>
+
+        <article class="landing-pill-panel" data-landing-pill-panel="launch">
+          <div class="landing-pill-text">
+            <span class="landing-pill-kicker" data-icon="rocket">{% ui "landing_pill_launch_label" %}</span>
+            <h2>{% ui "landing_modal_launch_title" %}</h2>
+            <p>{% ui "landing_modal_launch_copy" %}</p>
+            <ul>
+              <li>{% ui "landing_modal_launch_card_video" %}</li>
+              <li>{% ui "landing_modal_launch_card_cover" %}</li>
+              <li>{% ui "landing_modal_launch_card_zip" %}</li>
+            </ul>
+          </div>
+          <div class="landing-pill-visual is-launch" aria-hidden="true">
+            <div class="landing-visual-head"><strong>{% ui "landing_modal_visual_launch_head" %}</strong><small>{% ui "landing_pill_launch_label" %}</small></div>
+            <div class="landing-visual-grid">
+              <span data-icon="video"><b>{% ui "landing_modal_launch_card_video" %}</b><small>MP4</small></span>
+              <span data-icon="image"><b>{% ui "landing_modal_launch_card_cover" %}</b><small>PNG/JPG</small></span>
+              <span data-icon="captions"><b>{% ui "landing_modal_launch_card_subtitles" %}</b><small>SRT/VTT</small></span>
+              <span data-icon="layers"><b>{% ui "landing_modal_launch_card_zip" %}</b><small>ZIP</small></span>
+            </div>
+          </div>
+        </article>
+      </section>
+    </div>
     <script>
       (() => {
         const mobileQuery = window.matchMedia("(max-width: 760px)");
@@ -104,10 +205,49 @@
         const consoleGrid = document.querySelector(".console-grid");
         const consoleCards = [...document.querySelectorAll(".console-grid article")];
         const dockLinks = [...document.querySelectorAll(".landing-dock a")];
+        const pillButtons = [...document.querySelectorAll("[data-landing-pill]")];
+        const pillModal = document.querySelector("[data-landing-pill-modal]");
+        const pillDialog = pillModal?.querySelector(".landing-pill-dialog");
+        const pillPanels = [...document.querySelectorAll("[data-landing-pill-panel]")];
+        const pillCloseButtons = [...document.querySelectorAll("[data-landing-pill-close]")];
         let carouselIndex = 0;
         let carouselTimer = 0;
+        let lastPillTrigger = null;
 
         if (!nav || !revealItems.length) return;
+
+        const setActivePill = (name) => {
+          pillButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.landingPill === name));
+          pillPanels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.landingPillPanel === name));
+        };
+
+        const openPillModal = (name, trigger) => {
+          if (!pillModal || !pillDialog) return;
+          lastPillTrigger = trigger || null;
+          setActivePill(name);
+          pillModal.hidden = false;
+          body.classList.add("is-landing-pill-open");
+          window.setTimeout(() => pillDialog.focus(), 0);
+        };
+
+        const closePillModal = () => {
+          if (!pillModal) return;
+          pillModal.hidden = true;
+          body.classList.remove("is-landing-pill-open");
+          pillButtons.forEach((button) => button.classList.remove("is-active"));
+          lastPillTrigger?.focus?.();
+          lastPillTrigger = null;
+        };
+
+        pillButtons.forEach((button) => {
+          button.addEventListener("click", () => openPillModal(button.dataset.landingPill || "product", button));
+        });
+
+        pillCloseButtons.forEach((button) => button.addEventListener("click", closePillModal));
+
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && pillModal && !pillModal.hidden) closePillModal();
+        });
 
         const setFocusedCard = () => {
           if (!consoleGrid || !consoleCards.length) return;
