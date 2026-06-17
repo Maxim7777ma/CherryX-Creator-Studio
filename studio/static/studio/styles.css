@@ -1195,6 +1195,10 @@ body.is-designer-workspace .studio-topbar h1 {
   text-decoration: none;
 }
 
+.mobile-jobs-tab {
+  display: none;
+}
+
 .theme-dark .tab:hover,
 .theme-dark .tab.is-active {
   background: color-mix(in srgb, var(--blue) 24%, #0d1324);
@@ -19917,25 +19921,25 @@ body.is-landing-pill-open {
   }
 
   .auth-brand-top .language-menu {
-    position: absolute;
-    left: 14px;
+    position: fixed;
+    left: auto;
     right: 14px;
-    bottom: max(18px, calc(env(safe-area-inset-bottom) + 12px));
-    top: auto;
+    top: 58px;
+    bottom: auto;
     z-index: 120001;
-    width: auto;
-    max-width: none;
-    max-height: min(54svh, 372px);
+    width: min(230px, calc(100vw - 28px));
+    max-width: calc(100vw - 28px);
+    max-height: min(58svh, 420px);
     overflow-x: hidden;
     overflow-y: auto;
     border-radius: 20px;
-    padding: 14px 12px 16px;
+    padding: 9px;
     opacity: 0;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-gutter: stable;
-    transform: translateY(22px) scale(0.98);
-    transform-origin: bottom center;
+    transform: translateY(-8px) scale(0.98);
+    transform-origin: top right;
     clip-path: inset(0 round 20px);
     box-shadow: 0 28px 78px rgba(15, 23, 42, 0.3);
   }
