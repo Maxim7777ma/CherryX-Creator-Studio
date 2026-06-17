@@ -4615,8 +4615,17 @@ body.cx-surface-panning * {
 }
 
 @media (max-width: 760px) {
+  body.music-projects-page {
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 92% 4%, color-mix(in srgb, var(--blue) 16%, transparent), transparent 28%),
+      radial-gradient(circle at 0% 38%, rgba(20, 184, 166, 0.12), transparent 32%),
+      linear-gradient(180deg, #eef7ff 0%, #f8fbff 52%, #ffffff 100%);
+  }
+
   .music-projects-shell {
-    padding-inline: 12px;
+    gap: 12px;
+    padding: 10px 12px 96px;
   }
 
   .music-projects-head,
@@ -4626,8 +4635,28 @@ body.cx-surface-panning * {
   }
 
   .music-projects-head {
-    align-items: stretch;
-    flex-direction: column;
+    position: relative;
+    display: grid;
+    min-height: 138px;
+    align-items: start;
+    border: 1px solid transparent;
+    border-radius: 24px;
+    padding: 16px;
+    background:
+      radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--blue) 13%, transparent), transparent 36%) padding-box,
+      linear-gradient(145deg, rgba(255, 255, 255, 0.96), color-mix(in srgb, var(--blue) 5%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 34%, #ffffff), rgba(20, 184, 166, 0.28), rgba(255, 255, 255, 0.74)) border-box;
+    box-shadow: 0 20px 54px color-mix(in srgb, var(--blue) 12%, transparent);
+  }
+
+  .music-projects-head strong {
+    margin-top: 7px;
+    font-size: clamp(31px, 10vw, 42px);
+    line-height: 0.96;
+  }
+
+  .music-projects-head small {
+    max-width: 190px;
   }
 
   .music-projects-head button,
@@ -4638,14 +4667,19 @@ body.cx-surface-panning * {
 
   .music-projects-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .music-project-card {
     grid-template-columns: 1fr;
     grid-template-rows: auto;
     min-height: 0;
-    padding: 14px;
-    border-radius: 14px;
+    padding: 10px;
+    border-radius: 22px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), color-mix(in srgb, var(--blue) 4%, #ffffff)) padding-box,
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 28%, #ffffff), rgba(20, 184, 166, 0.22), rgba(255, 255, 255, 0.72)) border-box;
+    box-shadow: 0 20px 48px color-mix(in srgb, var(--blue) 10%, transparent);
   }
 
   .music-project-preview {
@@ -4735,6 +4769,24 @@ body.cx-surface-panning * {
 
   .music-project-empty-art {
     order: -1;
+  }
+
+  body.music-projects-page .video-project-mobile-filter-toggle {
+    right: 74px;
+  }
+
+  body.music-projects-page .video-projects-head > button[data-create-project] {
+    background:
+      url("https://api.iconify.design/lucide/music-2.svg?color=white") calc(50% - 76px) center / 19px 19px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 86%, #34d399), var(--blue));
+  }
+
+  body.music-projects-page .project-filter-bar {
+    border-radius: 26px;
+  }
+
+  body.music-projects-page .project-sort-menu[data-project-sort-portal] {
+    z-index: 70080;
   }
 }
 

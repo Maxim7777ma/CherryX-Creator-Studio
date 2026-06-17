@@ -10769,11 +10769,11 @@ body.video-projects-page .project-sort-dropdown.is-open .project-sort-trigger::a
 }
 
 body.video-projects-page .project-sort-menu {
-  position: absolute;
+  position: fixed;
   left: 0;
-  right: 0;
+  right: auto;
   top: calc(100% + 8px);
-  z-index: 40;
+  z-index: 70080;
   display: grid;
   gap: 5px;
   min-width: 180px;
@@ -10796,6 +10796,21 @@ body.video-projects-page .project-sort-menu {
 body.video-projects-page .project-sort-dropdown.is-open .project-sort-menu {
   opacity: 1;
   pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+body.video-projects-page .project-sort-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+body.video-projects-page .project-sort-menu.is-above {
+  transform: translateY(8px) scale(0.98);
+  transform-origin: 50% 100%;
+}
+
+body.video-projects-page .project-sort-menu.is-open.is-above {
   transform: translateY(0) scale(1);
 }
 
@@ -24374,6 +24389,7 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
     gap: 10px;
     max-height: min(62svh, 520px);
     overflow: auto;
+    overflow-x: visible;
     border: 1px solid transparent;
     border-radius: 24px;
     padding: 14px;
@@ -24641,7 +24657,7 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
   body.video-projects-page .project-sort-menu {
     top: auto;
     bottom: calc(100% + 10px);
-    z-index: 65035;
+    z-index: 70080;
     gap: 6px;
     border-radius: 18px;
     padding: 8px;
@@ -24658,6 +24674,12 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
     border-radius: 12px;
     padding: 9px 12px 9px 34px;
     font-size: 14px;
+  }
+
+  body.video-projects-page .project-sort-menu[data-project-sort-portal] {
+    position: fixed;
+    right: auto;
+    z-index: 70080;
   }
 }
 

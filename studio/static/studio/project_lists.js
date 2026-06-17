@@ -88,8 +88,34 @@
       const trigger = sortDropdown.querySelector("[data-mobile-sort-trigger]");
       const current = sortDropdown.querySelector("[data-mobile-sort-current]");
       const menu = sortDropdown.querySelector("[data-mobile-sort-menu]");
+      menu?.setAttribute("data-project-sort-portal", "");
+      if (menu) document.body.appendChild(menu);
+      const positionSortMenu = () => {
+        if (!trigger || !menu) return;
+        const rect = trigger.getBoundingClientRect();
+        const safeGap = 12;
+        const menuGap = 10;
+        const width = Math.min(Math.max(rect.width, 180), window.innerWidth - safeGap * 2);
+        const left = Math.min(Math.max(safeGap, rect.left), window.innerWidth - width - safeGap);
+        const spaceBelow = window.innerHeight - rect.bottom - safeGap - menuGap;
+        const spaceAbove = rect.top - safeGap - menuGap;
+        const openAbove = window.matchMedia("(max-width: 760px)").matches || spaceBelow < 190 && spaceAbove > spaceBelow;
+        const maxHeight = Math.max(132, Math.min(260, openAbove ? spaceAbove : spaceBelow));
+        menu.style.left = `${left}px`;
+        menu.style.width = `${width}px`;
+        menu.style.maxHeight = `${maxHeight}px`;
+        if (openAbove) {
+          menu.style.top = "auto";
+          menu.style.bottom = `${Math.max(safeGap, window.innerHeight - rect.top + menuGap)}px`;
+        } else {
+          menu.style.top = `${Math.min(rect.bottom + menuGap, window.innerHeight - safeGap - maxHeight)}px`;
+          menu.style.bottom = "auto";
+        }
+        menu.classList.toggle("is-above", openAbove);
+      };
       const closeSort = () => {
         sortDropdown.classList.remove("is-open");
+        menu?.classList.remove("is-open", "is-above");
         trigger?.setAttribute("aria-expanded", "false");
       };
       const renderSort = () => {
@@ -123,14 +149,23 @@
           if (dropdown !== sortDropdown) dropdown.classList.remove("is-open");
         });
         sortDropdown.classList.toggle("is-open", open);
+        menu?.classList.toggle("is-open", open);
         trigger.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) positionSortMenu();
       });
       sortDropdown.addEventListener("click", (event) => event.stopPropagation());
+      menu?.addEventListener("click", (event) => event.stopPropagation());
       sortSelect.addEventListener("change", renderSort);
       document.addEventListener("click", closeSort);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") closeSort();
       });
+      window.addEventListener("resize", () => {
+        if (sortDropdown.classList.contains("is-open")) positionSortMenu();
+      });
+      window.addEventListener("scroll", () => {
+        if (sortDropdown.classList.contains("is-open")) positionSortMenu();
+      }, {passive: true});
       renderSort();
     };
 
@@ -400,6 +435,7 @@
         filterToggle?.setAttribute("aria-expanded", "false");
         sortDropdown?.classList.remove("is-open");
         sortDropdown?.querySelector("[data-mobile-sort-trigger]")?.setAttribute("aria-expanded", "false");
+        document.querySelectorAll("[data-project-sort-portal].is-open").forEach((menu) => menu.classList.remove("is-open", "is-above"));
       };
 
       const syncMode = () => {
@@ -476,6 +512,8 @@
       const closeFilters = () => {
         document.body.classList.remove("is-mobile-video-filter-open");
         filterToggle?.setAttribute("aria-expanded", "false");
+        filters.querySelectorAll("[data-mobile-sort-dropdown].is-open").forEach((dropdown) => dropdown.classList.remove("is-open"));
+        document.querySelectorAll("[data-project-sort-portal].is-open").forEach((menu) => menu.classList.remove("is-open", "is-above"));
       };
 
       const syncMode = () => {

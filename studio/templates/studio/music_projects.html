@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "music_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-sort-custom">
-    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-mobile-filters">
+    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260617-project-mobile-filters">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page music-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -27,6 +27,7 @@
           <strong>{% ui "projects" %}</strong>
           <small><b data-project-total>{{ project_listing.total|default:music_projects|length }}</b> {% ui "in_workspace" %}</small>
         </div>
+        <button class="video-project-mobile-filter-toggle" type="button" data-mobile-project-filters aria-expanded="false" aria-label="{% ui "project_search" %}"></button>
         <button type="button" data-create-project data-icon="circle-plus">{% ui "create_project" %}</button>
       </section>
 
@@ -163,6 +164,6 @@
     <script>
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
     </script>
-    <script defer src="{% static 'studio/music_projects.js' %}?v=20260617-project-sort-custom"></script>
+    <script defer src="{% static 'studio/music_projects.js' %}?v=20260617-project-mobile-filters"></script>
   </body>
 </html>
