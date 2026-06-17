@@ -24,6 +24,129 @@
   (() => {
     if (!window.CXLanguageSwitcherReady) {
       window.CXLanguageSwitcherReady = true;
+      let activeSwitcher = null;
+      let portal = null;
+      let portalPanel = null;
+      let portalThumb = null;
+      let portalTrack = null;
+
+      const ensurePortal = () => {
+        if (portal) return portal;
+        portal = document.createElement("div");
+        portal.className = "language-portal";
+        portal.innerHTML = `
+          <div class="language-portal-backdrop" data-language-portal-close></div>
+          <div class="language-portal-panel" role="menu"></div>
+          <div class="language-portal-scrollbar" aria-hidden="true"><span></span></div>
+        `;
+        document.body.appendChild(portal);
+        portalPanel = portal.querySelector(".language-portal-panel");
+        portalTrack = portal.querySelector(".language-portal-scrollbar");
+        portalThumb = portalTrack?.querySelector("span");
+        portal.addEventListener("click", (event) => {
+          if (event.target.closest("[data-language-portal-close]")) {
+            closeLanguagePortal();
+          }
+        });
+        portalPanel?.addEventListener("scroll", updatePortalScrollbar, {passive: true});
+        return portal;
+      };
+
+      const syncBodyState = () => {
+        document.body?.classList.toggle("is-language-menu-open", Boolean(document.querySelector(".language-switcher.is-open")));
+        document.body?.classList.toggle("is-language-portal-open", Boolean(activeSwitcher));
+      };
+
+      const updatePortalScrollbar = () => {
+        if (!portalPanel || !portalTrack || !portalThumb) return;
+        const viewport = portalPanel.clientHeight;
+        const content = portalPanel.scrollHeight;
+        const maxScroll = Math.max(0, content - viewport);
+        const canScroll = maxScroll > 1;
+        portalTrack.hidden = !canScroll;
+        if (!canScroll) return;
+        const trackHeight = Math.max(0, portalTrack.clientHeight);
+        const thumbHeight = Math.min(trackHeight, Math.max(34, Math.round((viewport / content) * trackHeight)));
+        const travel = Math.max(1, trackHeight - thumbHeight);
+        const thumbTop = Math.round((portalPanel.scrollTop / maxScroll) * travel);
+        portalThumb.style.height = `${thumbHeight}px`;
+        portalThumb.style.transform = `translateY(${thumbTop}px)`;
+      };
+
+      const positionPortal = () => {
+        if (!activeSwitcher || !portal || !portalPanel) return;
+        const button = activeSwitcher.querySelector(".language-current");
+        if (!button) return;
+        const rect = button.getBoundingClientRect();
+        const gap = 10;
+        const safe = 14;
+        const width = Math.min(250, window.innerWidth - safe * 2);
+        const right = Math.max(safe, window.innerWidth - rect.right);
+        const top = Math.min(Math.max(safe, rect.bottom + gap), window.innerHeight - 92);
+        const maxHeight = Math.max(180, Math.min(430, window.innerHeight - top - safe));
+        portal.style.setProperty("--language-portal-top", `${top}px`);
+        portal.style.setProperty("--language-portal-right", `${Math.min(right, window.innerWidth - width - safe)}px`);
+        portal.style.setProperty("--language-portal-width", `${width}px`);
+        portal.style.setProperty("--language-portal-max-height", `${maxHeight}px`);
+        requestAnimationFrame(updatePortalScrollbar);
+      };
+
+      function closeLanguagePortal() {
+        if (activeSwitcher) {
+          activeSwitcher.classList.remove("is-open", "is-portal-open");
+          activeSwitcher.querySelector(".language-current")?.setAttribute("aria-expanded", "false");
+        }
+        activeSwitcher = null;
+        if (portal) {
+          portal.classList.remove("is-open");
+        }
+        syncBodyState();
+      }
+
+      const submitLanguage = (switcher, language) => {
+        if (!switcher || !language) return;
+        let input = switcher.querySelector('input[name="language"][type="hidden"]');
+        if (!input) {
+          input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "language";
+          switcher.appendChild(input);
+        }
+        input.value = language;
+        closeLanguagePortal();
+        if (typeof switcher.requestSubmit === "function") {
+          switcher.requestSubmit();
+        } else {
+          switcher.submit();
+        }
+      };
+
+      const openLanguagePortal = (switcher) => {
+        const sourceMenu = switcher.querySelector(".language-menu");
+        const button = switcher.querySelector(".language-current");
+        if (!sourceMenu || !button) return;
+        if (activeSwitcher && activeSwitcher !== switcher) closeLanguagePortal();
+        activeSwitcher = switcher;
+        ensurePortal();
+        portalPanel.replaceChildren();
+        sourceMenu.querySelectorAll("button[name='language']").forEach((item) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.className = item.className;
+          option.dataset.language = item.value;
+          option.setAttribute("role", "menuitem");
+          option.innerHTML = item.innerHTML;
+          option.addEventListener("click", () => submitLanguage(switcher, item.value));
+          portalPanel.appendChild(option);
+        });
+        switcher.classList.add("is-open", "is-portal-open");
+        button.setAttribute("aria-expanded", "true");
+        portal.classList.add("is-open");
+        portalPanel.scrollTop = 0;
+        positionPortal();
+        syncBodyState();
+      };
+
       const bindSwitchers = () => {
         document.querySelectorAll(".language-switcher").forEach((switcher) => {
           if (switcher.dataset.languageSwitcherBound === "1") return;
@@ -42,20 +165,24 @@
               `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
             );
           };
-          const syncBodyState = () => {
-            document.body?.classList.toggle("is-language-menu-open", Boolean(document.querySelector(".language-switcher.is-open")));
-          };
           const close = () => {
-            switcher.classList.remove("is-open");
+            if (activeSwitcher === switcher) {
+              closeLanguagePortal();
+              return;
+            }
+            switcher.classList.remove("is-open", "is-portal-open");
             button.setAttribute("aria-expanded", "false");
             syncBodyState();
           };
           switcher.addEventListener("click", (event) => event.stopPropagation());
           button.addEventListener("click", (event) => {
             event.stopPropagation();
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-            syncBodyState();
+            const open = !switcher.classList.contains("is-open");
+            if (!open) {
+              close();
+              return;
+            }
+            openLanguagePortal(switcher);
             if (open) {
               const menu = switcher.querySelector(".language-menu");
               if (menu) {
@@ -70,9 +197,11 @@
             }
           });
           window.addEventListener("resize", () => {
+            if (activeSwitcher === switcher) positionPortal();
             if (switcher.classList.contains("is-open")) positionMenu();
           });
           window.addEventListener("scroll", () => {
+            if (activeSwitcher === switcher) positionPortal();
             if (switcher.classList.contains("is-open")) positionMenu();
           }, { passive: true });
           document.addEventListener("click", (event) => {
