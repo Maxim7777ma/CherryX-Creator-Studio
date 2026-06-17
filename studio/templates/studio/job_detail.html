@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-job-mobile">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-job-result-mobile-v2">
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page job-detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -250,6 +250,24 @@
                   {% else %}
                     <div class="preview-missing">{% ui "preview_unavailable" %}</div>
                   {% endif %}
+                  <div class="output-mobile-actions">
+                    {% if output.can_edit_design %}
+                      <button class="output-link compact" type="button" data-edit-design-url="{{ output.edit_design_url }}">{% ui "edit_design" %}</button>
+                    {% endif %}
+                    {% if output.can_edit_video %}
+                      <button class="output-link compact" type="button" data-edit-video-url="{{ output.edit_video_url }}">{% ui "edit_video" %}</button>
+                    {% endif %}
+                    {% if is_originality %}
+                      <a class="output-link compact" href="{{ output.preview_url }}" target="_blank" rel="noreferrer">{% ui "open" %}</a>
+                      {% if has_access %}
+                        <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
+                      {% endif %}
+                    {% elif has_access %}
+                      <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
+                    {% else %}
+                      <a class="output-link compact" href="{{ checkout_url }}">Checkout</a>
+                    {% endif %}
+                  </div>
                 </article>
               {% endfor %}
             </div>
@@ -372,6 +390,11 @@
                 </div>
               </div>
               ${body}
+              <div class="output-mobile-actions">
+                ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">{% ui "edit_design" %}</button>` : ""}
+                ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">{% ui "edit_video" %}</button>` : ""}
+                <a class="output-link compact" href="${html(actionHref)}"${downloadAttr}>${html(action)}</a>
+              </div>
             </article>
           `;
         };

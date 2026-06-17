@@ -11832,6 +11832,10 @@ body.video-projects-page .project-sort-option[aria-selected="true"]::before {
   margin-top: 0;
 }
 
+.output-mobile-actions {
+  display: none;
+}
+
 .result-preview {
   display: block;
   width: 100%;
@@ -12260,12 +12264,21 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .detail-actions,
-  body.job-detail-page .output-actions,
   body.job-detail-page .originality-detail-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    max-width: 100%;
+    overflow: visible;
+    padding: 0;
+    scrollbar-width: none;
+  }
+
+  body.job-detail-page .output-actions {
     display: flex;
     flex-wrap: nowrap;
     gap: 8px;
-    max-width: calc(100vw - 58px);
+    max-width: 100%;
     overflow-x: auto;
     padding: 1px 1px 5px;
     scrollbar-width: none;
@@ -12279,11 +12292,28 @@ body.job-detail-page .detail-topbar .language-switcher {
 
   body.job-detail-page .detail-actions form,
   body.job-detail-page .detail-actions a,
-  body.job-detail-page .output-actions a,
-  body.job-detail-page .output-actions button,
   body.job-detail-page .originality-detail-actions a,
   body.job-detail-page .originality-detail-actions button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  body.job-detail-page .detail-actions form {
+    display: grid;
+  }
+
+  body.job-detail-page .detail-actions form:has(.danger-action) {
+    grid-column: 1 / -1;
+  }
+
+  body.job-detail-page .output-actions a,
+  body.job-detail-page .output-actions button {
     flex: 0 0 auto;
+  }
+
+  body.job-detail-page .detail-actions .danger-action {
+    color: #b91c1c;
+    background: color-mix(in srgb, #ef4444 8%, #ffffff);
   }
 
   body.job-detail-page .secondary-action,
@@ -12294,6 +12324,26 @@ body.job-detail-page .detail-topbar .language-switcher {
     border-radius: 15px;
     padding: 9px 12px;
     font-size: 12px;
+    line-height: 1.15;
+    text-align: center;
+    white-space: normal;
+  }
+
+  body.job-detail-page .detail-actions .secondary-action {
+    border-color: color-mix(in srgb, var(--blue) 18%, var(--line));
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), color-mix(in srgb, var(--blue) 5%, #ffffff));
+    color: var(--ink);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  }
+
+  body.job-detail-page .detail-actions .secondary-action[href*="/download/"] {
+    border-color: color-mix(in srgb, var(--blue) 28%, transparent);
+    background:
+      url("https://api.iconify.design/lucide/download.svg?color=white") calc(50% - 48px) center / 16px 16px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #34d399), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 15px 32px color-mix(in srgb, var(--blue) 20%, transparent);
   }
 
   body.job-detail-page .job-message {
@@ -12322,15 +12372,12 @@ body.job-detail-page .detail-topbar .language-switcher {
 
   body.job-detail-page .preview-grid {
     display: grid;
-    grid-auto-columns: minmax(82%, 1fr);
-    grid-auto-flow: column;
-    grid-template-columns: none;
+    grid-template-columns: 1fr;
     gap: 12px;
-    margin: 0 -14px;
-    overflow-x: auto;
-    padding: 0 14px 6px;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    margin: 0;
+    overflow: visible;
+    padding: 0;
+    scroll-snap-type: none;
   }
 
   body.job-detail-page .preview-grid::-webkit-scrollbar {
@@ -12338,21 +12385,29 @@ body.job-detail-page .detail-topbar .language-switcher {
   }
 
   body.job-detail-page .preview-card {
-    scroll-snap-align: start;
+    display: grid;
+    gap: 0;
+    scroll-snap-align: none;
   }
 
   body.job-detail-page .preview-head {
-    display: grid;
+    display: flex;
+    align-items: flex-start;
     gap: 10px;
-    padding: 12px;
+    padding: 13px 13px 11px;
+  }
+
+  body.job-detail-page .preview-head .output-actions {
+    display: none;
   }
 
   body.job-detail-page .preview-head h3 {
-    overflow: hidden;
+    display: -webkit-box;
     font-size: 16px;
-    line-height: 1.12;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.1;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   body.job-detail-page .preview-head p {
@@ -12364,10 +12419,46 @@ body.job-detail-page .detail-topbar .language-switcher {
     -webkit-line-clamp: 2;
   }
 
+  body.job-detail-page .output-mobile-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 12px 13px;
+    border-top: 1px solid color-mix(in srgb, var(--blue) 12%, var(--line));
+    background:
+      radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--blue) 7%, transparent), transparent 42%),
+      rgba(255, 255, 255, 0.64);
+  }
+
+  body.job-detail-page .output-mobile-actions .output-link.compact {
+    width: 100%;
+    min-height: 46px;
+    border-color: color-mix(in srgb, var(--blue) 28%, #bfdbfe);
+    border-radius: 16px;
+    background:
+      url("https://api.iconify.design/lucide/download.svg?color=white") calc(50% - 48px) center / 17px 17px no-repeat,
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #34d399), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 16px 34px color-mix(in srgb, var(--blue) 22%, transparent);
+    font-size: 13px;
+    font-weight: 950;
+  }
+
+  body.job-detail-page .output-mobile-actions .output-link.compact:not([download]) {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), color-mix(in srgb, var(--blue) 5%, #ffffff));
+    color: var(--blue);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
   body.job-detail-page .result-preview,
   body.job-detail-page .embed-preview {
     width: 100%;
-    max-height: min(54svh, 430px);
+    max-height: min(58svh, 460px);
+    border-top-color: color-mix(in srgb, var(--blue) 12%, var(--line));
+    background:
+      radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--blue) 8%, #ffffff), transparent 42%),
+      #ffffff;
   }
 
   body.job-detail-page .embed-preview {
