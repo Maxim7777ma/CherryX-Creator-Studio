@@ -19862,10 +19862,16 @@ body.is-landing-pill-open {
     z-index: 120000;
   }
 
+  .auth-page.is-language-menu-open .auth-brand,
   .auth-page:has(.language-switcher.is-open) .auth-brand {
     z-index: 120000;
   }
 
+  .auth-page.is-language-menu-open .auth-brand-top {
+    z-index: 120000;
+  }
+
+  .auth-page.is-language-menu-open .auth-card,
   .auth-page:has(.language-switcher.is-open) .auth-card {
     z-index: 0;
     pointer-events: none;
@@ -19900,14 +19906,16 @@ body.is-landing-pill-open {
   .auth-brand-top .language-switcher.is-open {
     position: fixed;
     inset: 0;
-    z-index: 120000;
+    z-index: 160000;
     pointer-events: auto;
+    isolation: isolate;
   }
 
   .auth-brand-top .language-switcher.is-open .language-current {
     position: fixed;
     top: 8px;
     right: 12px;
+    z-index: 160003;
     pointer-events: auto;
   }
 
@@ -19915,7 +19923,7 @@ body.is-landing-pill-open {
     content: "";
     position: fixed;
     inset: 0;
-    z-index: 119998;
+    z-index: 160000;
     background: rgba(15, 23, 42, 0.3);
     pointer-events: none;
   }
@@ -19926,7 +19934,7 @@ body.is-landing-pill-open {
     right: 14px;
     top: 58px;
     bottom: auto;
-    z-index: 120001;
+    z-index: 160002;
     width: min(230px, calc(100vw - 28px));
     max-width: calc(100vw - 28px);
     max-height: min(58svh, 420px);
@@ -19945,7 +19953,7 @@ body.is-landing-pill-open {
   }
 
   .auth-brand-top .language-switcher.is-open .language-menu {
-    z-index: 120001;
+    z-index: 160002;
     opacity: 1;
     transform: translateY(0) scale(1);
     visibility: visible;

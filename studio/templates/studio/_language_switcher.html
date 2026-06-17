@@ -42,15 +42,20 @@
               `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
             );
           };
+          const syncBodyState = () => {
+            document.body?.classList.toggle("is-language-menu-open", Boolean(document.querySelector(".language-switcher.is-open")));
+          };
           const close = () => {
             switcher.classList.remove("is-open");
             button.setAttribute("aria-expanded", "false");
+            syncBodyState();
           };
           switcher.addEventListener("click", (event) => event.stopPropagation());
           button.addEventListener("click", (event) => {
             event.stopPropagation();
             const open = switcher.classList.toggle("is-open");
             button.setAttribute("aria-expanded", open ? "true" : "false");
+            syncBodyState();
             if (open) {
               const menu = switcher.querySelector(".language-menu");
               if (menu) {
