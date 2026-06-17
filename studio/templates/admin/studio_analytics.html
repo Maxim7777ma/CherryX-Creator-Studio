@@ -1,0 +1,485 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  :root {
+    --cx-ink: #0f172a;
+    --cx-muted: #64748b;
+    --cx-line: rgba(37, 99, 235, .18);
+    --cx-blue: #2563eb;
+    --cx-green: #16a34a;
+    --cx-soft: #f8fbff;
+  }
+  #content { max-width: 1440px; }
+  .cx-admin {
+    display: grid;
+    gap: 20px;
+    color: var(--cx-ink);
+  }
+  .cx-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+    gap: 18px;
+    align-items: stretch;
+    padding: 22px;
+    border: 1px solid var(--cx-line);
+    border-radius: 24px;
+    background:
+      radial-gradient(circle at 88% 12%, rgba(37, 99, 235, .16), transparent 30%),
+      linear-gradient(135deg, #ffffff, #edf7ff);
+    box-shadow: 0 22px 60px rgba(15, 23, 42, .08);
+  }
+  .cx-kicker {
+    margin: 0 0 8px;
+    color: var(--cx-blue);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .cx-hero h1 {
+    margin: 0;
+    color: var(--cx-ink);
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: .96;
+    letter-spacing: 0;
+  }
+  .cx-hero p {
+    max-width: 760px;
+    margin: 12px 0 0;
+    color: var(--cx-muted);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .cx-search {
+    display: grid;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid var(--cx-line);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, .78);
+  }
+  .cx-search label {
+    color: var(--cx-muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .cx-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .cx-search input {
+    min-height: 42px;
+    border: 1px solid var(--cx-line);
+    border-radius: 14px;
+    padding: 0 12px;
+    background: #fff;
+    color: var(--cx-ink);
+  }
+  .cx-search button,
+  .cx-button {
+    min-height: 42px;
+    border: 0;
+    border-radius: 14px;
+    padding: 0 16px;
+    background: linear-gradient(135deg, #2563eb, #14b8a6);
+    color: #fff !important;
+    font-weight: 900;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .cx-match-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .cx-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--cx-line);
+    border-radius: 999px;
+    background: #fff;
+    color: #1d4ed8 !important;
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+  .cx-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .cx-card,
+  .cx-panel {
+    border: 1px solid var(--cx-line);
+    border-radius: 20px;
+    background: linear-gradient(145deg, #fff, var(--cx-soft));
+    box-shadow: 0 14px 40px rgba(15, 23, 42, .06);
+  }
+  .cx-card {
+    min-height: 108px;
+    padding: 16px;
+  }
+  .cx-card span,
+  .cx-mini span,
+  .cx-table small {
+    color: var(--cx-muted);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .cx-card strong {
+    display: block;
+    margin-top: 8px;
+    color: var(--cx-ink);
+    font-size: 28px;
+    line-height: 1;
+  }
+  .cx-card em {
+    display: block;
+    margin-top: 10px;
+    color: var(--cx-muted);
+    font-size: 12px;
+    font-style: normal;
+  }
+  .cx-two {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr);
+    gap: 16px;
+  }
+  .cx-panel {
+    padding: 18px;
+  }
+  .cx-panel h2 {
+    margin: 0 0 14px;
+    color: var(--cx-ink);
+    font-size: 20px;
+  }
+  .cx-user-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .cx-user-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .cx-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--accent, #2563eb), #14b8a6);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5);
+  }
+  .cx-user-title h2 { margin: 0 0 4px; }
+  .cx-user-title p { margin: 0; color: var(--cx-muted); }
+  .cx-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .cx-mini {
+    padding: 12px;
+    border: 1px solid rgba(148, 163, 184, .28);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .72);
+  }
+  .cx-mini strong {
+    display: block;
+    margin-top: 6px;
+    color: var(--cx-ink);
+    font-size: 20px;
+  }
+  .cx-meter {
+    overflow: hidden;
+    height: 9px;
+    margin: 12px 0 4px;
+    border-radius: 999px;
+    background: #e2e8f0;
+  }
+  .cx-meter i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #22c55e, #2563eb);
+  }
+  .cx-table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 16px;
+  }
+  .cx-table th {
+    color: var(--cx-muted);
+    font-size: 12px;
+    text-align: left;
+  }
+  .cx-table th,
+  .cx-table td {
+    padding: 11px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, .22);
+    vertical-align: top;
+  }
+  .cx-table tr:last-child td { border-bottom: 0; }
+  .cx-status {
+    display: inline-flex;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .cx-list {
+    display: grid;
+    gap: 10px;
+  }
+  .cx-list-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(148, 163, 184, .22);
+    border-radius: 16px;
+    background: rgba(255,255,255,.76);
+  }
+  .cx-list-item b {
+    display: block;
+    overflow: hidden;
+    color: var(--cx-ink);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cx-list-item small {
+    color: var(--cx-muted);
+  }
+  .cx-empty {
+    padding: 22px;
+    border: 1px dashed var(--cx-line);
+    border-radius: 18px;
+    color: var(--cx-muted);
+    background: rgba(255,255,255,.64);
+  }
+  @media (max-width: 1180px) {
+    .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cx-two, .cx-hero { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    #content { padding: 16px 12px; }
+    .cx-hero { padding: 16px; border-radius: 18px; }
+    .cx-search-row { grid-template-columns: 1fr; }
+    .cx-grid, .cx-mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cx-card strong { font-size: 22px; }
+    .cx-table { display: block; overflow-x: auto; }
+  }
+  @media (max-width: 520px) {
+    .cx-grid, .cx-mini-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cx-admin">
+  <section class="cx-hero">
+    <div>
+      <p class="cx-kicker">CherryX control center</p>
+      <h1>Аналитика аккаунтов, оплат и доступа</h1>
+      <p>Один экран для контроля платформы: регистрация пользователей, платежи, активные планы, задачи, файлы, проекты и быстрый разбор конкретного клиента.</p>
+    </div>
+    <form class="cx-search" method="get">
+      <label for="cx-user-search">Найти пользователя</label>
+      <div class="cx-search-row">
+        <input id="cx-user-search" name="q" value="{{ query }}" placeholder="email, username или ID">
+        <button type="submit">Открыть</button>
+      </div>
+      {% if matches %}
+      <div class="cx-match-list">
+        {% for match in matches %}
+        <a class="cx-chip" href="{{ match.url }}">{{ match.label }}{% if match.email %}<small>{{ match.email }}</small>{% endif %}</a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p style="margin:0;color:var(--cx-muted);font-size:12px;">Например: email клиента, username или внутренний ID аккаунта.</p>
+      {% endif %}
+    </form>
+  </section>
+
+  <section class="cx-grid">
+    {% for card in summary_cards %}
+    <article class="cx-card">
+      <span>{{ card.label }}</span>
+      <strong>{{ card.value }}</strong>
+      <em>{{ card.hint }}</em>
+    </article>
+    {% endfor %}
+  </section>
+
+  {% if selected %}
+  <section class="cx-panel" style="--accent: {{ selected.accent }};">
+    <div class="cx-user-head">
+      <div class="cx-user-title">
+        <span class="cx-avatar"></span>
+        <div>
+          <h2>{{ selected.label }}</h2>
+          <p>{{ selected.email }} · {{ selected.username }}</p>
+        </div>
+      </div>
+      {% if selected.admin_url %}<a class="cx-button" href="{{ selected.admin_url }}">Открыть аккаунт</a>{% endif %}
+    </div>
+
+    <div class="cx-mini-grid">
+      <article class="cx-mini"><span>CherryX баланс</span><strong>{{ selected.cherryx_balance }}</strong></article>
+      <article class="cx-mini"><span>Оплачено всего</span><strong>{{ selected.paid_total }}</strong></article>
+      <article class="cx-mini"><span>План</span><strong>{{ selected.plan_name }}</strong>{% if selected.active_until %}<small>до {{ selected.active_until|date:"d.m.Y H:i" }}</small>{% endif %}</article>
+      <article class="cx-mini"><span>Статус доступа</span><strong>{% if selected.access_active %}Active{% else %}Inactive{% endif %}</strong></article>
+      <article class="cx-mini"><span>Задачи</span><strong>{{ selected.jobs_total }}</strong></article>
+      <article class="cx-mini"><span>Готово</span><strong>{{ selected.jobs_completed }}</strong></article>
+      <article class="cx-mini"><span>Файлы</span><strong>{{ selected.outputs_total }}</strong></article>
+      <article class="cx-mini"><span>Проекты</span><strong>{{ selected.projects.video|add:selected.projects.design|add:selected.projects.music }}</strong></article>
+    </div>
+
+    <div class="cx-two" style="margin-top:16px;">
+      <div class="cx-mini">
+        <span>Хранилище</span>
+        <strong>{{ selected.storage_used }} / {{ selected.storage_limit }}</strong>
+        <div class="cx-meter"><i style="width: {{ selected.storage_percent }}%;"></i></div>
+        <small>{{ selected.storage_percent }}% · outputs {{ selected.output_storage }} · projects {{ selected.project_storage }}</small>
+      </div>
+      <div class="cx-mini">
+        <span>Профиль</span>
+        <strong>{{ selected.language }} · {{ selected.theme }}</strong>
+        <small>joined {{ selected.joined|date:"d.m.Y H:i" }}{% if selected.last_login %} · login {{ selected.last_login|date:"d.m.Y H:i" }}{% endif %}</small>
+      </div>
+    </div>
+
+    <div class="cx-two" style="margin-top:16px;">
+      <div>
+        <h2>Последние задачи</h2>
+        {% if selected.recent_jobs %}
+        <div class="cx-list">
+          {% for job in selected.recent_jobs %}
+          <div class="cx-list-item">
+            <div><b>{{ job.title }}</b><small>{{ job.kind }} · {{ job.created_at|date:"d.m.Y H:i" }}</small></div>
+            <span class="cx-status">{{ job.status }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}<div class="cx-empty">У пользователя пока нет задач.</div>{% endif %}
+      </div>
+      <div>
+        <h2>Последние оплаты</h2>
+        {% if selected.recent_payments %}
+        <div class="cx-list">
+          {% for payment in selected.recent_payments %}
+          <div class="cx-list-item">
+            <div><b>{{ payment.plan_code }}</b><small>{{ payment.email }} · {{ payment.paid_at|date:"d.m.Y H:i" }}</small></div>
+            {% if payment.admin_url %}<a class="cx-status" href="{{ payment.admin_url }}">{{ payment.amount }}</a>{% else %}<span class="cx-status">{{ payment.amount }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}<div class="cx-empty">Оплат пока нет.</div>{% endif %}
+      </div>
+    </div>
+  </section>
+  {% elif query %}
+  <section class="cx-empty">Пользователь по запросу “{{ query }}” не найден.</section>
+  {% endif %}
+
+  <section class="cx-two">
+    <article class="cx-panel">
+      <h2>Платежи по планам</h2>
+      <table class="cx-table">
+        <thead><tr><th>План</th><th>Оплат</th><th>Сумма</th></tr></thead>
+        <tbody>
+          {% for row in revenue_by_plan %}
+          <tr><td><b>{{ row.name }}</b><br><small>{{ row.code }}</small></td><td>{{ row.count }}</td><td>{{ row.total }}</td></tr>
+          {% empty %}
+          <tr><td colspan="3">Платежей пока нет.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </article>
+    <article class="cx-panel">
+      <h2>Активные планы</h2>
+      <table class="cx-table">
+        <thead><tr><th>План</th><th>Аккаунтов</th></tr></thead>
+        <tbody>
+          {% for row in plan_breakdown %}
+          <tr><td><b>{{ row.name }}</b><br><small>{{ row.code }}</small></td><td>{{ row.count }}</td></tr>
+          {% empty %}
+          <tr><td colspan="2">Активных планов пока нет.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </article>
+  </section>
+
+  <section class="cx-two">
+    <article class="cx-panel">
+      <h2>Лучшие клиенты по оплатам</h2>
+      <table class="cx-table">
+        <thead><tr><th>Клиент</th><th>Оплат</th><th>Сумма</th></tr></thead>
+        <tbody>
+          {% for row in top_customers %}
+          <tr>
+            <td><b>{{ row.email }}</b><br><small>{% if row.user_id %}User #{{ row.user_id }}{% else %}guest checkout{% endif %}</small></td>
+            <td>{{ row.payments }}</td>
+            <td>{{ row.total }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="3">Данных пока нет.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </article>
+    <article class="cx-panel">
+      <h2>Статусы задач</h2>
+      <div class="cx-list">
+        {% for row in status_breakdown %}
+        <div class="cx-list-item"><div><b>{{ row.status }}</b><small>Job status</small></div><span class="cx-status">{{ row.count }}</span></div>
+        {% empty %}
+        <div class="cx-empty">Задач пока нет.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="cx-two">
+    <article class="cx-panel">
+      <h2>Последние оплаты</h2>
+      <div class="cx-list">
+        {% for payment in recent_payments %}
+        <div class="cx-list-item">
+          <div><b>{{ payment.email }}</b><small>{{ payment.plan_code }} · {{ payment.paid_at|date:"d.m.Y H:i" }}</small></div>
+          {% if payment.admin_url %}<a class="cx-status" href="{{ payment.admin_url }}">{{ payment.amount }}</a>{% else %}<span class="cx-status">{{ payment.amount }}</span>{% endif %}
+        </div>
+        {% empty %}
+        <div class="cx-empty">Оплат пока нет.</div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="cx-panel">
+      <h2>Последние аккаунты</h2>
+      <div class="cx-list">
+        {% for item in recent_users %}
+        <div class="cx-list-item">
+          <div><b>{{ item.email|default:item.username }}</b><small>{{ item.date_joined|date:"d.m.Y H:i" }}</small></div>
+          <a class="cx-chip" href="?q={{ item.pk }}">View</a>
+        </div>
+        {% empty %}
+        <div class="cx-empty">Аккаунтов пока нет.</div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+</div>
+{% endblock %}
