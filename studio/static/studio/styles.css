@@ -10775,22 +10775,31 @@ body.video-projects-page .project-sort-menu {
   top: calc(100% + 8px);
   z-index: 70080;
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 180px;
   max-height: 236px;
   overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--blue) 18%, #dbeafe);
-  border-radius: 12px;
-  padding: 6px;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--blue) 26%, #dbeafe);
+  border-radius: 18px;
+  padding: 7px;
   background:
-    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--blue) 8%, transparent), transparent 42%),
-    rgba(255, 255, 255, 0.98);
-  box-shadow: 0 24px 54px rgba(15, 23, 42, 0.18);
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.97));
+  box-shadow:
+    0 30px 72px rgba(15, 23, 42, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(18px);
+  scrollbar-width: none;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-5px) scale(0.98);
   transform-origin: 50% 0%;
   transition: opacity 160ms ease, transform 160ms ease;
+}
+
+body.video-projects-page .project-sort-menu::-webkit-scrollbar {
+  display: none;
 }
 
 body.video-projects-page .project-sort-dropdown.is-open .project-sort-menu {
@@ -10819,10 +10828,10 @@ body.video-projects-page .project-sort-option {
   min-height: 38px;
   justify-content: flex-start;
   border: 0;
-  border-radius: 9px;
+  border-radius: 13px;
   background: transparent;
   color: #334155;
-  padding: 8px 10px 8px 31px;
+  padding: 10px 12px 10px 34px;
   font-size: 13px;
   font-weight: 820;
   text-align: left;
@@ -10849,6 +10858,7 @@ body.video-projects-page .project-sort-option:focus-visible {
 body.video-projects-page .project-sort-option[aria-selected="true"] {
   background: color-mix(in srgb, var(--blue) 9%, #ecfdf5);
   color: color-mix(in srgb, var(--blue) 72%, #047857);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 14%, transparent);
 }
 
 body.video-projects-page .project-sort-option[aria-selected="true"]::before {
@@ -24180,6 +24190,12 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
       linear-gradient(180deg, color-mix(in srgb, var(--blue) 8%, #f8fbff) 0, #eef8f6 54%, #f8fbff 100%);
   }
 
+  body.is-mobile-video-filter-open,
+  body.is-mobile-design-filter-open {
+    overflow: hidden;
+    touch-action: none;
+  }
+
   body.video-projects-page:not(.design-projects-page) .detail-topbar {
     position: sticky;
     top: 0;
@@ -24385,24 +24401,38 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
     bottom: max(82px, calc(env(safe-area-inset-bottom) + 82px));
     z-index: 65030;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(116px, 0.44fr);
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) minmax(118px, 0.44fr);
+    gap: 11px;
     max-height: min(62svh, 520px);
     overflow: auto;
     overflow-x: visible;
     border: 1px solid transparent;
-    border-radius: 24px;
-    padding: 14px;
+    border-radius: 28px;
+    padding: 22px 14px 14px;
     background:
       radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 30%) padding-box,
       linear-gradient(145deg, #ffffff, #f8fbff) padding-box,
       linear-gradient(135deg, color-mix(in srgb, var(--blue) 48%, #ffffff), rgba(20, 184, 166, 0.38), rgba(255, 255, 255, 0.8)) border-box;
-    box-shadow: 0 30px 82px rgba(15, 23, 42, 0.28);
+    box-shadow:
+      0 32px 88px rgba(15, 23, 42, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
     opacity: 0;
     overscroll-behavior: contain;
     pointer-events: none;
     transform: translateY(18px) scale(0.98);
     transition: opacity 180ms ease, transform 180ms ease;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar::before {
+    content: "";
+    position: absolute;
+    top: 9px;
+    left: 50%;
+    width: 48px;
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blue) 22%, #94a3b8);
+    transform: translateX(-50%);
   }
 
   body.is-mobile-video-filter-open.video-projects-page:not(.design-projects-page) .project-filter-bar {
@@ -24429,6 +24459,23 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
     grid-column: 1 / -1;
   }
 
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar label {
+    gap: 7px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar label > span {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 18px;
+    border-radius: 999px;
+    padding: 2px 7px;
+    background: color-mix(in srgb, var(--blue) 7%, transparent);
+    color: color-mix(in srgb, var(--ink) 70%, var(--blue));
+    font-size: 10px;
+    font-weight: 900;
+  }
+
   body.video-projects-page:not(.design-projects-page) .project-filter-bar input,
   body.video-projects-page:not(.design-projects-page) .project-filter-bar select {
     min-height: 48px;
@@ -24436,10 +24483,36 @@ body.video-projects-page:not(.design-projects-page) .video-project-mobile-filter
     font-size: 16px;
   }
 
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar input,
+  body.video-projects-page:not(.design-projects-page) .project-sort-trigger {
+    border-color: color-mix(in srgb, var(--blue) 18%, #dbeafe);
+    background:
+      radial-gradient(circle at 0 0, color-mix(in srgb, var(--blue) 6%, transparent), transparent 42%),
+      rgba(255, 255, 255, 0.96);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 8px 24px color-mix(in srgb, var(--blue) 7%, transparent);
+  }
+
   body.video-projects-page:not(.design-projects-page) .project-filter-bar button,
   body.video-projects-page:not(.design-projects-page) .project-filter-bar a {
     min-height: 44px;
     border-radius: 15px;
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar button[type="submit"] {
+    border-color: color-mix(in srgb, var(--blue) 28%, #93c5fd);
+    background:
+      radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.42), transparent 36%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 86%, #60a5fa), var(--blue));
+    color: #ffffff;
+    box-shadow: 0 18px 36px color-mix(in srgb, var(--blue) 24%, transparent);
+  }
+
+  body.video-projects-page:not(.design-projects-page) .project-filter-bar a {
+    grid-column: 1 / -1;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.78);
   }
 
   body.video-projects-page:not(.design-projects-page) .video-projects-grid {

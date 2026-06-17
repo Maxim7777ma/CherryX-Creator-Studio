@@ -4773,9 +4773,14 @@ body.cx-surface-panning * {
 
   body.music-projects-page .video-project-mobile-filter-toggle {
     right: 74px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 
   body.music-projects-page .video-projects-head > button[data-create-project] {
+    width: auto;
     background:
       url("https://api.iconify.design/lucide/music-2.svg?color=white") calc(50% - 76px) center / 19px 19px no-repeat,
       linear-gradient(180deg, color-mix(in srgb, var(--blue) 86%, #34d399), var(--blue));
@@ -4783,6 +4788,14 @@ body.cx-surface-panning * {
 
   body.music-projects-page .project-filter-bar {
     border-radius: 26px;
+  }
+
+  body.music-projects-page .music-project-preview {
+    min-height: clamp(220px, 58vw, 280px);
+  }
+
+  body.music-projects-page .music-project-card .video-project-body strong {
+    overflow-wrap: anywhere;
   }
 
   body.music-projects-page .project-sort-menu[data-project-sort-portal] {
