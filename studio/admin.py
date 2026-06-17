@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q, Sum
 from django.template.response import TemplateResponse
 from django.urls import NoReverseMatch, path, reverse
@@ -170,6 +171,9 @@ def _user_payload(user):
 
 
 def admin_analytics_view(request):
+    if not request.user.is_superuser:
+        raise PermissionDenied("Admin analytics is available only for superusers.")
+
     now = timezone.now()
     week_ago = now - timedelta(days=7)
     month_ago = now - timedelta(days=30)
