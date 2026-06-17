@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "music_projects_title" %} - CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-mobile-filters-v2">
-    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260617-project-mobile-filters-v2">
+    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260617-music-library-empty-v4">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page music-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -115,23 +115,60 @@
 
       <article class="video-project-empty music-project-empty" data-project-empty {% if music_projects %}hidden{% endif %}>
         <div class="music-project-empty-copy">
-          <small data-icon="music-2">{% ui "music_production" %}</small>
+          <small data-icon="music-2">{% ui "music_library" %}</small>
           <strong>{% ui "no_music_projects" %}</strong>
           <span>{% ui "music_empty_copy" %}</span>
-          <div class="music-project-empty-metrics" aria-hidden="true">
-            <b>120 BPM</b>
-            <b>16 Bars</b>
-            <b>WAV</b>
+          <div class="music-project-empty-actions">
+            <button type="button" data-create-project data-icon="circle-plus">{% ui "create_project" %}</button>
+          </div>
+          <div class="music-project-empty-points">
+            <span>
+              <i data-icon="upload-cloud"></i>
+              <b>{% ui "music_empty_import_audio" %}</b>
+              <em>{% ui "music_empty_import_audio_copy" %}</em>
+            </span>
+            <span>
+              <i data-icon="waveform"></i>
+              <b>{% ui "music_empty_arrange" %}</b>
+              <em>{% ui "music_empty_arrange_copy" %}</em>
+            </span>
+            <span>
+              <i data-icon="download"></i>
+              <b>{% ui "music_empty_export" %}</b>
+              <em>{% ui "music_empty_export_copy" %}</em>
+            </span>
           </div>
         </div>
         <div class="music-project-empty-art" aria-hidden="true">
-          <span class="music-empty-toolbar"><i></i><i></i><i></i></span>
-          <span class="music-empty-wave"><i></i><i></i><i></i><i></i><i></i></span>
-          <span class="music-empty-timeline">
-            <i></i><i></i><i></i><i></i>
+          <span class="music-empty-browser">
+            <span class="music-empty-browser-head">
+              <b>{% ui "music_empty_created_projects" %}</b>
+              <em>{% ui "music_empty_ready" %}</em>
+            </span>
+            <span class="music-empty-project-row is-active">
+              <i></i>
+              <b>{% ui "music_empty_draft_title" %}</b>
+              <em>00:42</em>
+            </span>
+            <span class="music-empty-project-row">
+              <i></i>
+              <b>{% ui "music_empty_mix_title" %}</b>
+              <em>WAV</em>
+            </span>
+            <span class="music-empty-project-row">
+              <i></i>
+              <b>{% ui "music_empty_idea_title" %}</b>
+              <em>120 BPM</em>
+            </span>
+          </span>
+          <span class="music-empty-studio">
+            <span class="music-empty-studio-top"><b>Studio</b><em></em></span>
+            <span class="music-empty-track is-one"><i></i><i></i><i></i></span>
+            <span class="music-empty-track is-two"><i></i><i></i></span>
+            <span class="music-empty-track is-three"><i></i><i></i><i></i></span>
+            <span class="music-empty-playhead"></span>
           </span>
         </div>
-        <button type="button" data-create-project data-icon="circle-plus">{% ui "create_project" %}</button>
       </article>
 
       {% if project_listing.has_more or project_listing.page > 1 %}
