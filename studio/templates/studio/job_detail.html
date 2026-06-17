@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-job-result-mobile-v2">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-job-result-mobile-v3">
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page job-detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -175,6 +175,20 @@
             <span data-job-message>{{ job.error|default:job.message }}</span>
             <small class="job-eta" data-job-eta{% if not job.eta_text or job.status == "completed" or job.status == "failed" %} hidden{% endif %}>{{ job.eta_text }}</small>
           </p>
+          <div class="job-state-summary">
+            <span>
+              <b data-job-progress-summary>{{ job.progress }}%</b>
+              <small>{% ui "progress" %}</small>
+            </span>
+            <span>
+              <b>{{ job.kind_label }}</b>
+              <small>{% ui "tool" %}</small>
+            </span>
+            <span>
+              <b data-job-output-summary>{{ display_outputs|length }}</b>
+              <small>{% ui "files" %}</small>
+            </span>
+          </div>
           {% if job.ai_summary %}
             <div class="ai-meta-row" data-ai-meta-row>
               {% for meta in job.ai_summary %}
@@ -327,7 +341,9 @@
         const etaNode = document.querySelector("[data-job-eta]");
         const progressNode = document.querySelector("[data-job-progress]");
         const progressTextNode = document.querySelector("[data-job-progress-text]");
+        const progressSummaryNode = document.querySelector("[data-job-progress-summary]");
         const outputCountNode = document.querySelector("[data-output-count]");
+        const outputSummaryNode = document.querySelector("[data-job-output-summary]");
         const grid = document.querySelector("[data-preview-grid]");
         const empty = document.querySelector("[data-empty-outputs]");
 
@@ -521,6 +537,7 @@
           messageNode.textContent = job.error || job.message || "";
           progressNode.style.width = `${progress}%`;
           progressTextNode.textContent = `${progress}%`;
+          if (progressSummaryNode) progressSummaryNode.textContent = `${progress}%`;
           if (job.eta_text && job.status !== "completed" && job.status !== "failed") {
             etaNode.hidden = false;
             etaNode.textContent = job.eta_text;
@@ -530,6 +547,7 @@
           }
           const outputs = (Array.isArray(job.outputs) ? job.outputs : []).filter(isDisplayOutput);
           outputCountNode.textContent = String(outputs.length);
+          if (outputSummaryNode) outputSummaryNode.textContent = String(outputs.length);
           empty.hidden = outputs.length > 0;
           const liveIndexes = new Set();
           outputs.forEach((output) => {

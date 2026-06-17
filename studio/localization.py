@@ -20,6 +20,28 @@ DEFAULT_LANGUAGE = "en"
 
 
 UI_TEXT: dict[str, dict[str, str]] = {
+    "progress": {
+        "en": "Progress",
+        "ru": "Прогресс",
+        "uk": "Прогрес",
+        "fr": "Progression",
+        "de": "Fortschritt",
+        "es": "Progreso",
+        "ka": "პროგრესი",
+        "hy": "Առաջընթաց",
+        "it": "Avanzamento",
+    },
+    "tool": {
+        "en": "Tool",
+        "ru": "Инструмент",
+        "uk": "Інструмент",
+        "fr": "Outil",
+        "de": "Tool",
+        "es": "Herramienta",
+        "ka": "ხელსაწყო",
+        "hy": "Գործիք",
+        "it": "Strumento",
+    },
     "details": {
         "en": "Details",
         "ru": "Детали",
