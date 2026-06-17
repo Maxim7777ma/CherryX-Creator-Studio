@@ -272,6 +272,8 @@ class CherryXMusicStudio {
       this.hideContextMenu();
       this.closeCustomSelects();
     });
+    window.addEventListener("resize", () => this.positionOpenCustomSelects());
+    window.addEventListener("scroll", () => this.positionOpenCustomSelects(), true);
     window.addEventListener("beforeunload", () => this.writeLocalBackup());
   }
 
@@ -309,6 +311,7 @@ class CherryXMusicStudio {
       this.closeCustomSelects(wrap);
       wrap.classList.toggle("is-open", !isOpen);
       button.setAttribute("aria-expanded", String(!isOpen));
+      if (!isOpen) this.positionCustomSelect(select);
     };
     button.addEventListener("click", openMenu);
     menu.addEventListener("click", event => {
@@ -352,8 +355,61 @@ class CherryXMusicStudio {
     this.container.querySelectorAll(".cx-custom-select.is-open").forEach(wrap => {
       if (wrap === except) return;
       wrap.classList.remove("is-open");
+      wrap.classList.remove("is-floating", "opens-up");
+      const menu = wrap.querySelector(".cx-custom-select-menu");
+      if (menu) {
+        menu.style.left = "";
+        menu.style.top = "";
+        menu.style.bottom = "";
+        menu.style.width = "";
+        menu.style.maxHeight = "";
+      }
       wrap.querySelector(".cx-custom-select-trigger")?.setAttribute("aria-expanded", "false");
     });
+  }
+
+  positionOpenCustomSelects() {
+    this.container.querySelectorAll("select[data-custom-select]").forEach(select => {
+      if (select._customSelect?.wrap?.classList.contains("is-open")) this.positionCustomSelect(select);
+    });
+  }
+
+  positionCustomSelect(select) {
+    const custom = select?._customSelect;
+    if (!custom) return;
+    const { wrap, button, menu } = custom;
+    wrap.classList.remove("is-floating", "opens-up");
+    menu.style.left = "";
+    menu.style.top = "";
+    menu.style.bottom = "";
+    menu.style.width = "";
+    menu.style.maxHeight = "";
+    if (window.innerWidth > 760) return;
+
+    const rect = button.getBoundingClientRect();
+    const gap = 8;
+    const sidePad = 12;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const below = viewportHeight - rect.bottom - gap;
+    const above = rect.top - gap;
+    const openUp = below < 176 && above > below;
+    const maxHeight = Math.max(132, Math.min(240, (openUp ? above : below) - sidePad));
+    const width = Math.min(Math.max(rect.width, 176), viewportWidth - sidePad * 2);
+    const left = Math.min(Math.max(sidePad, rect.left), viewportWidth - width - sidePad);
+
+    wrap.classList.add("is-floating");
+    if (openUp) wrap.classList.add("opens-up");
+    menu.style.left = `${left}px`;
+    menu.style.width = `${width}px`;
+    menu.style.maxHeight = `${maxHeight}px`;
+    if (openUp) {
+      menu.style.top = "auto";
+      menu.style.bottom = `${Math.max(sidePad, viewportHeight - rect.top + gap)}px`;
+    } else {
+      menu.style.top = `${Math.min(rect.bottom + gap, viewportHeight - maxHeight - sidePad)}px`;
+      menu.style.bottom = "auto";
+    }
   }
 
   uiPrefsKey() {
