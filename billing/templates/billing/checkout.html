@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "checkout" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260616-mobile-checkout">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-checkout-plan-clean">
   </head>
   <body class="auth-page">
     <main class="checkout-shell checkout-wizard-shell">
@@ -102,7 +102,6 @@
                     data-headline="{{ plan.headline }}"
                     aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
                   >
-                    <span class="plan-letter">{{ plan.name|first }}</span>
                     <span class="plan-copy">
                       <span class="plan-badge">{{ plan.badge }}</span>
                       <strong>{{ plan.name }}</strong>

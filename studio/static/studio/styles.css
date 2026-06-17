@@ -15531,8 +15531,8 @@ body.is-landing-pill-open {
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
   width: 100%;
   min-height: 108px;
   border: 1px solid color-mix(in srgb, var(--plan-accent) 18%, var(--line));
@@ -15584,21 +15584,6 @@ body.is-landing-pill-open {
     url("https://api.iconify.design/lucide/check.svg?color=white") center / 12px 12px no-repeat,
     var(--plan-accent);
   box-shadow: 0 10px 22px color-mix(in srgb, var(--plan-accent) 24%, transparent);
-}
-
-.plan-letter {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--plan-accent) 28%, var(--line));
-  border-radius: 12px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--plan-accent) 13%, #ffffff), #ffffff);
-  color: var(--plan-accent);
-  font-size: 15px;
-  font-weight: 950;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
 .plan-copy {
@@ -20311,7 +20296,6 @@ body.is-landing-pill-open {
 
   .auth-card-head h2 {
     font-size: clamp(28px, 8vw, 38px);
-    line-height: 1.08;
   }
 
   .auth-card-head p {
