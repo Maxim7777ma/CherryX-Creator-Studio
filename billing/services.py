@@ -270,8 +270,10 @@ def create_telegram_payment_intent(
     if kind == TelegramPaymentIntent.KIND_PLAN:
         plan = get_plan(plan_code)
         plan_code = plan.code
-        cherryx = int(plan.price_cents)
-        stars = int(telegram_plan_price(plan)["stars_amount"])
+        cherryx = int(cherryx_amount) if cherryx_amount is not None else int(plan.price_cents)
+        if cherryx <= 0:
+            raise ValueError("Plan amount must be positive")
+        stars = usd_cents_to_telegram_stars(cherryx)
     elif kind == TelegramPaymentIntent.KIND_TOPUP:
         cherryx = int(cherryx_amount or 0)
         if cherryx <= 0:

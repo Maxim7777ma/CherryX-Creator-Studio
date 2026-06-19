@@ -51,8 +51,9 @@ from src.youtube_tools import SubtitleUnavailableError, normalize_subtitle_langu
 from .forms import AccountSettingsForm, CommunityWorkForm, EmailLoginForm, RegisterForm
 from .documentation_content import documentation_content
 from .legal_documents import legal_document_content
-from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, repair_mojibake, translate
+from .localization import LANGUAGE_OPTIONS, app_messages, cherryx_pay_messages, clean_language, localized_plan, music_messages, repair_mojibake, translate
 from .models import AccountProfile, CommunityPurchase, CommunityWork, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, LearningArticle, MagicLoginToken, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .wallet import WalletError, create_cherryx_withdrawal_request, recent_wallet_transactions, transfer_cherryx_by_email
 
 
 settings = get_settings()
@@ -950,23 +951,88 @@ def cherryx_pay(request: HttpRequest):
     telegram_link_token = ensure_telegram_link_token(request.user) if request.user.is_authenticated else ""
     profile = getattr(request.user, "studio_profile", None) if request.user.is_authenticated else None
     language = getattr(request, "interface_language", "en")
+    wallet_transactions = recent_wallet_transactions(request.user, 8) if request.user.is_authenticated else []
     return render(
         request,
         "studio/cherryx_pay.html",
         {
             "balance": _cherryx_balance(request),
+            "withdrawal_available": _cherryx_balance(request),
             "usd_rate": 100,
+            "telegram_stars_rate": telegram_stars_rate(),
             "telegram_link_token": telegram_link_token,
             "telegram_user_id": getattr(profile, "telegram_user_id", "") if profile else "",
+            "telegram_username": getattr(profile, "telegram_username", "") if profile else "",
+            "telegram_first_name": getattr(profile, "telegram_first_name", "") if profile else "",
+            "wallet_transactions": wallet_transactions,
             "display_name": _display_name(request),
             "checkout_url": _checkout_url(request),
             "pricing_url": reverse("billing:pricing"),
             "plans": [localized_plan(plan, language) for plan in PLANS],
+            "pay_text": cherryx_pay_messages(language),
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "app_messages": app_messages(getattr(request, "interface_language", "en")),
         },
+    )
+
+
+def _wallet_transaction_payload(transaction) -> dict[str, object]:
+    related = transaction.related_user
+    return {
+        "id": transaction.id,
+        "type": transaction.type,
+        "label": transaction.get_type_display(),
+        "amount": transaction.amount,
+        "balance_after": transaction.balance_after,
+        "status": transaction.status,
+        "related": (related.email or related.username) if related else "",
+        "created_at": transaction.created_at.isoformat(),
+    }
+
+
+@login_required
+@require_POST
+def cherryx_transfer(request: HttpRequest) -> JsonResponse:
+    try:
+        result = transfer_cherryx_by_email(
+            request.user,
+            request.POST.get("email", ""),
+            request.POST.get("credits") or request.POST.get("amount") or "0",
+        )
+    except WalletError as exc:
+        return JsonResponse({"ok": False, "error": exc.reason, "message": str(exc)}, status=400)
+    return JsonResponse(
+        {
+            "ok": True,
+            "balance": result["balance"],
+            "amount": result["amount"],
+            "recipient_email": result["recipient_email"],
+            "transaction": _wallet_transaction_payload(result["transaction"]),
+        }
+    )
+
+
+@login_required
+@require_POST
+def cherryx_withdrawal_request(request: HttpRequest) -> JsonResponse:
+    try:
+        result = create_cherryx_withdrawal_request(
+            request.user,
+            request.POST.get("credits") or request.POST.get("amount") or "0",
+        )
+    except WalletError as exc:
+        return JsonResponse({"ok": False, "error": exc.reason, "message": str(exc)}, status=400)
+    return JsonResponse(
+        {
+            "ok": True,
+            "balance": result["balance"],
+            "amount": result["amount"],
+            "estimated_stars": result["estimated_stars"],
+            "withdrawal_id": result["withdrawal"].id,
+            "transaction": _wallet_transaction_payload(result["transaction"]),
+        }
     )
 
 

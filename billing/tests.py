@@ -3,11 +3,13 @@ from django.contrib.admin.sites import AdminSite
 from django.test import RequestFactory
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
 from unittest import mock
 
 from .forms import CheckoutForm
 from .admin import TelegramPromotionAdmin
-from .models import TelegramPaymentIntent, TelegramPromotion
+from .models import CustomerAccess, TelegramPaymentIntent, TelegramPromotion
 from .services import (
     cherryx_to_telegram_stars,
     create_account_for_paid_telegram_intent,
@@ -153,6 +155,35 @@ class TelegramPaymentIntentTests(TestCase):
         self.assertEqual(payload["cherryx_amount"], 1900)
         self.assertEqual(payload["stars_amount"], 1462)
         self.assertIn("https://t.me/", payload["link"])
+
+    def test_telegram_intent_endpoint_accepts_prorated_plan_due(self):
+        user = get_user_model().objects.create_user(username="due@example.com", email="due@example.com", password="Strong123")
+        CustomerAccess.objects.create(
+            user=user,
+            plan_code="pro",
+            active_until=timezone.now() + timedelta(days=15),
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("billing:telegram_intent"),
+            {"kind": "plan", "plan": "studio", "cherryx_amount": "3950"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["kind"], "plan")
+        self.assertEqual(payload["plan_code"], "studio")
+        self.assertEqual(payload["cherryx_amount"], 3950)
+        self.assertEqual(payload["stars_amount"], usd_cents_to_telegram_stars(3950))
+
+        invalid = self.client.post(
+            reverse("billing:telegram_intent"),
+            {"kind": "plan", "plan": "studio", "cherryx_amount": "4900"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.json()["error"], "invalid_due")
 
     def test_intent_plan_payment_activates_linked_account(self):
         user = get_user_model().objects.create_user(username="linked@example.com", email="linked@example.com", password="Strong123")

@@ -251,7 +251,8 @@ body.community-page {
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07);
 }
 
-.community-filter-bar label {
+.community-filter-bar label,
+.community-filter-select {
   display: grid;
   flex: 1 1 150px;
   gap: 6px;
@@ -264,8 +265,45 @@ body.community-page {
   flex-basis: 280px;
 }
 
-.community-filter-bar input,
-.community-filter-bar select {
+.community-filter-bar label > span,
+.community-filter-select > span {
+  display: inline-grid;
+  grid-template-columns: 14px max-content;
+  gap: 6px;
+  align-items: center;
+}
+
+.community-filter-bar label > span::before,
+.community-filter-select > span::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: var(--filter-icon) center / contain no-repeat;
+  -webkit-mask: var(--filter-icon) center / contain no-repeat;
+}
+
+.community-filter-bar [data-filter-icon="search"] {
+  --filter-icon: url("https://api.iconify.design/lucide/search.svg");
+}
+
+.community-filter-bar [data-filter-icon="access"] {
+  --filter-icon: url("https://api.iconify.design/lucide/badge-dollar-sign.svg");
+}
+
+.community-filter-bar [data-filter-icon="sort"] {
+  --filter-icon: url("https://api.iconify.design/lucide/arrow-down-up.svg");
+}
+
+.community-filter-bar [data-filter-icon="min"] {
+  --filter-icon: url("https://api.iconify.design/lucide/chevrons-down.svg");
+}
+
+.community-filter-bar [data-filter-icon="max"] {
+  --filter-icon: url("https://api.iconify.design/lucide/chevrons-up.svg");
+}
+
+.community-filter-bar input {
   min-height: 42px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -719,6 +757,14 @@ body.community-page {
   font-weight: 850;
 }
 
+.community-filter-select {
+  position: relative;
+}
+
+.community-filter-select .custom-select {
+  gap: 0;
+}
+
 .custom-select > button,
 .custom-select-menu button {
   width: 100%;
@@ -734,9 +780,36 @@ body.community-page {
 }
 
 .custom-select > button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  gap: 8px;
+  align-items: center;
   position: relative;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.custom-select > button::before,
+.custom-select-menu button::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: var(--select-icon) center / contain no-repeat;
+  -webkit-mask: var(--select-icon) center / contain no-repeat;
+}
+
+.custom-select > button:not([data-icon])::before,
+.custom-select-menu button:not([data-icon])::before {
+  display: none;
+}
+
+.custom-select > button:not([data-icon]) {
+  grid-template-columns: minmax(0, 1fr) 14px;
+}
+
+.custom-select-menu button:not([data-icon]) {
+  grid-template-columns: minmax(0, 1fr) 16px;
 }
 
 .custom-select > button:hover,
@@ -747,10 +820,9 @@ body.community-page {
 
 .custom-select > button::after {
   content: "";
-  float: right;
   width: 14px;
   height: 14px;
-  margin-top: 3px;
+  justify-self: end;
   background: currentColor;
   mask: url("https://api.iconify.design/lucide/chevron-down.svg") center / contain no-repeat;
   -webkit-mask: url("https://api.iconify.design/lucide/chevron-down.svg") center / contain no-repeat;
@@ -790,7 +862,8 @@ body.community-page {
 
 .custom-select-menu button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  gap: 8px;
   align-items: center;
   background: #f8fafc;
   transition: background 160ms ease, color 160ms ease, transform 160ms ease;
@@ -810,6 +883,41 @@ body.community-page {
   opacity: 0;
   mask: url("https://api.iconify.design/lucide/check.svg") center / contain no-repeat;
   -webkit-mask: url("https://api.iconify.design/lucide/check.svg") center / contain no-repeat;
+}
+
+.custom-select [data-icon="list-filter"],
+.custom-select > button[data-icon="list-filter"] {
+  --select-icon: url("https://api.iconify.design/lucide/list-filter.svg");
+}
+
+.custom-select [data-icon="gift"],
+.custom-select > button[data-icon="gift"] {
+  --select-icon: url("https://api.iconify.design/lucide/gift.svg");
+}
+
+.custom-select [data-icon="badge-dollar-sign"],
+.custom-select > button[data-icon="badge-dollar-sign"] {
+  --select-icon: url("https://api.iconify.design/lucide/badge-dollar-sign.svg");
+}
+
+.custom-select [data-icon="clock"],
+.custom-select > button[data-icon="clock"] {
+  --select-icon: url("https://api.iconify.design/lucide/clock-3.svg");
+}
+
+.custom-select [data-icon="flame"],
+.custom-select > button[data-icon="flame"] {
+  --select-icon: url("https://api.iconify.design/lucide/flame.svg");
+}
+
+.custom-select [data-icon="arrow-down-01"],
+.custom-select > button[data-icon="arrow-down-01"] {
+  --select-icon: url("https://api.iconify.design/lucide/arrow-down-0-1.svg");
+}
+
+.custom-select [data-icon="arrow-up-10"],
+.custom-select > button[data-icon="arrow-up-10"] {
+  --select-icon: url("https://api.iconify.design/lucide/arrow-up-1-0.svg");
 }
 
 .custom-select-menu button.is-selected {
@@ -860,6 +968,7 @@ body.community-page {
 .custom-file-zone label span {
   color: var(--muted);
   line-height: 1.42;
+  font-size: 11px;
 }
 
 .custom-file-zone [data-icon="upload-cloud"] {

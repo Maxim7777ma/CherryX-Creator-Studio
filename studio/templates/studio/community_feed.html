@@ -7,7 +7,7 @@
     <title>{{ seo_title }} - CherryX Creator Studio</title>
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-active-icons">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-filter-select-icons">
   </head>
   <body class="community-page community-{{ kind }}">
     <header class="community-nav">
@@ -30,32 +30,40 @@
         <a class="community-hero-action" href="{% url 'studio:community_publish' %}">Share your work</a>
       </section>
       <form class="community-filter-bar" method="get">
-        <label class="community-search-field">
+        <label class="community-search-field" data-filter-icon="search">
           <span>Search</span>
           <input type="search" name="q" value="{{ filters.q }}" placeholder="Title, author, description">
         </label>
-        <label>
+        <div class="community-filter-select" data-filter-icon="access">
           <span>Access</span>
-          <select name="access">
-            <option value="">All</option>
-            <option value="free" {% if filters.access == "free" %}selected{% endif %}>Free</option>
-            <option value="paid" {% if filters.access == "paid" %}selected{% endif %}>Paid</option>
-          </select>
-        </label>
-        <label>
+          <div class="custom-select" data-custom-select>
+            <input type="hidden" name="access" value="{{ filters.access }}" data-custom-select-input>
+            <button type="button" data-custom-select-button><span data-custom-select-label>All</span></button>
+            <div class="custom-select-menu" hidden>
+              <button type="button" data-value="" data-label="All" data-icon="list-filter">All</button>
+              <button type="button" data-value="free" data-label="Free" data-icon="gift">Free</button>
+              <button type="button" data-value="paid" data-label="Paid" data-icon="badge-dollar-sign">Paid</button>
+            </div>
+          </div>
+        </div>
+        <div class="community-filter-select" data-filter-icon="sort">
           <span>Sort</span>
-          <select name="sort">
-            <option value="new" {% if filters.sort == "new" %}selected{% endif %}>Newest</option>
-            <option value="popular" {% if filters.sort == "popular" %}selected{% endif %}>Popular</option>
-            <option value="price_low" {% if filters.sort == "price_low" %}selected{% endif %}>Price low</option>
-            <option value="price_high" {% if filters.sort == "price_high" %}selected{% endif %}>Price high</option>
-          </select>
-        </label>
-        <label>
+          <div class="custom-select" data-custom-select>
+            <input type="hidden" name="sort" value="{{ filters.sort|default:'new' }}" data-custom-select-input>
+            <button type="button" data-custom-select-button><span data-custom-select-label>Newest</span></button>
+            <div class="custom-select-menu" hidden>
+              <button type="button" data-value="new" data-label="Newest" data-icon="clock">Newest</button>
+              <button type="button" data-value="popular" data-label="Popular" data-icon="flame">Popular</button>
+              <button type="button" data-value="price_low" data-label="Price low" data-icon="arrow-down-01">Price low</button>
+              <button type="button" data-value="price_high" data-label="Price high" data-icon="arrow-up-10">Price high</button>
+            </div>
+          </div>
+        </div>
+        <label data-filter-icon="min">
           <span>Min CX</span>
           <input type="number" name="min_price" min="0" value="{{ filters.min_price }}">
         </label>
-        <label>
+        <label data-filter-icon="max">
           <span>Max CX</span>
           <input type="number" name="max_price" min="0" value="{{ filters.max_price }}">
         </label>
@@ -87,5 +95,6 @@
         {% endfor %}
       </section>
     </main>
+    <script src="{% static 'studio/community_publish.js' %}?v=20260619-filter-select-icons" defer></script>
   </body>
 </html>

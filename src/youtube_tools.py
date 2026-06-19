@@ -206,6 +206,11 @@ def download_youtube_video(url: str, output_dir: Path, timeout_seconds: int, est
 
     path = _resolve_downloaded_path(info, output_dir)
     duration = float(info.get("duration") or 0)
+    if duration <= 0:
+        try:
+            duration = float(inspect_video(path).duration_seconds or 0)
+        except Exception:
+            duration = 0
     return YouTubeDownload(
         path=path,
         title=info.get("title") or "youtube_video",

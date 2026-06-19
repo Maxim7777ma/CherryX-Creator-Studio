@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Max, Q, Sum
@@ -15,6 +15,9 @@ from billing.plans import PLANS, get_plan
 
 from .models import (
     AccountProfile,
+    CherryXTransfer,
+    CherryXWalletTransaction,
+    CherryXWithdrawalRequest,
     CommunityPurchase,
     CommunityWork,
     DesignerAsset,
@@ -29,6 +32,7 @@ from .models import (
     VideoEditorProject,
     WorkspaceShare,
 )
+from .wallet import WalletError, mark_withdrawal_paid, reject_withdrawal_and_refund
 
 
 def _money(cents: int | None, currency: str = "USD") -> str:
@@ -361,6 +365,59 @@ class AccountProfileAdmin(admin.ModelAdmin):
     list_filter = ("interface_language", "theme_mode")
     search_fields = ("user__username", "user__email")
     autocomplete_fields = ("user",)
+
+
+@admin.register(CherryXWalletTransaction)
+class CherryXWalletTransactionAdmin(admin.ModelAdmin):
+    list_display = ("user", "type", "amount", "balance_after", "status", "related_user", "created_at")
+    list_filter = ("type", "status", "created_at")
+    search_fields = ("user__username", "user__email", "related_user__username", "related_user__email")
+    autocomplete_fields = ("user", "related_user")
+    readonly_fields = ("user", "type", "amount", "balance_after", "status", "related_user", "metadata", "created_at")
+
+
+@admin.register(CherryXTransfer)
+class CherryXTransferAdmin(admin.ModelAdmin):
+    list_display = ("sender", "recipient", "recipient_email", "amount", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("sender__username", "sender__email", "recipient__username", "recipient__email", "recipient_email")
+    autocomplete_fields = ("sender", "recipient")
+    readonly_fields = ("sender", "recipient", "recipient_email", "amount", "status", "created_at")
+
+
+@admin.register(CherryXWithdrawalRequest)
+class CherryXWithdrawalRequestAdmin(admin.ModelAdmin):
+    list_display = ("user", "telegram_user_id", "amount_cherryx", "estimated_stars", "actual_paid_stars", "status", "created_at")
+    list_editable = ("actual_paid_stars",)
+    list_filter = ("status", "created_at", "paid_at", "rejected_at")
+    search_fields = ("user__username", "user__email", "telegram_user_id", "admin_notes")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("telegram_user_id", "amount_cherryx", "estimated_stars", "status", "paid_at", "rejected_at", "created_at", "updated_at")
+    actions = ("mark_paid", "reject_and_refund")
+
+    @admin.action(description="Mark selected withdrawals as paid")
+    def mark_paid(self, request, queryset):
+        paid = 0
+        failed = 0
+        for withdrawal in queryset:
+            try:
+                mark_withdrawal_paid(withdrawal, withdrawal.actual_paid_stars or withdrawal.estimated_stars)
+                paid += 1
+            except WalletError:
+                failed += 1
+        self.message_user(request, f"Marked paid: {paid}. Failed: {failed}.", messages.SUCCESS if not failed else messages.WARNING)
+
+    @admin.action(description="Reject selected withdrawals and refund CherryX")
+    def reject_and_refund(self, request, queryset):
+        refunded = 0
+        failed = 0
+        for withdrawal in queryset:
+            try:
+                reject_withdrawal_and_refund(withdrawal)
+                refunded += 1
+            except WalletError:
+                failed += 1
+        self.message_user(request, f"Rejected/refunded: {refunded}. Failed: {failed}.", messages.SUCCESS if not failed else messages.WARNING)
 
 
 @admin.register(LearningArticle)

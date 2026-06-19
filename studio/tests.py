@@ -26,9 +26,10 @@ from src import web_actions as actions
 from src.youtube_tools import SubtitleCue
 from .legal_documents import legal_document_content
 from . import views
-from .localization import app_messages, language_options, translate
-from .models import AccountProfile, CommunityPurchase, CommunityWork, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, LearningArticle, MagicLoginToken, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .localization import app_messages, cherryx_pay_messages, language_options, translate
+from .models import AccountProfile, CherryXTransfer, CherryXWalletTransaction, CherryXWithdrawalRequest, CommunityPurchase, CommunityWork, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, LearningArticle, MagicLoginToken, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 from .views import _job_record_params
+from .wallet import WalletError, create_cherryx_withdrawal_request, mark_withdrawal_paid, reject_withdrawal_and_refund, transfer_cherryx_by_email
 
 
 class SiteSmokeTests(TransactionTestCase):
@@ -76,6 +77,121 @@ class SiteSmokeTests(TransactionTestCase):
         self.assertEqual(response.url, reverse("studio:login"))
         self.assertNotIn("_auth_user_id", self.client.session)
 
+    def test_cherryx_transfer_service_moves_balance_and_writes_ledger(self) -> None:
+        sender = get_user_model().objects.create_user(username="wallet-sender@example.com", email="wallet-sender@example.com", password="pass12345")
+        recipient = get_user_model().objects.create_user(username="wallet-recipient@example.com", email="wallet-recipient@example.com", password="pass12345")
+        AccountProfile.objects.create(user=sender, cherryx_balance=300)
+        AccountProfile.objects.create(user=recipient, cherryx_balance=20)
+
+        result = transfer_cherryx_by_email(sender, "wallet-recipient@example.com", 125)
+
+        self.assertTrue(result["ok"])
+        sender.studio_profile.refresh_from_db()
+        recipient.studio_profile.refresh_from_db()
+        self.assertEqual(sender.studio_profile.cherryx_balance, 175)
+        self.assertEqual(recipient.studio_profile.cherryx_balance, 145)
+        self.assertTrue(CherryXTransfer.objects.filter(sender=sender, recipient=recipient, amount=125).exists())
+        self.assertTrue(CherryXWalletTransaction.objects.filter(user=sender, type=CherryXWalletTransaction.TYPE_TRANSFER_OUT, amount=-125).exists())
+        self.assertTrue(CherryXWalletTransaction.objects.filter(user=recipient, type=CherryXWalletTransaction.TYPE_TRANSFER_IN, amount=125).exists())
+
+    def test_cherryx_transfer_rejects_invalid_targets_and_amounts(self) -> None:
+        user = get_user_model().objects.create_user(username="wallet-user@example.com", email="wallet-user@example.com", password="pass12345")
+        recipient = get_user_model().objects.create_user(username="wallet-other@example.com", email="wallet-other@example.com", password="pass12345")
+        AccountProfile.objects.create(user=user, cherryx_balance=10)
+        AccountProfile.objects.create(user=recipient, cherryx_balance=0)
+
+        for email, amount in (
+            ("wallet-user@example.com", 1),
+            ("missing@example.com", 1),
+            ("wallet-other@example.com", 0),
+            ("wallet-other@example.com", 99),
+        ):
+            with self.subTest(email=email, amount=amount):
+                with self.assertRaises(WalletError):
+                    transfer_cherryx_by_email(user, email, amount)
+
+    def test_cherryx_withdrawal_reserves_balance_and_admin_can_refund_or_pay(self) -> None:
+        user = get_user_model().objects.create_user(username="withdraw@example.com", email="withdraw@example.com", password="pass12345")
+        profile = AccountProfile.objects.create(user=user, cherryx_balance=1000)
+        with self.assertRaises(WalletError):
+            create_cherryx_withdrawal_request(user, 100)
+
+        profile.telegram_user_id = 555777
+        profile.save(update_fields=["telegram_user_id", "updated_at"])
+        with mock.patch("studio.wallet.telegram_stars_rate", return_value=10):
+            first = create_cherryx_withdrawal_request(user, 400)
+        profile.refresh_from_db()
+        self.assertEqual(profile.cherryx_balance, 600)
+        self.assertEqual(first["withdrawal"].status, CherryXWithdrawalRequest.STATUS_PENDING)
+        self.assertEqual(first["estimated_stars"], 40)
+
+        reject_withdrawal_and_refund(first["withdrawal"])
+        profile.refresh_from_db()
+        self.assertEqual(profile.cherryx_balance, 1000)
+        first["withdrawal"].refresh_from_db()
+        self.assertEqual(first["withdrawal"].status, CherryXWithdrawalRequest.STATUS_REJECTED)
+
+        with mock.patch("studio.wallet.telegram_stars_rate", return_value=10):
+            second = create_cherryx_withdrawal_request(user, 250)
+        mark_withdrawal_paid(second["withdrawal"], 25)
+        profile.refresh_from_db()
+        second["withdrawal"].refresh_from_db()
+        self.assertEqual(profile.cherryx_balance, 750)
+        self.assertEqual(second["withdrawal"].status, CherryXWithdrawalRequest.STATUS_PAID)
+        self.assertEqual(second["withdrawal"].actual_paid_stars, 25)
+
+    def test_cherryx_pay_transfer_and_withdraw_endpoints(self) -> None:
+        sender = get_user_model().objects.create_user(username="api-sender@example.com", email="api-sender@example.com", password="pass12345")
+        recipient = get_user_model().objects.create_user(username="api-recipient@example.com", email="api-recipient@example.com", password="pass12345")
+        AccountProfile.objects.create(user=sender, telegram_user_id=9090, cherryx_balance=500)
+        AccountProfile.objects.create(user=recipient, cherryx_balance=0)
+
+        self.assertEqual(self.client.post(reverse("studio:cherryx_transfer"), {"email": recipient.email, "credits": "50"}).status_code, 302)
+        self.client.force_login(sender)
+
+        transfer = self.client.post(reverse("studio:cherryx_transfer"), {"email": recipient.email, "credits": "50"})
+        self.assertEqual(transfer.status_code, 200)
+        self.assertEqual(transfer.json()["balance"], 450)
+
+        withdrawal = self.client.post(reverse("studio:cherryx_withdrawal_request"), {"credits": "100"})
+        self.assertEqual(withdrawal.status_code, 200)
+        self.assertEqual(withdrawal.json()["balance"], 350)
+        self.assertTrue(CherryXWithdrawalRequest.objects.filter(user=sender, amount_cherryx=100, status=CherryXWithdrawalRequest.STATUS_PENDING).exists())
+
+        page = self.client.get(reverse("studio:cherryx_pay"))
+        self.assertContains(page, "Transfer out")
+        self.assertContains(page, "Withdrawal hold")
+        self.assertContains(page, "Available to withdraw")
+        self.assertContains(page, "data-withdraw-available")
+        self.assertContains(page, 'data-wallet-action="topup"')
+        self.assertContains(page, 'data-wallet-action-panel="withdraw"')
+        self.assertContains(page, 'data-wallet-action-panel="topup"')
+        self.assertContains(page, "is-active-panel")
+        self.assertContains(page, 'data-icon="landmark"')
+
+    def test_cherryx_pay_messages_cover_site_languages(self) -> None:
+        expected = {
+            "en": ("Top up", "Withdraw"),
+            "ru": ("Пополнить", "Вывод"),
+            "uk": ("Поповнити", "Виведення"),
+            "fr": ("Recharger", "Retrait"),
+            "de": ("Aufladen", "Auszahlen"),
+            "es": ("Recargar", "Retirar"),
+            "ka": ("შევსება", "გატანა"),
+            "hy": ("Լիցքավորել", "Ելք"),
+            "it": ("Ricarica", "Prelievo"),
+        }
+        for language, labels in expected.items():
+            with self.subTest(language=language):
+                messages = cherryx_pay_messages(language)
+                self.assertEqual(messages["topup"], labels[0])
+                self.assertEqual(messages["withdraw"], labels[1])
+                self.assertEqual(len(messages["spend_options"]), 8)
+                self.client.cookies["interface_language"] = language
+                response = self.client.get(reverse("studio:cherryx_pay"))
+                self.assertContains(response, labels[0])
+                self.assertContains(response, labels[1])
+
     def test_legal_pages_use_telegram_stars_without_old_requisites(self) -> None:
         forbidden = (
             "WayForPay",
@@ -117,6 +233,9 @@ class SiteSmokeTests(TransactionTestCase):
                     serialized = json.dumps(document, ensure_ascii=False)
                     self.assertTrue(document["sections"])
                     self.assertIn("Telegram Stars", serialized)
+                    self.assertIn("CherryX", serialized)
+                    if document_type == "refund" and language == "en":
+                        self.assertIn("Unused CherryX balance", serialized)
                     for marker in forbidden:
                         self.assertNotIn(marker, serialized)
 

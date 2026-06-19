@@ -100,10 +100,21 @@ def telegram_intent(request: HttpRequest) -> JsonResponse:
     kind = (request.POST.get("kind") or "").strip().lower()
     try:
         if kind == "plan":
+            plan = get_plan(request.POST.get("plan") or "pro")
+            due_text = request.POST.get("cherryx_amount")
+            cherryx_amount = None
+            if due_text not in (None, ""):
+                cherryx_amount = int(due_text)
+                expected_due = int(_checkout_price_context(request, plan).get("due_cents") or plan.price_cents)
+                if cherryx_amount != expected_due:
+                    return JsonResponse({"ok": False, "error": "invalid_due"}, status=400)
+                if cherryx_amount <= 0:
+                    return JsonResponse({"ok": False, "error": "zero_due_checkout_required"}, status=400)
             payload = create_telegram_payment_intent(
                 kind="plan",
                 user=request.user,
-                plan_code=request.POST.get("plan") or "pro",
+                plan_code=plan.code,
+                cherryx_amount=cherryx_amount,
             )
         elif kind == "topup":
             payload = create_telegram_payment_intent(

@@ -4,75 +4,98 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CherryX Pay - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-dock-active-scroll">
+    <title>{{ pay_text.page_title }}</title>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260619-pay-action-evenly">
   </head>
   <body class="theme-{{ theme_mode }} detail-page cherryx-pay-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar cherryx-pay-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
         <h1><span class="cherryx-brand-red">CherryX</span> Pay</h1>
-        <p class="topbar-note">Внутренний баланс для пакетов доступа, разовых функций и переводов между аккаунтами.</p>
+        <p class="topbar-note">{{ pay_text.topbar_note }}</p>
       </div>
       <div class="limits account-bar">
         {% include "studio/_language_switcher.html" %}
-        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">Студия</a>
-        <a class="topbar-link" href="{{ pricing_url }}">Тарифы</a>
+        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{{ pay_text.studio }}</a>
+        <a class="topbar-link" href="{{ pricing_url }}">{{ pay_text.pricing }}</a>
       </div>
     </header>
 
-    <main class="cherryx-pay-shell is-minimal" data-cherryx-pay data-rate="{{ usd_rate }}" data-balance="{{ balance }}" data-telegram-intent-url="{% url 'billing:telegram_intent' %}">
+    <main class="cherryx-pay-shell is-minimal" data-cherryx-pay data-rate="{{ usd_rate }}" data-stars-rate="{{ telegram_stars_rate }}" data-balance="{{ balance }}" data-withdraw-available="{{ withdrawal_available }}" data-telegram-intent-url="{% url 'billing:telegram_intent' %}" data-transfer-url="{% url 'studio:cherryx_transfer' %}" data-withdraw-url="{% url 'studio:cherryx_withdrawal_request' %}">
       <section class="cherryx-pay-summary" aria-label="CherryX wallet summary">
         <article class="cherryx-balance-tile" data-icon="wallet-cards">
-          <span>Баланс</span>
+          <span>{{ pay_text.balance }}</span>
           <strong><b data-pay-balance>{{ balance }}</b> <span class="cherryx-brand-red">CherryX</span></strong>
-          <small>Доступно для Studio</small>
+          <small>{{ pay_text.available_for_studio }}</small>
         </article>
         <article class="cherryx-mini-tile" data-icon="badge-dollar-sign">
-          <span>Курс</span>
+          <span>{{ pay_text.rate }}</span>
           <strong>1 USD = {{ usd_rate }} CherryX</strong>
           <small><i class="flag-us" aria-label="USA"></i> USA / CherryX</small>
         </article>
-        <article class="cherryx-mini-tile" data-icon="shield-check">
-          <span>Защита</span>
-          <strong>Confirm first</strong>
-          <small>Email confirmation</small>
-        </article>
         <article class="cherryx-mini-tile" data-icon="receipt-text">
-          <span>Оплата</span>
-          <strong>Пакеты и функции</strong>
-          <small>Pay as you go</small>
+          <span>{{ pay_text.payment }}</span>
+          <strong>{{ pay_text.packages_features }}</strong>
+          <small>{{ pay_text.pay_as_you_go }}</small>
         </article>
       </section>
 
       <section class="cherryx-pay-grid">
-        <section class="cherryx-pay-panel is-compact cherryx-telegram-panel" data-telegram-link-panel>
+        <section class="cherryx-pay-panel is-compact cherryx-telegram-panel {% if telegram_user_id %}is-linked{% endif %}" data-telegram-link-panel>
           <header>
             <span data-icon="send"></span>
             <div>
               <strong>Telegram Stars</strong>
-              <small>{% if telegram_user_id %}Telegram подключен: {{ telegram_user_id }}{% else %}Привяжи бот, чтобы Stars зачислялись на этот аккаунт.{% endif %}</small>
+              <small>{% if telegram_user_id %}{{ pay_text.telegram_linked }}: {{ telegram_user_id }}{% else %}{{ pay_text.telegram_bind_hint }}{% endif %}</small>
             </div>
           </header>
-          {% if request.user.is_authenticated %}
-            <div class="cherryx-telegram-link-code">
-              <span>Команда для бота</span>
-              <b>/link {{ telegram_link_token }}</b>
+          {% if request.user.is_authenticated and telegram_user_id %}
+            <div class="cherryx-telegram-account">
+              <span>Telegram ID</span>
+              <b>{{ telegram_user_id }}</b>
+              {% if telegram_username %}
+                <small>@{{ telegram_username }}</small>
+              {% elif telegram_first_name %}
+                <small>{{ telegram_first_name }}</small>
+              {% else %}
+                <small>{{ pay_text.telegram_account_linked }}</small>
+              {% endif %}
             </div>
-            <p>Отправь эту команду боту CherryX. После оплаты бот добавит CherryX на баланс и продлит доступ.</p>
-            <button type="button" data-refresh-telegram-link>Новый код</button>
+            <p class="cherryx-telegram-linked-note">{{ pay_text.telegram_linked_note }}</p>
+          {% endif %}
+          {% if request.user.is_authenticated %}
+            <div class="cherryx-telegram-command-row">
+              <div class="cherryx-telegram-link-code">
+                <span>{{ pay_text.bot_command }}</span>
+                <b>/link {{ telegram_link_token }}</b>
+              </div>
+              <button type="button" data-refresh-telegram-link>{{ pay_text.new_code }}</button>
+            </div>
+            <p class="cherryx-telegram-help">{{ pay_text.bot_command_help }}</p>
           {% else %}
-            <p>Войди в аккаунт, чтобы получить код привязки Telegram.</p>
-            <a class="primary-action" href="{% url 'studio:login' %}">Войти</a>
+            <p>{{ pay_text.login_for_code }}</p>
+            <a class="primary-action" href="{% url 'studio:login' %}">{{ pay_text.login }}</a>
           {% endif %}
         </section>
 
-        <form class="cherryx-pay-panel is-compact" data-topup-form>
+        <div class="cherryx-action-switcher" aria-label="CherryX wallet actions">
+          <button class="cherryx-action-button is-active" type="button" data-wallet-action="topup" data-icon="credit-card">
+            <span>{{ pay_text.topup }}</span>
+          </button>
+          <button class="cherryx-action-button" type="button" data-wallet-action="transfer" data-icon="send">
+            <span>{{ pay_text.transfer }}</span>
+          </button>
+          <button class="cherryx-action-button" type="button" data-wallet-action="withdraw" data-icon="landmark">
+            <span>{{ pay_text.withdraw }}</span>
+          </button>
+        </div>
+
+        <form class="cherryx-pay-panel is-compact is-active-panel" data-topup-form data-wallet-action-panel="topup">
           <header>
             <span data-icon="credit-card"></span>
             <div>
-              <strong>Пополнить</strong>
-              <small>Demo-flow перед подключением Stripe, WayForPay или LiqPay.</small>
+              <strong>{{ pay_text.topup }}</strong>
+              <small>{{ pay_text.topup_hint }}</small>
             </div>
           </header>
           <div class="cherryx-quick-amounts" aria-label="Quick top up amounts">
@@ -86,112 +109,132 @@
             <input type="number" min="1" step="1" value="10" name="usd" data-topup-usd>
           </label>
           <div class="cherryx-conversion">
-            <span>Получишь</span>
+            <span>{{ pay_text.receive }}</span>
             <b><em data-topup-credits>1000</em> CherryX</b>
           </div>
-          <button class="primary-action" type="submit" data-icon="circle-plus">Пополнить через Telegram Stars</button>
+          <button class="primary-action" type="submit" data-icon="circle-plus">{{ pay_text.topup_button }}</button>
           <p data-topup-status></p>
         </form>
 
-        <form class="cherryx-pay-panel is-compact" data-transfer-form>
+        <form class="cherryx-pay-panel is-compact" data-transfer-form data-wallet-action-panel="transfer">
           <header>
             <span data-icon="send"></span>
             <div>
-              <strong>Перевести</strong>
-              <small>На другой аккаунт CherryX по email.</small>
+              <strong>{{ pay_text.transfer }}</strong>
+              <small>{{ pay_text.transfer_hint }}</small>
             </div>
           </header>
           <label>
-            <span>Email</span>
+            <span>{{ pay_text.email }}</span>
             <input type="email" name="email" placeholder="client@example.com" required>
           </label>
           <label>
-            <span>CherryX</span>
+            <span>{{ pay_text.cherryx }}</span>
             <input type="number" min="1" step="1" value="250" name="credits" required>
           </label>
           <label class="cherryx-confirm">
             <input type="checkbox" required>
-            <span>Подтверждаю перевод</span>
+            <span>{{ pay_text.confirm_transfer }}</span>
           </label>
-          <button class="primary-action" type="submit" data-icon="send">Отправить</button>
+          <button class="primary-action" type="submit" data-icon="send">{{ pay_text.send }}</button>
           <p data-transfer-status></p>
+        </form>
+
+        <form class="cherryx-pay-panel is-compact" data-withdraw-form data-wallet-action-panel="withdraw">
+          <header>
+            <span data-icon="landmark"></span>
+            <div>
+              <strong>{{ pay_text.withdraw_title }}</strong>
+              <small>{{ pay_text.withdraw_hint }}</small>
+            </div>
+          </header>
+          <label>
+            <span>{{ pay_text.cherryx }}</span>
+            <input type="number" min="1" step="1" value="500" name="credits" required data-withdraw-credits>
+          </label>
+          <div class="cherryx-withdraw-balance">
+            <span>
+              <small>{{ pay_text.on_balance }}</small>
+              <b><em data-wallet-balance-copy>{{ balance }}</em> CherryX</b>
+            </span>
+            <span>
+              <small>{{ pay_text.withdraw_available }}</small>
+              <b><em data-withdraw-available-copy>{{ withdrawal_available }}</em> CherryX</b>
+            </span>
+          </div>
+          <div class="cherryx-conversion">
+            <span>{{ pay_text.approx_payout }}</span>
+            <b><em data-withdraw-stars>0</em> Stars</b>
+          </div>
+          <label class="cherryx-confirm">
+            <input type="checkbox" required>
+            <span>{{ pay_text.confirm_withdraw }}</span>
+          </label>
+          <button class="primary-action" type="submit" data-icon="landmark">{{ pay_text.withdraw_button }}</button>
+          <p data-withdraw-status></p>
         </form>
       </section>
 
-      <section class="cherryx-plan-grid" aria-label="CherryX access packages">
+      <section class="cherryx-plan-grid" aria-label="{{ pay_text.access_packages }}">
         {% for plan in plans %}
-        <article class="{% if plan.code == 'pro' %}is-featured{% endif %}">
+        <article class="{% if plan.code == 'pro' %}is-featured{% endif %}" data-plan-code="{{ plan.code }}">
+          <details class="cherryx-plan-info">
+            <summary aria-label="{{ plan.name }} details">i</summary>
+            <div>
+              <b>{{ plan.name }}</b>
+              <ul>
+                {% for feature in plan.features %}
+                  <li>{{ feature }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </details>
           <span>{{ plan.badge }}</span>
           <b>{{ plan.name }}</b>
           <strong>{{ plan.cherryx_display }}</strong>
           <small>{{ plan.telegram_usd_approx_display }} · {{ plan.period_days }} days · {{ plan.storage_text }}</small>
-          <button type="button" data-pay-action data-plan-code="{{ plan.code }}" data-title="Оплатить {{ plan.name }}" data-cost="{{ plan.telegram_stars_amount }}" data-kind="Пакет доступа">Оплатить Stars</button>
-          <a href="/billing/checkout/?plan={{ plan.code }}">Checkout {{ plan.telegram_usd_approx_display }}</a>
+          <button type="button" data-pay-action data-plan-code="{{ plan.code }}" data-title="{{ pay_text.pay }} {{ plan.name }}" data-cost="{{ plan.telegram_stars_amount }}" data-kind="{{ pay_text.access_packages }}">{{ pay_text.pay_stars }}</button>
+          <a href="/billing/checkout/?plan={{ plan.code }}">{{ pay_text.checkout }} {{ plan.telegram_usd_approx_display }}</a>
         </article>
         {% endfor %}
       </section>
 
-      <section class="cherryx-plan-grid" aria-label="Legacy CherryX access packages" hidden>
-        <article>
-          <span>Для теста</span>
-          <b>Старт</b>
-          <strong>100 CherryX</strong>
-          <small>3 дня · 512 MB · полный поток скачивания</small>
-          <button type="button" data-pay-action data-plan-code="free" data-title="Оплатить Старт" data-cost="100" data-kind="Пакет доступа">Оплатить Stars</button>
-          <a href="/billing/checkout/?plan=free">Checkout $1</a>
-        </article>
-        <article>
-          <span>Быстрый запуск</span>
-          <b>Starter</b>
-          <strong>900 CherryX</strong>
-          <small>7 дней · 2 GB · история задач и повтор запусков</small>
-          <button type="button" data-pay-action data-plan-code="starter" data-title="Оплатить Starter" data-cost="900" data-kind="Пакет доступа">Оплатить Stars</button>
-          <a href="/billing/checkout/?plan=starter">Checkout $9</a>
-        </article>
-        <article class="is-featured">
-          <span>Лучший выбор</span>
-          <b>Creator Pro</b>
-          <strong>1900 CherryX</strong>
-          <small>30 дней · 20 GB · Shorts, обложки, субтитры, ZIP, PDF</small>
-          <button type="button" data-pay-action data-plan-code="pro" data-title="Оплатить Creator Pro" data-cost="1900" data-kind="Пакет доступа">Оплатить Stars</button>
-          <a href="/billing/checkout/?plan=pro">Checkout $19</a>
-        </article>
-        <article>
-          <span>Для команды</span>
-          <b>Studio</b>
-          <strong>4900 CherryX</strong>
-          <small>90 дней · 100 GB · клиентские проекты и архив</small>
-          <button type="button" data-pay-action data-plan-code="studio" data-title="Оплатить Studio" data-cost="4900" data-kind="Пакет доступа">Оплатить Stars</button>
-          <a href="/billing/checkout/?plan=studio">Checkout $49</a>
-        </article>
-      </section>
-
-      <section class="cherryx-pay-rows" aria-label="CherryX spend options">
+      <section class="cherryx-pay-rows" aria-label="{{ pay_text.one_off_features }}">
         <header>
           <span data-icon="sparkles"></span>
           <div>
-            <strong>Разовые функции за CherryX</strong>
-            <small>Бюджетные списания, когда подписка не нужна или нужен один результат.</small>
+            <strong>{{ pay_text.one_off_features }}</strong>
+            <small>{{ pay_text.one_off_hint }}</small>
           </div>
         </header>
-        <article data-icon="refresh-cw"><b>Конвертация</b><span>Один файл, preview и готовое скачивание</span><strong>10</strong><button type="button" data-pay-action data-title="Оплатить конвертацию" data-cost="10" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="file-user"><b>PDF-резюме</b><span>Один экспорт PDF по шаблону</span><strong>30</strong><button type="button" data-pay-action data-title="Оплатить PDF-резюме" data-cost="30" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="image"><b>Обложка</b><span>PNG-обложка или AI-background</span><strong>35</strong><button type="button" data-pay-action data-title="Оплатить обложку" data-cost="35" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="captions"><b>Субтитры</b><span>SRT/VTT или MP4 с оформлением</span><strong>45</strong><button type="button" data-pay-action data-title="Оплатить субтитры" data-cost="45" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="youtube"><b>YouTube / Shorts</b><span>Один короткий клип или preview</span><strong>60</strong><button type="button" data-pay-action data-title="Оплатить YouTube / Shorts" data-cost="60" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="package"><b>Пакет публикации</b><span>ZIP, превью, тексты и ассеты</span><strong>75</strong><button type="button" data-pay-action data-title="Оплатить пакет публикации" data-cost="75" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="palette"><b>Дизайн экспорт</b><span>Макет, обложка или презентация</span><strong>20</strong><button type="button" data-pay-action data-title="Оплатить дизайн экспорт" data-cost="20" data-kind="Функция">Оплатить</button></article>
-        <article data-icon="zap"><b>Priority job</b><span>Быстрая очередь обработки</span><strong>25</strong><button type="button" data-pay-action data-title="Оплатить Priority job" data-cost="25" data-kind="Функция">Оплатить</button></article>
+        {% for option in pay_text.spend_options %}
+          <article data-icon="{{ option.icon }}">
+            <b>{{ option.title }}</b>
+            <span>{{ option.description }}</span>
+            <strong>{{ option.cost }}</strong>
+            <button type="button" data-pay-action data-title="{{ pay_text.pay }} {{ option.title }}" data-cost="{{ option.cost }}" data-kind="{{ pay_text.feature_kind }}">{{ pay_text.pay }}</button>
+          </article>
+        {% endfor %}
       </section>
 
       <section class="cherryx-pay-bottom">
         <article class="cherryx-pay-note" data-icon="lock-keyhole">
-          <strong>Как работает подтверждение</strong>
-          <span>Любое списание сначала открывает модалку. В реальной версии перевод подтвердится email-кодом или 2FA, а пополнение пройдет через платежного провайдера.</span>
+          <strong>{{ pay_text.how_confirmation_works }}</strong>
+          <span>{{ pay_text.confirmation_note }}</span>
         </article>
         <article class="cherryx-pay-note" data-icon="history">
-          <strong>Последние операции</strong>
-          <span>Top up +1000 CherryX · Transfer pending 250 CherryX · Creator Pro draft 1900 CherryX</span>
+          <strong>{{ pay_text.recent_operations }}</strong>
+          <div class="cherryx-operation-list" data-wallet-activity>
+            {% for entry in wallet_transactions %}
+              <span data-operation-row>
+                <b>{{ entry.get_type_display }}</b>
+                <em>{% if entry.amount > 0 %}+{% endif %}{{ entry.amount }} CherryX</em>
+                <small>{{ entry.status }} · balance {{ entry.balance_after }}{% if entry.related_user %} · {{ entry.related_user.email|default:entry.related_user.username }}{% endif %}</small>
+              </span>
+            {% empty %}
+              <span data-operation-empty>{{ pay_text.no_operations }}</span>
+            {% endfor %}
+          </div>
         </article>
       </section>
     </main>
@@ -202,18 +245,18 @@
         <header>
           <span data-icon="shield-check"></span>
           <div>
-            <strong id="cherryx-confirm-title" data-confirm-title>Подтверждение</strong>
+            <strong id="cherryx-confirm-title" data-confirm-title>{{ pay_text.confirmation }}</strong>
             <small data-confirm-kind>CherryX Pay</small>
           </div>
         </header>
         <p data-confirm-body></p>
         <div class="cherryx-confirm-total">
-          <span>Сумма</span>
+          <span>{{ pay_text.amount }}</span>
           <b data-confirm-amount>0 CherryX</b>
         </div>
         <footer>
-          <button type="button" data-confirm-close>Отмена</button>
-          <button class="primary-action" type="button" data-confirm-submit data-icon="check-check">Подтвердить</button>
+          <button type="button" data-confirm-close>{{ pay_text.cancel }}</button>
+          <button class="primary-action" type="button" data-confirm-submit data-icon="check-check">{{ pay_text.confirm }}</button>
         </footer>
       </section>
     </div>
@@ -229,13 +272,24 @@
           return match ? decodeURIComponent(match[1]) : "";
         };
         const rate = Number(root.dataset.rate || 100);
+        const starsRate = Math.max(1, Number(root.dataset.starsRate || 1));
         let balance = Number(root.dataset.balance || 0);
+        let withdrawAvailable = Number(root.dataset.withdrawAvailable || balance);
         let confirmCallback = null;
         const balanceNode = root.querySelector("[data-pay-balance]");
+        const withdrawAvailableNodes = root.querySelectorAll("[data-withdraw-available-display], [data-withdraw-available-copy]");
+        const walletBalanceCopyNodes = root.querySelectorAll("[data-wallet-balance-copy]");
+        const walletActionButtons = root.querySelectorAll("[data-wallet-action]");
+        const walletActionPanels = root.querySelectorAll("[data-wallet-action-panel]");
         const topupForm = root.querySelector("[data-topup-form]");
         const transferForm = root.querySelector("[data-transfer-form]");
+        const withdrawForm = root.querySelector("[data-withdraw-form]");
         const topupInput = root.querySelector("[data-topup-usd]");
         const creditsNode = root.querySelector("[data-topup-credits]");
+        const withdrawInput = root.querySelector("[data-withdraw-credits]");
+        const withdrawStarsNode = root.querySelector("[data-withdraw-stars]");
+        const activityList = root.querySelector("[data-wallet-activity]");
+        const planInfoNodes = root.querySelectorAll(".cherryx-plan-info");
         const confirmTitle = modal.querySelector("[data-confirm-title]");
         const confirmKind = modal.querySelector("[data-confirm-kind]");
         const confirmBody = modal.querySelector("[data-confirm-body]");
@@ -243,17 +297,55 @@
         const confirmSubmit = modal.querySelector("[data-confirm-submit]");
         const refreshTelegramLink = document.querySelector("[data-refresh-telegram-link]");
         const telegramLinkCode = document.querySelector(".cherryx-telegram-link-code b");
-        const format = (value) => Math.round(value).toLocaleString("ru-RU");
+        const msg = {
+          confirm: "{{ pay_text.confirm|escapejs }}",
+          noCharge: "{{ pay_text.no_charge|escapejs }}",
+          telegramUnavailable: "{{ pay_text.telegram_unavailable|escapejs }}",
+          insufficientTransfer: "{{ pay_text.insufficient_transfer|escapejs }}",
+          insufficientWithdraw: "{{ pay_text.insufficient_withdraw|escapejs }}",
+          transferConfirmTitle: "{{ pay_text.transfer_confirm_title|escapejs }}",
+          transfer: "{{ pay_text.transfer|escapejs }}",
+          send: "{{ pay_text.send|escapejs }}",
+          transferSending: "{{ pay_text.transfer_sending|escapejs }}",
+          sentTo: "{{ pay_text.sent_to|escapejs }}",
+          transferFailed: "{{ pay_text.transfer_failed|escapejs }}",
+          withdrawConfirmTitle: "{{ pay_text.withdraw_confirm_title|escapejs }}",
+          withdraw: "{{ pay_text.withdraw|escapejs }}",
+          withdrawButton: "{{ pay_text.withdraw_button|escapejs }}",
+          withdrawProcessing: "{{ pay_text.withdraw_processing|escapejs }}",
+          withdrawalAccepted: "{{ pay_text.withdraw_accepted|escapejs }}",
+          accepted: "{{ pay_text.accepted|escapejs }}",
+          estimate: "{{ pay_text.estimate|escapejs }}",
+          withdrawFailed: "{{ pay_text.withdraw_failed|escapejs }}",
+        };
+        const format = (value) => Math.round(value).toLocaleString("{{ interface_language|escapejs }}");
         const setBalance = (value) => {
           balance = Math.max(0, Math.round(value));
+          withdrawAvailable = balance;
           balanceNode.textContent = format(balance);
+          root.dataset.balance = String(balance);
+          root.dataset.withdrawAvailable = String(withdrawAvailable);
+          withdrawAvailableNodes.forEach((node) => { node.textContent = format(withdrawAvailable); });
+          walletBalanceCopyNodes.forEach((node) => { node.textContent = format(balance); });
+        };
+        const setWalletAction = (action) => {
+          walletActionButtons.forEach((button) => {
+            const isActive = button.dataset.walletAction === action;
+            button.classList.toggle("is-active", isActive);
+            button.setAttribute("aria-pressed", isActive ? "true" : "false");
+          });
+          walletActionPanels.forEach((panel) => {
+            const isActive = panel.dataset.walletActionPanel === action;
+            panel.classList.toggle("is-active-panel", isActive);
+            panel.hidden = !isActive;
+          });
         };
         const openConfirm = ({ title, kind, body, amount, action, onConfirm }) => {
           confirmTitle.textContent = title;
           confirmKind.textContent = kind || "CherryX Pay";
           confirmBody.textContent = body;
-          confirmAmount.textContent = amount ? `${format(amount)} CherryX` : "Без списания";
-          confirmSubmit.textContent = action || "Подтвердить";
+          confirmAmount.textContent = amount ? `${format(amount)} CherryX` : msg.noCharge;
+          confirmSubmit.textContent = action || msg.confirm;
           confirmCallback = onConfirm;
           modal.hidden = false;
           confirmSubmit.focus();
@@ -265,6 +357,40 @@
         const updateTopup = () => {
           const usd = Math.max(0, Number(topupInput.value || 0));
           creditsNode.textContent = format(usd * rate);
+        };
+        const updateWithdrawEstimate = () => {
+          const credits = Math.max(0, Number(withdrawInput?.value || 0));
+          if (withdrawStarsNode) withdrawStarsNode.textContent = format(Math.max(1, Math.ceil(credits / starsRate)));
+        };
+        const addActivity = (transaction) => {
+          if (!activityList || !transaction) return;
+          activityList.querySelector("[data-operation-empty]")?.remove();
+          const row = document.createElement("span");
+          row.dataset.operationRow = "";
+          const amount = Number(transaction.amount || 0);
+          const sign = amount > 0 ? "+" : "";
+          const label = document.createElement("b");
+          const value = document.createElement("em");
+          const details = document.createElement("small");
+          label.textContent = transaction.label || transaction.type || "CherryX";
+          value.textContent = `${sign}${format(amount)} CherryX`;
+          details.textContent = `${transaction.status || "completed"} · balance ${format(transaction.balance_after || 0)}${transaction.related ? ` · ${transaction.related}` : ""}`;
+          row.append(label, value, details);
+          activityList.prepend(row);
+          [...activityList.querySelectorAll("[data-operation-row]")].slice(8).forEach((item) => item.remove());
+        };
+        const postWalletForm = async (url, data) => {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "X-CSRFToken": csrfToken(),
+            },
+            body: new URLSearchParams(data),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.message || payload.error || "wallet_failed");
+          return payload;
         };
         const openTelegramIntent = async (params) => {
           const response = await fetch(root.dataset.telegramIntentUrl, {
@@ -314,6 +440,12 @@
         });
         topupInput.addEventListener("input", updateTopup);
         updateTopup();
+        withdrawInput?.addEventListener("input", updateWithdrawEstimate);
+        updateWithdrawEstimate();
+        walletActionButtons.forEach((button) => {
+          button.addEventListener("click", () => setWalletAction(button.dataset.walletAction || "topup"));
+        });
+        setWalletAction("topup");
 
         topupForm.addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -324,7 +456,7 @@
           try {
             await openTelegramIntent({ kind: "topup", cherryx_amount: String(credits) });
           } catch (error) {
-            root.querySelector("[data-topup-status]").textContent = "Telegram Stars payment is temporarily unavailable.";
+            root.querySelector("[data-topup-status]").textContent = msg.telegramUnavailable;
           }
         }, true);
 
@@ -335,50 +467,81 @@
             try {
               await openTelegramIntent({ kind: "plan", plan: button.dataset.planCode || "pro" });
             } catch (error) {
-              button.textContent = "Telegram unavailable";
+              button.textContent = msg.telegramUnavailable;
             }
           }, true);
         });
-
-        topupForm.addEventListener("submit", (event) => {
-          event.preventDefault();
-          if (!topupForm.reportValidity()) return;
-          const usd = Math.max(0, Number(topupInput.value || 0));
-          const credits = Math.round(usd * rate);
-          openConfirm({
-            title: "Подтвердить пополнение",
-            kind: "Top up",
-            body: `Пополнить баланс на $${usd} по курсу 1 USD = ${rate} CherryX.`,
-            amount: credits,
-            action: "Пополнить",
-            onConfirm: () => {
-              setBalance(balance + credits);
-              root.querySelector("[data-topup-status]").textContent = `+${format(credits)} CherryX добавлено к demo-балансу.`;
-            },
+        planInfoNodes.forEach((node) => {
+          node.addEventListener("toggle", () => {
+            if (!node.open) return;
+            planInfoNodes.forEach((other) => {
+              if (other !== node) other.open = false;
+            });
           });
         });
 
         transferForm.addEventListener("submit", (event) => {
           event.preventDefault();
+          event.stopImmediatePropagation();
           if (!transferForm.reportValidity()) return;
           const data = new FormData(transferForm);
           const email = String(data.get("email") || "").trim();
           const credits = Math.round(Number(data.get("credits") || 0));
           const status = root.querySelector("[data-transfer-status]");
           if (credits > balance) {
-            status.textContent = "Недостаточно CherryX для перевода.";
+            status.textContent = msg.insufficientTransfer;
             return;
           }
           openConfirm({
-            title: "Подтвердить перевод",
-            kind: "Transfer",
-            body: `Отправить ${format(credits)} CherryX на аккаунт ${email}. В реальной версии потребуется email-код.`,
+            title: msg.transferConfirmTitle,
+            kind: msg.transfer,
+            body: `${msg.send} ${format(credits)} CherryX: ${email}.`,
             amount: credits,
-            action: "Отправить",
-            onConfirm: () => {
-              setBalance(balance - credits);
-              status.textContent = `${format(credits)} CherryX для ${email} ожидает подтверждения.`;
-              transferForm.reset();
+            action: msg.send,
+            onConfirm: async () => {
+              status.textContent = msg.transferSending;
+              try {
+                const payload = await postWalletForm(root.dataset.transferUrl, { email, credits: String(credits) });
+                setBalance(payload.balance);
+                addActivity(payload.transaction);
+                status.textContent = `${format(payload.amount)} CherryX ${msg.sentTo} ${payload.recipient_email}.`;
+                transferForm.reset();
+              } catch (error) {
+                status.textContent = error.message || msg.transferFailed;
+              }
+            },
+          });
+        }, true);
+
+        withdrawForm?.addEventListener("submit", (event) => {
+          event.preventDefault();
+          if (!withdrawForm.reportValidity()) return;
+          const data = new FormData(withdrawForm);
+          const credits = Math.round(Number(data.get("credits") || 0));
+          const status = root.querySelector("[data-withdraw-status]");
+          const estimatedStars = Math.max(1, Math.ceil(credits / starsRate));
+          if (credits > balance) {
+            status.textContent = msg.insufficientWithdraw;
+            return;
+          }
+          openConfirm({
+            title: msg.withdrawConfirmTitle,
+            kind: msg.withdraw,
+            body: `${msg.withdrawButton}: ${format(credits)} CherryX. ${msg.estimate}: ${format(estimatedStars)} Telegram Stars.`,
+            amount: credits,
+            action: msg.withdrawButton,
+            onConfirm: async () => {
+              status.textContent = msg.withdrawProcessing;
+              try {
+                const payload = await postWalletForm(root.dataset.withdrawUrl, { credits: String(credits) });
+                setBalance(payload.balance);
+                addActivity(payload.transaction);
+                status.textContent = `${msg.withdrawalAccepted} #${payload.withdrawal_id} ${msg.accepted}. ${msg.estimate}: ${format(payload.estimated_stars)} Stars.`;
+                withdrawForm.reset();
+                updateWithdrawEstimate();
+              } catch (error) {
+                status.textContent = error.message || msg.withdrawFailed;
+              }
             },
           });
         });
@@ -386,15 +549,15 @@
         root.querySelectorAll("[data-pay-action]").forEach((button) => {
           button.addEventListener("click", () => {
             const cost = Math.round(Number(button.dataset.cost || 0));
-            const title = button.dataset.title || "Оплатить";
+            const title = button.dataset.title || "{{ pay_text.pay|escapejs }}";
             const kind = button.dataset.kind || "CherryX";
             if (cost > balance) {
               openConfirm({
-                title: "Недостаточно CherryX",
+                title: msg.insufficientWithdraw,
                 kind,
-                body: `Для операции нужно ${format(cost)} CherryX. Пополни баланс или выбери checkout в USD.`,
+                body: `${format(cost)} CherryX`,
                 amount: cost,
-                action: "Понятно",
+                action: msg.confirm,
                 onConfirm: () => {},
               });
               return;
@@ -402,12 +565,12 @@
             openConfirm({
               title,
               kind,
-              body: `Списать ${format(cost)} CherryX с внутреннего баланса. Это demo-списание для проверки потока.`,
+              body: `${msg.confirm}: ${format(cost)} CherryX.`,
               amount: cost,
-              action: "Оплатить",
+              action: "{{ pay_text.pay|escapejs }}",
               onConfirm: () => {
                 setBalance(balance - cost);
-                button.textContent = "Оплачено";
+                button.textContent = msg.confirm;
                 button.disabled = true;
               },
             });

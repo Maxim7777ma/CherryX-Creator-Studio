@@ -313,6 +313,110 @@ class AccountProfile(models.Model):
         return f"profile:{self.user_id}"
 
 
+class CherryXWalletTransaction(models.Model):
+    TYPE_TRANSFER_OUT = "transfer_out"
+    TYPE_TRANSFER_IN = "transfer_in"
+    TYPE_WITHDRAWAL_HOLD = "withdrawal_hold"
+    TYPE_WITHDRAWAL_REFUND = "withdrawal_refund"
+    TYPE_WITHDRAWAL_PAID = "withdrawal_paid"
+    TYPE_MARKET_PURCHASE = "market_purchase"
+    TYPE_MARKET_SALE = "market_sale"
+    TYPE_CHOICES = (
+        (TYPE_TRANSFER_OUT, "Transfer out"),
+        (TYPE_TRANSFER_IN, "Transfer in"),
+        (TYPE_WITHDRAWAL_HOLD, "Withdrawal hold"),
+        (TYPE_WITHDRAWAL_REFUND, "Withdrawal refund"),
+        (TYPE_WITHDRAWAL_PAID, "Withdrawal paid"),
+        (TYPE_MARKET_PURCHASE, "Market purchase"),
+        (TYPE_MARKET_SALE, "Market sale"),
+    )
+
+    STATUS_COMPLETED = "completed"
+    STATUS_PENDING = "pending"
+    STATUS_REVERSED = "reversed"
+    STATUS_CHOICES = (
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_PENDING, "Pending"),
+        (STATUS_REVERSED, "Reversed"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="cherryx_wallet_transactions", on_delete=models.CASCADE)
+    type = models.CharField(max_length=32, choices=TYPE_CHOICES, db_index=True)
+    amount = models.IntegerField()
+    balance_after = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_COMPLETED, db_index=True)
+    related_user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="related_cherryx_wallet_transactions", null=True, blank=True, on_delete=models.SET_NULL)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["type", "status", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.type}:{self.amount}"
+
+
+class CherryXTransfer(models.Model):
+    STATUS_COMPLETED = "completed"
+    STATUS_CHOICES = ((STATUS_COMPLETED, "Completed"),)
+
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="cherryx_transfers_sent", on_delete=models.CASCADE)
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="cherryx_transfers_received", on_delete=models.CASCADE)
+    recipient_email = models.EmailField(db_index=True)
+    amount = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_COMPLETED, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["sender", "-created_at"]),
+            models.Index(fields=["recipient", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sender_id}->{self.recipient_id}:{self.amount}"
+
+
+class CherryXWithdrawalRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PAID = "paid"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PAID, "Paid"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="cherryx_withdrawal_requests", on_delete=models.CASCADE)
+    telegram_user_id = models.BigIntegerField(db_index=True)
+    amount_cherryx = models.PositiveIntegerField()
+    estimated_stars = models.PositiveIntegerField()
+    actual_paid_stars = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    admin_notes = models.TextField(blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["status", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"withdrawal:{self.user_id}:{self.amount_cherryx}:{self.status}"
+
+
 class MagicLoginToken(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="magic_login_tokens", on_delete=models.CASCADE)
     token = models.CharField(max_length=80, unique=True, db_index=True)

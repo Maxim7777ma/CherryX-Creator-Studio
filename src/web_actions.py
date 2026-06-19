@@ -350,6 +350,16 @@ def start_youtube_job(
             f"{size_text}. {plan_text}. Загрузка: {estimate_download_time(metadata.estimated_size_bytes)}",
         )
         download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
+        actual_duration = float(download.duration_seconds or metadata.duration_seconds or 0)
+        if actual_duration <= 0:
+            actual_duration = float(inspect_video(download.path).duration_seconds or 0)
+        if actual_duration > max_duration:
+            raise ValueError(
+                f"Video is too long: {format_duration(actual_duration)}. "
+                f"Limit: {settings.youtube_max_duration_minutes} min."
+            )
+        if metadata.duration_seconds <= 0 < actual_duration:
+            _update_job(job, 24, f"Duration after download: {format_duration(actual_duration)}. {_youtube_plan_text(profile, actual_duration)}")
 
         if profile.is_backstage:
             if not settings.youtube_backstage_enabled:
@@ -359,7 +369,7 @@ def start_youtube_job(
                 download.path,
                 output_dir,
                 download.title,
-                download.duration_seconds,
+                actual_duration,
                 settings.video_timeout_seconds,
                 profile.backstage_output_seconds,
                 profile.backstage_segment_seconds,
@@ -385,7 +395,7 @@ def start_youtube_job(
         _update_job(job, 34, "Ищу сильные моменты для Shorts")
         clip_candidates = rank_smart_clip_candidates(
             download.path,
-            download.duration_seconds,
+            actual_duration,
             max(profile.max_shorts * 8, 24),
             profile.short_seconds,
             profile.sample_limit,
@@ -393,7 +403,7 @@ def start_youtube_job(
         )
         starts = calculate_smart_clip_starts(
             download.path,
-            download.duration_seconds,
+            actual_duration,
             profile.max_shorts,
             profile.short_seconds,
             profile.sample_limit,
@@ -403,7 +413,7 @@ def start_youtube_job(
             raise ValueError("Не получилось подобрать фрагменты для Shorts")
 
         if ai_improve:
-            starts = _ai_improve_clip_starts(job, download.title, download.duration_seconds, clip_candidates or starts, profile.max_shorts)
+            starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
 
         source_info = inspect_video(download.path)
         clips = []
@@ -415,7 +425,7 @@ def start_youtube_job(
                 download.path,
                 output_dir,
                 base_name,
-                download.duration_seconds,
+                actual_duration,
                 start_second,
                 index,
                 profile.short_seconds,
@@ -437,7 +447,7 @@ def start_youtube_job(
                 download.path,
                 output_dir / "cover",
                 download.title,
-                download.duration_seconds,
+                actual_duration,
                 settings.video_timeout_seconds,
                 settings.face_detection_enabled,
             )

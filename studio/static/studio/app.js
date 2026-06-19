@@ -148,6 +148,7 @@ function setupSubscriptionDrawer() {
   const openButton = document.querySelector("[data-subscription-open]");
   if (!drawer || !openButton) return;
   const closeButtons = drawer.querySelectorAll("[data-subscription-close]");
+  const telegramPlanButtons = drawer.querySelectorAll("[data-telegram-plan-action]");
   const setOpen = (open) => {
     drawer.hidden = !open;
     document.body.classList.toggle("subscription-drawer-open", open);
@@ -157,6 +158,41 @@ function setupSubscriptionDrawer() {
   closeButtons.forEach((button) => button.addEventListener("click", () => setOpen(false)));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !drawer.hidden) setOpen(false);
+  });
+  telegramPlanButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      const due = Math.max(0, Number(button.dataset.planDue || 0));
+      if (!due) {
+        window.location.href = button.dataset.checkoutUrl || "/billing/checkout/";
+        return;
+      }
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "Opening...";
+      try {
+        const response = await fetch(drawer.dataset.telegramIntentUrl || "/billing/telegram-intent/", {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "X-CSRFToken": csrfToken(),
+          },
+          body: new URLSearchParams({
+            kind: "plan",
+            plan: button.dataset.planCode || "pro",
+            cherryx_amount: String(due),
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok || !payload.link) throw new Error(payload.error || "telegram_intent_failed");
+        window.location.href = payload.link;
+      } catch (error) {
+        button.textContent = "Telegram unavailable";
+        setTimeout(() => {
+          button.disabled = false;
+          button.textContent = originalText;
+        }, 1800);
+      }
+    });
   });
 }
 

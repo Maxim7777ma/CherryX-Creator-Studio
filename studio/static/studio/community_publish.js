@@ -1,16 +1,13 @@
 (() => {
   const form = document.querySelector("[data-publish-form]");
-  if (!form) return;
-
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-  const usdRate = Number(form.dataset.usdRate || "0.01") || 0.01;
-  const starsRate = Math.max(1, Number(form.dataset.starsRate || "10") || 10);
 
   document.querySelectorAll("[data-custom-select]").forEach((select) => {
     const input = select.querySelector("[data-custom-select-input]");
     const button = select.querySelector("[data-custom-select-button]");
+    const buttonLabel = button?.querySelector("[data-custom-select-label]");
     const menu = select.querySelector(".custom-select-menu");
     const options = [...select.querySelectorAll("[data-value]")];
+    if (!input || !button || !menu || !options.length) return;
     const close = () => {
       select.classList.remove("is-open");
       button.setAttribute("aria-expanded", "false");
@@ -22,7 +19,17 @@
     const syncLabel = () => {
       const active = options.find((option) => option.dataset.value === input.value) || options[0];
       if (!active) return;
-      button.textContent = active.dataset.label || active.textContent.trim();
+      const label = active.dataset.label || active.textContent.trim();
+      if (buttonLabel) {
+        buttonLabel.textContent = label;
+      } else {
+        button.textContent = label;
+      }
+      if (active.dataset.icon) {
+        button.dataset.icon = active.dataset.icon;
+      } else {
+        delete button.dataset.icon;
+      }
       options.forEach((option) => {
         const selected = option === active;
         option.classList.toggle("is-selected", selected);
@@ -77,6 +84,12 @@
     });
     close();
   });
+
+  if (!form) return;
+
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const usdRate = Number(form.dataset.usdRate || "0.01") || 0.01;
+  const starsRate = Math.max(1, Number(form.dataset.starsRate || "10") || 10);
 
   document.querySelectorAll("[data-access-switch]").forEach((switcher) => {
     const input = switcher.querySelector("[data-access-input]");

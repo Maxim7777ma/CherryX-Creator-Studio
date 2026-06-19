@@ -602,19 +602,91 @@ for _language, _content in _GENERIC_TRANSLATIONS.items():
         }
 
 
+_BALANCE_POLICY_TEXT: dict[str, dict[str, dict[str, list[str] | str]]] = {
+    "en": {
+        "terms": {
+            "title": "CherryX balance, transfers and withdrawals",
+            "paragraphs": ["CherryX balance is internal account credit used for CherryX Creator Studio digital services, paid marketplace works, plans, processing, exports and other account features."],
+            "items": ["Paid and already provided digital services are not refundable.", "Unused available CherryX balance may be transferred to another CherryX account by email where the feature is available.", "Unused available CherryX balance may be submitted as a withdrawal request to Telegram where supported. The request is reviewed manually and the CherryX amount is reserved until it is paid or rejected.", "A withdrawal request is not a refund for already provided services and may require account, Telegram and payment verification."],
+        },
+        "refund": {
+            "title": "Unused CherryX balance",
+            "paragraphs": ["Refunds are not provided for activated or already provided digital services. This does not prevent the customer from using available account balance features."],
+            "items": ["Unused available CherryX balance can be transferred to another CherryX account.", "Unused available CherryX balance can be requested for withdrawal through the manual Telegram payout queue where supported.", "CherryX reserved for a pending withdrawal cannot be spent again until the request is paid or rejected.", "If a withdrawal request is rejected, the reserved CherryX is returned to the account balance."],
+        },
+        "contacts": {
+            "title": "Balance transfer and withdrawal support",
+            "paragraphs": ["For CherryX balance transfers or withdrawal requests, contact support and include your website email and Telegram ID or username if the account is linked."],
+            "items": ["Email: cherryxdigital@gmail.com.", "Phone: +380 (96) 363-59-05.", "Support can review available balance, transfer history and pending withdrawal requests."],
+        },
+    },
+    "ru": {
+        "terms": {
+            "title": "Баланс CherryX, переводы и вывод",
+            "paragraphs": ["Баланс CherryX является внутренним кредитом аккаунта для цифровых услуг CherryX Creator Studio, платных работ маркета, тарифов, обработки, экспорта и других функций аккаунта."],
+            "items": ["Средства за оплаченные и уже предоставленные цифровые услуги не возвращаются.", "Неиспользованный доступный баланс CherryX можно перевести на другой аккаунт CherryX по email, если функция доступна.", "Неиспользованный доступный баланс CherryX можно подать на вывод в Telegram через ручную очередь выплат, если такая возможность поддерживается. Сумма CherryX резервируется до выплаты или отказа.", "Заявка на вывод не является возвратом за уже предоставленные услуги и может требовать проверки аккаунта, Telegram и платежа."],
+        },
+        "refund": {
+            "title": "Неиспользованный баланс CherryX",
+            "paragraphs": ["Возврат за активированные или уже предоставленные цифровые услуги не выполняется. Это не ограничивает функции доступного баланса аккаунта."],
+            "items": ["Неиспользованный доступный баланс CherryX можно перевести на другой аккаунт CherryX.", "Неиспользованный доступный баланс CherryX можно подать на вывод через ручную очередь выплат в Telegram, если функция поддерживается.", "CherryX, зарезервированные в заявке на вывод, нельзя потратить повторно до выплаты или отказа.", "Если заявка на вывод отклонена, зарезервированные CherryX возвращаются на баланс аккаунта."],
+        },
+        "contacts": {
+            "title": "Поддержка переводов и вывода баланса",
+            "paragraphs": ["По вопросам перевода CherryX или заявки на вывод обращайтесь в поддержку и указывайте email аккаунта сайта, а также Telegram ID или username, если Telegram привязан."],
+            "items": ["Email: cherryxdigital@gmail.com.", "Телефон: +380 (96) 363-59-05.", "Поддержка может проверить доступный баланс, историю переводов и заявки на вывод."],
+        },
+    },
+    "uk": {
+        "terms": {
+            "title": "Баланс CherryX, перекази та виведення",
+            "paragraphs": ["Баланс CherryX є внутрішнім кредитом акаунта для цифрових послуг CherryX Creator Studio, платних робіт маркету, тарифів, обробки, експорту та інших функцій акаунта."],
+            "items": ["Кошти за оплачені та вже надані цифрові послуги не повертаються.", "Невикористаний доступний баланс CherryX можна переказати на інший акаунт CherryX за email, якщо функція доступна.", "Невикористаний доступний баланс CherryX можна подати на виведення в Telegram через ручну чергу виплат, якщо така можливість підтримується. Сума CherryX резервується до виплати або відхилення.", "Заявка на виведення не є поверненням за вже надані послуги та може вимагати перевірки акаунта, Telegram і платежу."],
+        },
+        "refund": {
+            "title": "Невикористаний баланс CherryX",
+            "paragraphs": ["Повернення за активовані або вже надані цифрові послуги не виконується. Це не обмежує функції доступного балансу акаунта."],
+            "items": ["Невикористаний доступний баланс CherryX можна переказати на інший акаунт CherryX.", "Невикористаний доступний баланс CherryX можна подати на виведення через ручну чергу виплат у Telegram, якщо функція підтримується.", "CherryX, зарезервовані в заявці на виведення, не можна витратити повторно до виплати або відхилення.", "Якщо заявку на виведення відхилено, зарезервовані CherryX повертаються на баланс акаунта."],
+        },
+        "contacts": {
+            "title": "Підтримка переказів і виведення балансу",
+            "paragraphs": ["З питань переказу CherryX або заявки на виведення звертайтеся до підтримки та вказуйте email акаунта сайту, а також Telegram ID або username, якщо Telegram прив'язаний."],
+            "items": ["Email: cherryxdigital@gmail.com.", "Телефон: +380 (96) 363-59-05.", "Підтримка може перевірити доступний баланс, історію переказів і заявки на виведення."],
+        },
+    },
+}
+
+
+def _balance_policy_section(document_type: str, language: str) -> dict[str, object] | None:
+    localized = _BALANCE_POLICY_TEXT.get(language) or _BALANCE_POLICY_TEXT["en"]
+    section = localized.get(document_type) or _BALANCE_POLICY_TEXT["en"].get(document_type)
+    if not section:
+        return None
+    return {
+        "title": section["title"],
+        "paragraphs": section.get("paragraphs", []),
+        "items": section.get("items", []),
+        "after": [],
+    }
+
+
 def legal_document_content(document_type: str, language: str | None) -> dict[str, object]:
     language = clean_language(language)
     documents = ACTIVE_LEGAL_DOCUMENTS.get(document_type) or ACTIVE_LEGAL_DOCUMENTS["terms"]
     document = documents.get(language) or documents.get("en") or {"sections": [], "meta_service_type": "Digital services"}
+    sections = [
+        {
+            "title": section.get("title", ""),
+            "paragraphs": section.get("paragraphs", []),
+            "items": section.get("items", []),
+            "after": section.get("after", []),
+        }
+        for section in document.get("sections", [])
+    ]
+    balance_policy = _balance_policy_section(document_type, language)
+    if balance_policy:
+        sections.append(balance_policy)
     return {
         "meta_service_type": document.get("meta_service_type", "Digital services"),
-        "sections": [
-            {
-                "title": section.get("title", ""),
-                "paragraphs": section.get("paragraphs", []),
-                "items": section.get("items", []),
-                "after": section.get("after", []),
-            }
-            for section in document.get("sections", [])
-        ],
+        "sections": sections,
     }
