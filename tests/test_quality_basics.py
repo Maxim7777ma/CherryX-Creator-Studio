@@ -34,7 +34,9 @@ class TranslationQualityTests(unittest.TestCase):
     def test_language_detection_defaults_to_english(self) -> None:
         self.assertEqual(lang_from_code("ru-RU"), "ru")
         self.assertEqual(lang_from_code("uk"), "uk")
-        self.assertEqual(lang_from_code("de"), "en")
+        self.assertEqual(lang_from_code("de"), "de")
+        self.assertEqual(lang_from_code("fr-FR"), "fr")
+        self.assertEqual(lang_from_code("es"), "es")
         self.assertEqual(lang_from_code(None), "en")
 
 

@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.utils import timezone
 
+from billing.services import sync_telegram_star_rate
 from src import web_actions
 from studio.models import JobRecord
 from studio import views
@@ -29,6 +30,7 @@ SUPPORTED_JOB_KINDS = GENERIC_JOB_KINDS | VIDEO_JOB_KINDS
 
 class Command(BaseCommand):
     help = "Run persistent CherryX background jobs from the Django database queue."
+    _last_rate_sync_check = 0.0
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--once", action="store_true", help="Process available jobs and exit.")
@@ -49,6 +51,8 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("CherryX worker started."))
         while True:
+            self._write_heartbeat()
+            self._sync_daily_rates()
             record = self._claim_next_job()
             if not record:
                 if options["once"]:
@@ -95,6 +99,34 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Failed {record.job_id}: {exc}"))
         finally:
             close_old_connections()
+
+    def _sync_daily_rates(self) -> None:
+        now = time.time()
+        if now - self._last_rate_sync_check < 300:
+            return
+        self._last_rate_sync_check = now
+        try:
+            sync_telegram_star_rate()
+        except Exception:
+            self.stderr.write(self.style.WARNING("Telegram Star rate sync failed."))
+
+    def _write_heartbeat(self) -> None:
+        try:
+            path = Path("data") / "worker_heartbeat.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "service": "worker",
+                        "status": "ok",
+                        "time": time.time(),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            self.stderr.write(self.style.WARNING("Worker heartbeat write failed."))
 
     def _run_video_record(self, record: JobRecord) -> None:
         params = _loads_params(record.params_json)

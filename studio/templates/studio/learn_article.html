@@ -1,0 +1,36 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:learn_article' article.slug %}">
+    {% if article.cover_image %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ article.cover_image.url }}">{% endif %}
+    <link rel="stylesheet" href="{% static 'studio/learn.css' %}?v=20260619-community-foundation">
+  </head>
+  <body class="learn-page">
+    <header class="learn-nav">
+      <a href="{% url 'studio:learn_index' %}">Learning</a>
+      <nav>
+        <a href="{% url 'studio:index' %}">Live workspace</a>
+        <a href="{% url 'studio:community_videos' %}">Videos</a>
+        <a href="{% url 'studio:community_images' %}">Images</a>
+        <a href="{% url 'studio:community_texts' %}">Texts</a>
+        <a href="{% url 'studio:community_publish' %}">Publish</a>
+      </nav>
+    </header>
+    <main class="article-shell">
+      <article class="article-document">
+        <header>
+          <p>CherryX guide</p>
+          <h1>{{ article.title }}</h1>
+          {% if article.excerpt %}<span>{{ article.excerpt }}</span>{% endif %}
+          {% if article.cover_image %}<img src="{{ article.cover_image.url }}" alt="">{% endif %}
+        </header>
+        <div class="article-body">{{ article.body|linebreaks }}</div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "music_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-mobile-filters-v2">
-    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260617-music-library-empty-v4">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-create-icon">
+    <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260618-mobile-create-icon">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page music-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -107,7 +107,10 @@
             </div>
             <div class="video-project-actions">
               <a href="{{ music_editor_url }}?project={{ project.id }}"><img alt="" src="https://api.iconify.design/lucide/folder-open.svg?color=white">{% ui "open" %}</a>
-              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}"><img alt="" src="https://api.iconify.design/lucide/trash-2.svg?color=%23d71920">{% ui "delete" %}</button>{% endif %}
+              {% if project.is_owner %}
+                <a href="{{ project.publish_url }}"><img alt="" src="https://api.iconify.design/lucide/send.svg?color=white">Publish</a>
+                <button type="button" data-delete-project="{{ project.id }}"><img alt="" src="https://api.iconify.design/lucide/trash-2.svg?color=%23d71920">{% ui "delete" %}</button>
+              {% endif %}
             </div>
           </article>
         {% endfor %}
@@ -201,6 +204,7 @@
     <script>
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
     </script>
-    <script defer src="{% static 'studio/music_projects.js' %}?v=20260617-project-mobile-filters-v2"></script>
+    {% include "studio/_mobile_workspace_dock.html" with active_mobile_nav="music" %}
+    <script defer src="{% static 'studio/music_projects.js' %}?v=20260618-mobile-create-icon"></script>
   </body>
 </html>

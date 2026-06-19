@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
 from html import escape
+import json
 import logging
 from pathlib import Path
 import re
@@ -39,6 +40,7 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     LabeledPrice,
     MenuButtonWebApp,
     Message,
@@ -48,6 +50,18 @@ from aiogram.types import (
 
 from .config import Settings, get_settings
 from .db import Database
+from .django_bridge import (
+    claim_payment_intent,
+    create_account_for_paid_intent,
+    create_direct_payment_intent,
+    create_direct_topup_by_stars,
+    get_payment_intent_by_payload,
+    link_telegram_account,
+    record_intent_payment,
+    record_stars_payment,
+    telegram_wallet,
+    upsert_bot_user,
+)
 from .i18n import lang_from_code, tr
 from . import bot_keyboards
 from .bot_utils import (
@@ -101,23 +115,23 @@ TELEGRAM_SAFE_UPLOAD_BYTES = 48 * 1024 * 1024
 JOB_TTL_SECONDS = 86_400
 
 NEXT_STEP_HINT = (
-    "\n\nЧто дальше:\n"
-    "- выбери формат кнопкой ниже;\n"
-    "- если нужно другое имя файла, нажми «Переименовать»;\n"
-    "- для видео можно сразу сделать PNG-обложку;\n"
-    "- для монтажа отправь YouTube-ссылку;\n"
-    "- если передумал при переименовании, напиши /cancel."
+    "\n\nР§С‚Рѕ РґР°Р»СЊС€Рµ:\n"
+    "- РІС‹Р±РµСЂРё С„РѕСЂРјР°С‚ РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ;\n"
+    "- РµСЃР»Рё РЅСѓР¶РЅРѕ РґСЂСѓРіРѕРµ РёРјСЏ С„Р°Р№Р»Р°, РЅР°Р¶РјРё В«РџРµСЂРµРёРјРµРЅРѕРІР°С‚СЊВ»;\n"
+    "- РґР»СЏ РІРёРґРµРѕ РјРѕР¶РЅРѕ СЃСЂР°Р·Сѓ СЃРґРµР»Р°С‚СЊ PNG-РѕР±Р»РѕР¶РєСѓ;\n"
+    "- РґР»СЏ РјРѕРЅС‚Р°Р¶Р° РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ;\n"
+    "- РµСЃР»Рё РїРµСЂРµРґСѓРјР°Р» РїСЂРё РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРё, РЅР°РїРёС€Рё /cancel."
 )
 AFTER_RESULT_HINT = (
-    "\n\nЧто дальше:\n"
-    "- отправь следующий файл или YouTube-ссылку;\n"
-    "- для видео можно нажать кнопку субтитров или обложки PNG;\n"
-    "- статус доступа: /status, история: /history."
+    "\n\nР§С‚Рѕ РґР°Р»СЊС€Рµ:\n"
+    "- РѕС‚РїСЂР°РІСЊ СЃР»РµРґСѓСЋС‰РёР№ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ;\n"
+    "- РґР»СЏ РІРёРґРµРѕ РјРѕР¶РЅРѕ РЅР°Р¶Р°С‚СЊ РєРЅРѕРїРєСѓ СЃСѓР±С‚РёС‚СЂРѕРІ РёР»Рё РѕР±Р»РѕР¶РєРё PNG;\n"
+    "- СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°: /status, РёСЃС‚РѕСЂРёСЏ: /history."
 )
-FILE_PREP_STEPS = ["получаю файл", "проверяю размер и тип", "читаю параметры", "показываю варианты"]
-IMAGE_CONVERT_STEPS = ["проверяю исходник", "конвертирую формат", "сохраняю результат", "отправляю файл"]
-VIDEO_CONVERT_STEPS = ["проверяю видео", "запускаю кодирование", "сохраняю MP4/WEBM/GIF", "отправляю файл"]
-SUBTITLE_STEPS = ["готовлю звук", "распознаю речь", "верстаю субтитры", "вшиваю в видео", "отправляю файл"]
+FILE_PREP_STEPS = ["РїРѕР»СѓС‡Р°СЋ С„Р°Р№Р»", "РїСЂРѕРІРµСЂСЏСЋ СЂР°Р·РјРµСЂ Рё С‚РёРї", "С‡РёС‚Р°СЋ РїР°СЂР°РјРµС‚СЂС‹", "РїРѕРєР°Р·С‹РІР°СЋ РІР°СЂРёР°РЅС‚С‹"]
+IMAGE_CONVERT_STEPS = ["РїСЂРѕРІРµСЂСЏСЋ РёСЃС…РѕРґРЅРёРє", "РєРѕРЅРІРµСЂС‚РёСЂСѓСЋ С„РѕСЂРјР°С‚", "СЃРѕС…СЂР°РЅСЏСЋ СЂРµР·СѓР»СЊС‚Р°С‚", "РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»"]
+VIDEO_CONVERT_STEPS = ["РїСЂРѕРІРµСЂСЏСЋ РІРёРґРµРѕ", "Р·Р°РїСѓСЃРєР°СЋ РєРѕРґРёСЂРѕРІР°РЅРёРµ", "СЃРѕС…СЂР°РЅСЏСЋ MP4/WEBM/GIF", "РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»"]
+SUBTITLE_STEPS = ["РіРѕС‚РѕРІР»СЋ Р·РІСѓРє", "СЂР°СЃРїРѕР·РЅР°СЋ СЂРµС‡СЊ", "РІРµСЂСЃС‚Р°СЋ СЃСѓР±С‚РёС‚СЂС‹", "РІС€РёРІР°СЋ РІ РІРёРґРµРѕ", "РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»"]
 SUBTITLE_STYLE_LABELS = {
     "pop": "Pop",
     "neon": "Neon",
@@ -136,17 +150,17 @@ SUBTITLE_STYLE_LABELS = {
 }
 SUBTITLE_LANGUAGE_LABELS = {
     "auto": "Auto",
-    "ru": "Русский",
-    "uk": "Українська",
+    "ru": "Р СѓСЃСЃРєРёР№",
+    "uk": "РЈРєСЂР°С—РЅСЃСЊРєР°",
     "en": "English",
 }
-COVER_STEPS = ["читаю параметры", "выбираю сильный кадр", "ищу тематические картинки", "собираю PNG-обложку", "отправляю файл"]
+COVER_STEPS = ["С‡РёС‚Р°СЋ РїР°СЂР°РјРµС‚СЂС‹", "РІС‹Р±РёСЂР°СЋ СЃРёР»СЊРЅС‹Р№ РєР°РґСЂ", "РёС‰Сѓ С‚РµРјР°С‚РёС‡РµСЃРєРёРµ РєР°СЂС‚РёРЅРєРё", "СЃРѕР±РёСЂР°СЋ PNG-РѕР±Р»РѕР¶РєСѓ", "РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»"]
 IMAGE_MODE_LABELS = {
-    "light": "максимально легко",
-    "balanced": "баланс",
-    "quality": "качество",
+    "light": "РјР°РєСЃРёРјР°Р»СЊРЅРѕ Р»РµРіРєРѕ",
+    "balanced": "Р±Р°Р»Р°РЅСЃ",
+    "quality": "РєР°С‡РµСЃС‚РІРѕ",
 }
-PUBLICATION_STEPS = ["готовлю видео", "делаю обложку", "добавляю субтитры", "пишу описание", "собираю ZIP", "отправляю пакет"]
+PUBLICATION_STEPS = ["РіРѕС‚РѕРІР»СЋ РІРёРґРµРѕ", "РґРµР»Р°СЋ РѕР±Р»РѕР¶РєСѓ", "РґРѕР±Р°РІР»СЏСЋ СЃСѓР±С‚РёС‚СЂС‹", "РїРёС€Сѓ РѕРїРёСЃР°РЅРёРµ", "СЃРѕР±РёСЂР°СЋ ZIP", "РѕС‚РїСЂР°РІР»СЏСЋ РїР°РєРµС‚"]
 
 
 class RenameState(StatesGroup):
@@ -155,6 +169,11 @@ class RenameState(StatesGroup):
 
 class CoverTextState(StatesGroup):
     waiting_text = State()
+
+
+class BillingAccountState(StatesGroup):
+    waiting_email = State()
+    waiting_topup_stars = State()
 
 
 class ResumeState(StatesGroup):
@@ -227,6 +246,7 @@ class CoverJob:
 settings: Settings = get_settings()
 db = Database(settings.database_path)
 router = Router()
+BOT_LANGUAGE_CODES = {"ru", "uk", "en", "fr", "de", "es", "ka", "hy", "it"}
 sessions: dict[str, FileSession] = {}
 user_latest_session: dict[int, str] = {}
 pending_youtube_jobs: dict[str, tuple[int, str, str, int]] = {}
@@ -242,46 +262,46 @@ cover_semaphore = asyncio.Semaphore(max(1, settings.cover_workers))
 
 NEXT_STEP_ITEM_TRANSLATIONS = {
     "en": {
-        "отправь картинку или видео для конвертации": "send an image or video for conversion",
-        "отправь YouTube-ссылку для Shorts или Preview": "send a YouTube link for Shorts or Preview",
-        "после результата нажимай Subtitles или Redo, если нужно продолжить обработку": "after the result, use Subtitles or Redo if you want to continue",
-        "отправь файл для конвертации": "send a file for conversion",
-        "отправь YouTube-ссылку для монтажа": "send a YouTube link for editing",
-        "после готового MP4 можно добавить субтитры": "after an MP4 is ready, you can add subtitles",
-        "используй этот ID для списка бесплатного доступа": "use this ID for the free access list",
-        "или отправь файл/ссылку для обработки": "or send a file/link to process",
-        "отправь новый файл": "send a new file",
-        "или YouTube-ссылку для монтажа": "or a YouTube link for editing",
-        "нажми оплату ниже": "tap the payment button below",
-        "или используй доступные Free-действия": "or use the available Free actions",
-        "отправь файл": "send a file",
-        "или YouTube-ссылку": "or a YouTube link",
-        "активируй доступ кнопкой ниже": "activate access with the button below",
-        "или используй доступный Free-лимит": "or use the available Free limit",
-        "или напиши /id и добавь ID в FREE_USER_IDS": "or send /id and add the ID to FREE_USER_IDS",
-        "отправь файл или YouTube-ссылку": "send a file or YouTube link",
-        "после обработки результат появится здесь": "after processing, the result will appear here",
+        "РѕС‚РїСЂР°РІСЊ РєР°СЂС‚РёРЅРєСѓ РёР»Рё РІРёРґРµРѕ РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё": "send an image or video for conversion",
+        "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ Shorts РёР»Рё Preview": "send a YouTube link for Shorts or Preview",
+        "РїРѕСЃР»Рµ СЂРµР·СѓР»СЊС‚Р°С‚Р° РЅР°Р¶РёРјР°Р№ Subtitles РёР»Рё Redo, РµСЃР»Рё РЅСѓР¶РЅРѕ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РѕР±СЂР°Р±РѕС‚РєСѓ": "after the result, use Subtitles or Redo if you want to continue",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё": "send a file for conversion",
+        "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°": "send a YouTube link for editing",
+        "РїРѕСЃР»Рµ РіРѕС‚РѕРІРѕРіРѕ MP4 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹": "after an MP4 is ready, you can add subtitles",
+        "РёСЃРїРѕР»СЊР·СѓР№ СЌС‚РѕС‚ ID РґР»СЏ СЃРїРёСЃРєР° Р±РµСЃРїР»Р°С‚РЅРѕРіРѕ РґРѕСЃС‚СѓРїР°": "use this ID for the free access list",
+        "РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»/СЃСЃС‹Р»РєСѓ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё": "or send a file/link to process",
+        "РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»": "send a new file",
+        "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°": "or a YouTube link for editing",
+        "РЅР°Р¶РјРё РѕРїР»Р°С‚Сѓ РЅРёР¶Рµ": "tap the payment button below",
+        "РёР»Рё РёСЃРїРѕР»СЊР·СѓР№ РґРѕСЃС‚СѓРїРЅС‹Рµ Free-РґРµР№СЃС‚РІРёСЏ": "or use the available Free actions",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»": "send a file",
+        "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ": "or a YouTube link",
+        "Р°РєС‚РёРІРёСЂСѓР№ РґРѕСЃС‚СѓРї РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ": "activate access with the button below",
+        "РёР»Рё РёСЃРїРѕР»СЊР·СѓР№ РґРѕСЃС‚СѓРїРЅС‹Р№ Free-Р»РёРјРёС‚": "or use the available Free limit",
+        "РёР»Рё РЅР°РїРёС€Рё /id Рё РґРѕР±Р°РІСЊ ID РІ FREE_USER_IDS": "or send /id and add the ID to FREE_USER_IDS",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ": "send a file or YouTube link",
+        "РїРѕСЃР»Рµ РѕР±СЂР°Р±РѕС‚РєРё СЂРµР·СѓР»СЊС‚Р°С‚ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ": "after processing, the result will appear here",
     },
     "uk": {
-        "отправь картинку или видео для конвертации": "надішліть зображення або відео для конвертації",
-        "отправь YouTube-ссылку для Shorts или Preview": "надішліть YouTube-посилання для Shorts або Preview",
-        "после результата нажимай Subtitles или Redo, если нужно продолжить обработку": "після результату натискайте Subtitles або Redo, якщо потрібно продовжити",
-        "отправь файл для конвертации": "надішліть файл для конвертації",
-        "отправь YouTube-ссылку для монтажа": "надішліть YouTube-посилання для монтажу",
-        "после готового MP4 можно добавить субтитры": "після готового MP4 можна додати субтитри",
-        "используй этот ID для списка бесплатного доступа": "використовуйте цей ID для списку безкоштовного доступу",
-        "или отправь файл/ссылку для обработки": "або надішліть файл/посилання для обробки",
-        "отправь новый файл": "надішліть новий файл",
-        "или YouTube-ссылку для монтажа": "або YouTube-посилання для монтажу",
-        "нажми оплату ниже": "натисніть оплату нижче",
-        "или используй доступные Free-действия": "або використовуйте доступні Free-дії",
-        "отправь файл": "надішліть файл",
-        "или YouTube-ссылку": "або YouTube-посилання",
-        "активируй доступ кнопкой ниже": "активуйте доступ кнопкою нижче",
-        "или используй доступный Free-лимит": "або використовуйте доступний Free-ліміт",
-        "или напиши /id и добавь ID в FREE_USER_IDS": "або надішліть /id і додайте ID у FREE_USER_IDS",
-        "отправь файл или YouTube-ссылку": "надішліть файл або YouTube-посилання",
-        "после обработки результат появится здесь": "після обробки результат з'явиться тут",
+        "РѕС‚РїСЂР°РІСЊ РєР°СЂС‚РёРЅРєСѓ РёР»Рё РІРёРґРµРѕ РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё": "РЅР°РґС–С€Р»С–С‚СЊ Р·РѕР±СЂР°Р¶РµРЅРЅСЏ Р°Р±Рѕ РІС–РґРµРѕ РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†С–С—",
+        "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ Shorts РёР»Рё Preview": "РЅР°РґС–С€Р»С–С‚СЊ YouTube-РїРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ Shorts Р°Р±Рѕ Preview",
+        "РїРѕСЃР»Рµ СЂРµР·СѓР»СЊС‚Р°С‚Р° РЅР°Р¶РёРјР°Р№ Subtitles РёР»Рё Redo, РµСЃР»Рё РЅСѓР¶РЅРѕ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РѕР±СЂР°Р±РѕС‚РєСѓ": "РїС–СЃР»СЏ СЂРµР·СѓР»СЊС‚Р°С‚Сѓ РЅР°С‚РёСЃРєР°Р№С‚Рµ Subtitles Р°Р±Рѕ Redo, СЏРєС‰Рѕ РїРѕС‚СЂС–Р±РЅРѕ РїСЂРѕРґРѕРІР¶РёС‚Рё",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё": "РЅР°РґС–С€Р»С–С‚СЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†С–С—",
+        "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°": "РЅР°РґС–С€Р»С–С‚СЊ YouTube-РїРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ РјРѕРЅС‚Р°Р¶Сѓ",
+        "РїРѕСЃР»Рµ РіРѕС‚РѕРІРѕРіРѕ MP4 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹": "РїС–СЃР»СЏ РіРѕС‚РѕРІРѕРіРѕ MP4 РјРѕР¶РЅР° РґРѕРґР°С‚Рё СЃСѓР±С‚РёС‚СЂРё",
+        "РёСЃРїРѕР»СЊР·СѓР№ СЌС‚РѕС‚ ID РґР»СЏ СЃРїРёСЃРєР° Р±РµСЃРїР»Р°С‚РЅРѕРіРѕ РґРѕСЃС‚СѓРїР°": "РІРёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ С†РµР№ ID РґР»СЏ СЃРїРёСЃРєСѓ Р±РµР·РєРѕС€С‚РѕРІРЅРѕРіРѕ РґРѕСЃС‚СѓРїСѓ",
+        "РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»/СЃСЃС‹Р»РєСѓ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё": "Р°Р±Рѕ РЅР°РґС–С€Р»С–С‚СЊ С„Р°Р№Р»/РїРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ РѕР±СЂРѕР±РєРё",
+        "РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»": "РЅР°РґС–С€Р»С–С‚СЊ РЅРѕРІРёР№ С„Р°Р№Р»",
+        "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°": "Р°Р±Рѕ YouTube-РїРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ РјРѕРЅС‚Р°Р¶Сѓ",
+        "РЅР°Р¶РјРё РѕРїР»Р°С‚Сѓ РЅРёР¶Рµ": "РЅР°С‚РёСЃРЅС–С‚СЊ РѕРїР»Р°С‚Сѓ РЅРёР¶С‡Рµ",
+        "РёР»Рё РёСЃРїРѕР»СЊР·СѓР№ РґРѕСЃС‚СѓРїРЅС‹Рµ Free-РґРµР№СЃС‚РІРёСЏ": "Р°Р±Рѕ РІРёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ РґРѕСЃС‚СѓРїРЅС– Free-РґС–С—",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»": "РЅР°РґС–С€Р»С–С‚СЊ С„Р°Р№Р»",
+        "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ": "Р°Р±Рѕ YouTube-РїРѕСЃРёР»Р°РЅРЅСЏ",
+        "Р°РєС‚РёРІРёСЂСѓР№ РґРѕСЃС‚СѓРї РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ": "Р°РєС‚РёРІСѓР№С‚Рµ РґРѕСЃС‚СѓРї РєРЅРѕРїРєРѕСЋ РЅРёР¶С‡Рµ",
+        "РёР»Рё РёСЃРїРѕР»СЊР·СѓР№ РґРѕСЃС‚СѓРїРЅС‹Р№ Free-Р»РёРјРёС‚": "Р°Р±Рѕ РІРёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ РґРѕСЃС‚СѓРїРЅРёР№ Free-Р»С–РјС–С‚",
+        "РёР»Рё РЅР°РїРёС€Рё /id Рё РґРѕР±Р°РІСЊ ID РІ FREE_USER_IDS": "Р°Р±Рѕ РЅР°РґС–С€Р»С–С‚СЊ /id С– РґРѕРґР°Р№С‚Рµ ID Сѓ FREE_USER_IDS",
+        "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ": "РЅР°РґС–С€Р»С–С‚СЊ С„Р°Р№Р» Р°Р±Рѕ YouTube-РїРѕСЃРёР»Р°РЅРЅСЏ",
+        "РїРѕСЃР»Рµ РѕР±СЂР°Р±РѕС‚РєРё СЂРµР·СѓР»СЊС‚Р°С‚ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ": "РїС–СЃР»СЏ РѕР±СЂРѕР±РєРё СЂРµР·СѓР»СЊС‚Р°С‚ Р·'СЏРІРёС‚СЊСЃСЏ С‚СѓС‚",
     },
 }
 
@@ -297,11 +317,11 @@ async def heartbeat(status: Message, state: dict[str, object]) -> None:
     while True:
         await asyncio.sleep(60)
         elapsed = format_duration(time.time() - float(state.get("started_at", time.time())))
-        stage = str(state.get("stage", "Работаю"))
+        stage = str(state.get("stage", "Р Р°Р±РѕС‚Р°СЋ"))
         detail = str(state.get("detail", ""))
         await safe_edit(
             status,
-            f"{stage}\n{detail}\n\nЕще работаю. Прошло: {elapsed}. Бот не завис, можно писать /status или /help.",
+            f"{stage}\n{detail}\n\nР•С‰Рµ СЂР°Р±РѕС‚Р°СЋ. РџСЂРѕС€Р»Рѕ: {elapsed}. Р‘РѕС‚ РЅРµ Р·Р°РІРёСЃ, РјРѕР¶РЅРѕ РїРёСЃР°С‚СЊ /status РёР»Рё /help.",
         )
 
 
@@ -329,6 +349,18 @@ def user_lang(message_or_callback) -> str:
     return lang_from_code(getattr(user, "language_code", None))
 
 
+def billing_bot_mode() -> bool:
+    return settings.bot_mode == "billing"
+
+
+def admin_user_ids() -> set[int]:
+    return settings.bot_admin_ids or settings.free_user_ids
+
+
+def is_admin_user(user_id: int | None) -> bool:
+    return bool(user_id and user_id in admin_user_ids())
+
+
 def main_menu(lang: str = "ru") -> InlineKeyboardMarkup:
     return bot_keyboards.main_menu(lang, settings.subscription_stars, settings.mini_app_url)
 
@@ -338,6 +370,15 @@ def help_navigation_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
 
 
 def persistent_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
+    if billing_bot_mode():
+        rows = [
+            [KeyboardButton(text=billing_text(lang, "pay_button")), KeyboardButton(text=billing_text(lang, "status_button"))],
+            [KeyboardButton(text=billing_text(lang, "wallet_button")), KeyboardButton(text=billing_text(lang, "support_button"))],
+            [KeyboardButton(text=billing_text(lang, "language_button"))],
+        ]
+        if settings.mini_app_url:
+            rows.append([KeyboardButton(text=billing_text(lang, "mini_app"), web_app=WebAppInfo(url=settings.mini_app_url))])
+        return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
     return bot_keyboards.persistent_menu_keyboard(lang, settings.mini_app_url)
 
 
@@ -578,6 +619,13 @@ def is_free_user(user_id: int) -> bool:
 async def ensure_user(message: Message) -> None:
     if message.from_user:
         await db.upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+        await asyncio.to_thread(
+            upsert_bot_user,
+            message.from_user.id,
+            message.from_user.username or "",
+            message.from_user.first_name or "",
+            getattr(message.from_user, "language_code", "") or "",
+        )
         if message.from_user.id not in language_overrides:
             saved_language = await db.get_language(message.from_user.id)
             if saved_language:
@@ -587,6 +635,13 @@ async def ensure_user(message: Message) -> None:
 async def ensure_callback_user(callback: CallbackQuery) -> None:
     if callback.from_user:
         await db.upsert_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
+        await asyncio.to_thread(
+            upsert_bot_user,
+            callback.from_user.id,
+            callback.from_user.username or "",
+            callback.from_user.first_name or "",
+            getattr(callback.from_user, "language_code", "") or "",
+        )
         if callback.from_user.id not in language_overrides:
             saved_language = await db.get_language(callback.from_user.id)
             if saved_language:
@@ -599,6 +654,942 @@ async def has_access(user_id: int) -> bool:
 
 async def is_pro_user(user_id: int) -> bool:
     return is_free_user(user_id) or (await db.get_subscription(user_id)).is_active
+
+
+def billing_intro_text() -> str:
+    return (
+        "CherryX Pay bot\n\n"
+        f"- Stars invoice: {settings.subscription_stars} Stars / {settings.subscription_days} days\n"
+        "- Link website account: /link CODE\n"
+        "- Check access: /status\n"
+        "- Check wallet: /wallet\n"
+        "- Payment help: /paysupport"
+    )
+
+
+def billing_help_text() -> str:
+    return (
+        "This bot is used only for CherryX payments and account monitoring.\n\n"
+        "Commands:\n"
+        "/subscribe - pay with Telegram Stars\n"
+        "/status - access status\n"
+        "/wallet - CherryX balance and linked account\n"
+        "/link CODE - link Telegram with the website account\n"
+        "/paysupport - payment support\n"
+        "/id - show Telegram ID"
+    )
+
+
+def billing_only_text() -> str:
+    return "This bot accepts payments and monitors CherryX access only. Use /subscribe, /status, /wallet or /paysupport."
+
+
+def billing_direct_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Start - 100 CherryX", callback_data="tgplan:free"),
+            InlineKeyboardButton(text="Starter - 900", callback_data="tgplan:starter"),
+        ],
+        [
+            InlineKeyboardButton(text="Creator Pro - 1900", callback_data="tgplan:pro"),
+            InlineKeyboardButton(text="Studio - 4900", callback_data="tgplan:studio"),
+        ],
+        [
+            InlineKeyboardButton(text="РџРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ", callback_data="tgtopup:custom"),
+        ],
+    ])
+
+
+async def send_intent_invoice(message: Message, bot: Bot, intent: dict[str, object]) -> None:
+    await message.answer(
+        f"{intent.get('title')}\n"
+        f"{intent.get('description')}\n\n"
+        f"Price: {intent.get('stars_amount')} Telegram Stars."
+    )
+    await bot(
+        SendInvoice(
+            chat_id=message.chat.id,
+            title=str(intent.get("title") or "CherryX"),
+            description=str(intent.get("description") or "CherryX payment"),
+            payload=str(intent.get("payload") or ""),
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=str(intent.get("title") or "CherryX"), amount=int(intent.get("stars_amount") or 1))],
+        )
+    )
+
+
+BILLING_TEXT = {
+    "ru": {
+        "intro": "CherryX Pay Р±РѕС‚\n\nР—РґРµСЃСЊ РјРѕР¶РЅРѕ РѕРїР»Р°С‚РёС‚СЊ РїР°РєРµС‚, РїРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ Рё РїСЂРѕРІРµСЂРёС‚СЊ Р°РєРєР°СѓРЅС‚.\n\n/link CODE - РїСЂРёРІСЏР·Р°С‚СЊ Р°РєРєР°СѓРЅС‚ СЃР°Р№С‚Р°\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°\n/wallet - Р±Р°Р»Р°РЅСЃ CherryX\n/paysupport - РїРѕРјРѕС‰СЊ СЃ РѕРїР»Р°С‚РѕР№",
+        "help": "Р­С‚РѕС‚ Р±РѕС‚ СЂР°Р±РѕС‚Р°РµС‚ С‚РѕР»СЊРєРѕ РґР»СЏ РѕРїР»Р°С‚ CherryX Рё РјРѕРЅРёС‚РѕСЂРёРЅРіР° Р°РєРєР°СѓРЅС‚Р°.\n\n/subscribe - РѕРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°\n/wallet - Р±Р°Р»Р°РЅСЃ Рё РїСЂРёРІСЏР·РєР°\n/link CODE - РїСЂРёРІСЏР·Р°С‚СЊ Р°РєРєР°СѓРЅС‚ СЃР°Р№С‚Р°\n/paysupport - РїРѕРјРѕС‰СЊ СЃ РѕРїР»Р°С‚РѕР№\n/id - Telegram ID",
+        "only": "Р‘РѕС‚ РїСЂРёРЅРёРјР°РµС‚ РѕРїР»Р°С‚С‹ Рё РїРѕРєР°Р·С‹РІР°РµС‚ СЃС‚Р°С‚СѓСЃ CherryX. РСЃРїРѕР»СЊР·СѓР№С‚Рµ /subscribe, /status, /wallet РёР»Рё /paysupport.",
+        "choose": "Р’С‹Р±РµСЂРёС‚Рµ РїР°РєРµС‚ РёР»Рё РїРѕРїРѕР»РЅРµРЅРёРµ Р±Р°Р»Р°РЅСЃР°:",
+        "topup": "РџРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ",
+        "enter_stars": "Р’РІРµРґРёС‚Рµ СЃСѓРјРјСѓ РїРѕРїРѕР»РЅРµРЅРёСЏ РІ Telegram Stars.\nРњРёРЅРёРјСѓРј: 1 Star. РњР°РєСЃРёРјСѓРј: 150000 Stars.\nРќР° Р±Р°Р»Р°РЅСЃ CherryX РїСЂРёРґРµС‚ СЃСѓРјРјР° РїРѕ С‚РµРєСѓС‰РµРјСѓ РєСѓСЂСЃСѓ.",
+        "invalid_stars": "Р’РІРµРґРёС‚Рµ С†РµР»РѕРµ С‡РёСЃР»Рѕ Stars РѕС‚ 1 РґРѕ 150000.",
+        "stars_range": "РЎСѓРјРјР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РѕС‚ 1 РґРѕ 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nРљ РѕРїР»Р°С‚Рµ: {stars} Telegram Stars.",
+        "intent_error": "РћРїР»Р°С‚Р° РїРѕР»СѓС‡РµРЅР°, РЅРѕ РЅРµ СЃРјРѕРі РїСЂРёРјРµРЅРёС‚СЊ РµРµ Рє Р°РєРєР°СѓРЅС‚Сѓ. РќР°РїРёС€РёС‚Рµ /paysupport.",
+        "need_email": "РћРїР»Р°С‚Р° РїРѕР»СѓС‡РµРЅР°.\nРћС‚РїСЂР°РІСЊС‚Рµ email, Рё СЏ СЃРѕР·РґР°Рј CherryX Р°РєРєР°СѓРЅС‚, РїСЂРёРјРµРЅСЋ РїР°РєРµС‚ РёР»Рё Р±Р°Р»Р°РЅСЃ Рё РїСЂРёС€Р»СЋ РґР°РЅРЅС‹Рµ РґР»СЏ РІС…РѕРґР°.",
+        "applied": "РћРїР»Р°С‚Р° РїСЂРѕС€Р»Р° Рё РїСЂРёРјРµРЅРµРЅР°.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX Р°РєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ, РѕРїР»Р°С‚Р° РїСЂРёРјРµРЅРµРЅР°.\n\nР›РѕРіРёРЅ: {email}\nРџР°СЂРѕР»СЊ: {password}\nРЎСЃС‹Р»РєР° РґР»СЏ РІС…РѕРґР°: {login_url}\n\nРџРѕСЃР»Рµ РїРµСЂРІРѕРіРѕ РІС…РѕРґР° СЃРјРµРЅРёС‚Рµ РїР°СЂРѕР»СЊ.",
+        "open_cherryx": "РћС‚РєСЂС‹С‚СЊ CherryX",
+        "email_exists": "РўР°РєРѕР№ email СѓР¶Рµ РµСЃС‚СЊ РІ CherryX.\nР’РѕР№РґРёС‚Рµ РЅР° СЃР°Р№С‚Рµ, РѕС‚РєСЂРѕР№С‚Рµ CherryX Pay, СЃРєРѕРїРёСЂСѓР№С‚Рµ /link CODE Рё РѕС‚РїСЂР°РІСЊС‚Рµ СЃСЋРґР°. РћРїР»Р°С‚Р° Р±СѓРґРµС‚ Р¶РґР°С‚СЊ РїСЂРёРІСЏР·РєРё.",
+        "email_invalid": "РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ email.",
+    },
+    "uk": {
+        "intro": "CherryX Pay Р±РѕС‚\n\nРўСѓС‚ РјРѕР¶РЅР° РѕРїР»Р°С‚РёС‚Рё РїР°РєРµС‚, РїРѕРїРѕРІРЅРёС‚Рё Р±Р°Р»Р°РЅСЃ С– РїРµСЂРµРІС–СЂРёС‚Рё Р°РєР°СѓРЅС‚.\n\n/link CODE - РїСЂРёРІ'СЏР·Р°С‚Рё Р°РєР°СѓРЅС‚ СЃР°Р№С‚Сѓ\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїСѓ\n/wallet - Р±Р°Р»Р°РЅСЃ CherryX\n/paysupport - РґРѕРїРѕРјРѕРіР° Р· РѕРїР»Р°С‚РѕСЋ",
+        "help": "Р¦РµР№ Р±РѕС‚ РїСЂР°С†СЋС” С‚С–Р»СЊРєРё РґР»СЏ РѕРїР»Р°С‚ CherryX С– РјРѕРЅС–С‚РѕСЂРёРЅРіСѓ Р°РєР°СѓРЅС‚Р°.\n\n/subscribe - РѕРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїСѓ\n/wallet - Р±Р°Р»Р°РЅСЃ С– РїСЂРёРІ'СЏР·РєР°\n/link CODE - РїСЂРёРІ'СЏР·Р°С‚Рё Р°РєР°СѓРЅС‚ СЃР°Р№С‚Сѓ\n/paysupport - РґРѕРїРѕРјРѕРіР° Р· РѕРїР»Р°С‚РѕСЋ\n/id - Telegram ID",
+        "only": "Р‘РѕС‚ РїСЂРёР№РјР°С” РѕРїР»Р°С‚Рё С– РїРѕРєР°Р·СѓС” СЃС‚Р°С‚СѓСЃ CherryX. Р’РёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ /subscribe, /status, /wallet Р°Р±Рѕ /paysupport.",
+        "choose": "РћР±РµСЂС–С‚СЊ РїР°РєРµС‚ Р°Р±Рѕ РїРѕРїРѕРІРЅРµРЅРЅСЏ Р±Р°Р»Р°РЅСЃСѓ:",
+        "topup": "РџРѕРїРѕРІРЅРёС‚Рё Р±Р°Р»Р°РЅСЃ",
+        "enter_stars": "Р’РІРµРґС–С‚СЊ СЃСѓРјСѓ РїРѕРїРѕРІРЅРµРЅРЅСЏ РІ Telegram Stars.\nРњС–РЅС–РјСѓРј: 1 Star. РњР°РєСЃРёРјСѓРј: 150000 Stars.\nРќР° Р±Р°Р»Р°РЅСЃ CherryX РїСЂРёР№РґРµ СЃСѓРјР° Р·Р° РїРѕС‚РѕС‡РЅРёРј РєСѓСЂСЃРѕРј.",
+        "invalid_stars": "Р’РІРµРґС–С‚СЊ С†С–Р»Рµ С‡РёСЃР»Рѕ Stars РІС–Рґ 1 РґРѕ 150000.",
+        "stars_range": "РЎСѓРјР° РјР°С” Р±СѓС‚Рё РІС–Рґ 1 РґРѕ 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nР”Рѕ РѕРїР»Р°С‚Рё: {stars} Telegram Stars.",
+        "intent_error": "РћРїР»Р°С‚Сѓ РѕС‚СЂРёРјР°РЅРѕ, Р°Р»Рµ РЅРµ РІРґР°Р»РѕСЃСЏ Р·Р°СЃС‚РѕСЃСѓРІР°С‚Рё С—С— РґРѕ Р°РєР°СѓРЅС‚Р°. РќР°РїРёС€С–С‚СЊ /paysupport.",
+        "need_email": "РћРїР»Р°С‚Сѓ РѕС‚СЂРёРјР°РЅРѕ.\nРќР°РґС–С€Р»С–С‚СЊ email, С– СЏ СЃС‚РІРѕСЂСЋ CherryX Р°РєР°СѓРЅС‚, Р·Р°СЃС‚РѕСЃСѓСЋ РїР°РєРµС‚ Р°Р±Рѕ Р±Р°Р»Р°РЅСЃ С– РЅР°РґС–С€Р»СЋ РґР°РЅС– РґР»СЏ РІС…РѕРґСѓ.",
+        "applied": "РћРїР»Р°С‚Сѓ РїСЂРѕРІРµРґРµРЅРѕ С– Р·Р°СЃС‚РѕСЃРѕРІР°РЅРѕ.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX Р°РєР°СѓРЅС‚ СЃС‚РІРѕСЂРµРЅРѕ, РѕРїР»Р°С‚Сѓ Р·Р°СЃС‚РѕСЃРѕРІР°РЅРѕ.\n\nР›РѕРіС–РЅ: {email}\nРџР°СЂРѕР»СЊ: {password}\nРџРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ РІС…РѕРґСѓ: {login_url}\n\nРџС–СЃР»СЏ РїРµСЂС€РѕРіРѕ РІС…РѕРґСѓ Р·РјС–РЅС–С‚СЊ РїР°СЂРѕР»СЊ.",
+        "open_cherryx": "Р’С–РґРєСЂРёС‚Рё CherryX",
+        "email_exists": "РўР°РєРёР№ email РІР¶Рµ С” РІ CherryX.\nРЈРІС–Р№РґС–С‚СЊ РЅР° СЃР°Р№С‚С–, РІС–РґРєСЂРёР№С‚Рµ CherryX Pay, СЃРєРѕРїС–СЋР№С‚Рµ /link CODE С– РЅР°РґС–С€Р»С–С‚СЊ СЃСЋРґРё. РћРїР»Р°С‚Р° С‡РµРєР°С‚РёРјРµ РїСЂРёРІ'СЏР·РєРё.",
+        "email_invalid": "РќР°РґС–С€Р»С–С‚СЊ РєРѕСЂРµРєС‚РЅРёР№ email.",
+    },
+    "en": {
+        "intro": "CherryX Pay bot\n\nPay for a package, top up balance, and monitor your account.\n\n/link CODE - link website account\n/status - access status\n/wallet - CherryX balance\n/paysupport - payment help",
+        "help": "This bot is used only for CherryX payments and account monitoring.\n\n/subscribe - pay with Telegram Stars\n/status - access status\n/wallet - CherryX balance and linked account\n/link CODE - link Telegram with the website account\n/paysupport - payment support\n/id - Telegram ID",
+        "only": "This bot accepts payments and monitors CherryX access only. Use /subscribe, /status, /wallet or /paysupport.",
+        "choose": "Choose a package or top up balance:",
+        "topup": "Top up balance",
+        "enter_stars": "Enter the top up amount in Telegram Stars.\nMinimum: 1 Star. Maximum: 150000 Stars.\nCherryX will be credited by the current rate.",
+        "invalid_stars": "Enter a whole Stars amount from 1 to 150000.",
+        "stars_range": "Amount must be from 1 to 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nTo pay: {stars} Telegram Stars.",
+        "intent_error": "Payment was received, but it could not be applied. Please contact /paysupport.",
+        "need_email": "Payment received.\nSend your email and I will create your CherryX account, apply the package or balance, and send login details.",
+        "applied": "Payment received and applied.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX account created and payment applied.\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nChange the password after first login.",
+        "open_cherryx": "Open CherryX",
+        "email_exists": "This email already exists on CherryX.\nLog in on the website, open CherryX Pay, copy /link CODE and send it here. The paid intent will wait for linking.",
+        "email_invalid": "Please send a valid email address.",
+    },
+}
+for _code in ("fr", "de", "es", "ka", "hy", "it"):
+    BILLING_TEXT[_code] = BILLING_TEXT["en"]
+BILLING_TEXT["fr"] = {
+    **BILLING_TEXT["en"],
+    "intro": "Bot CherryX Pay\n\nPayez un forfait, rechargez le solde et vГ©rifiez votre compte.\n\n/link CODE - lier le compte du site\n/status - statut d'accГЁs\n/wallet - solde CherryX\n/paysupport - aide au paiement",
+    "choose": "Choisissez un forfait ou rechargez le solde:",
+    "topup": "Recharger le solde",
+    "enter_stars": "Entrez le montant en Telegram Stars.\nMinimum: 1 Star. Maximum: 150000 Stars.\nCherryX sera crГ©ditГ© selon le taux actuel.",
+    "invalid_stars": "Entrez un nombre entier de Stars entre 1 et 150000.",
+    "stars_range": "Le montant doit ГЄtre entre 1 et 150000 Telegram Stars.",
+    "invoice": "{title}\n{description}\n\nГЂ payer: {stars} Telegram Stars.",
+    "need_email": "Paiement reГ§u.\nEnvoyez votre email et je crГ©erai votre compte CherryX, puis j'appliquerai le forfait ou le solde.",
+    "applied": "Paiement reГ§u et appliquГ©.\n{title}\nCherryX: {cherryx}",
+    "account_created": "Compte CherryX crГ©Г©, paiement appliquГ©.\n\nLogin: {email}\nMot de passe: {password}\nURL de connexion: {login_url}\n\nChangez le mot de passe aprГЁs la premiГЁre connexion.",
+}
+BILLING_TEXT["de"] = {
+    **BILLING_TEXT["en"],
+    "intro": "CherryX Pay Bot\n\nPaket bezahlen, Guthaben aufladen und Konto prГјfen.\n\n/link CODE - Website-Konto verknГјpfen\n/status - Zugriffsstatus\n/wallet - CherryX Guthaben\n/paysupport - Zahlungshilfe",
+    "choose": "Paket wГ¤hlen oder Guthaben aufladen:",
+    "topup": "Guthaben aufladen",
+    "enter_stars": "Geben Sie den Betrag in Telegram Stars ein.\nMinimum: 1 Star. Maximum: 150000 Stars.\nCherryX wird zum aktuellen Kurs gutgeschrieben.",
+    "invalid_stars": "Geben Sie eine ganze Stars-Zahl von 1 bis 150000 ein.",
+    "stars_range": "Der Betrag muss zwischen 1 und 150000 Telegram Stars liegen.",
+    "invoice": "{title}\n{description}\n\nZu zahlen: {stars} Telegram Stars.",
+    "need_email": "Zahlung erhalten.\nSenden Sie Ihre E-Mail, dann erstelle ich Ihr CherryX-Konto und wende Paket oder Guthaben an.",
+    "applied": "Zahlung erhalten und angewendet.\n{title}\nCherryX: {cherryx}",
+    "account_created": "CherryX-Konto erstellt, Zahlung angewendet.\n\nLogin: {email}\nPasswort: {password}\nLogin-URL: {login_url}\n\nГ„ndern Sie das Passwort nach dem ersten Login.",
+}
+BILLING_TEXT["es"] = {
+    **BILLING_TEXT["en"],
+    "intro": "Bot CherryX Pay\n\nPaga un paquete, recarga saldo y revisa tu cuenta.\n\n/link CODE - vincular cuenta web\n/status - estado de acceso\n/wallet - saldo CherryX\n/paysupport - ayuda con pagos",
+    "choose": "Elige un paquete o recarga saldo:",
+    "topup": "Recargar saldo",
+    "enter_stars": "Introduce el importe en Telegram Stars.\nMГ­nimo: 1 Star. MГЎximo: 150000 Stars.\nCherryX se acreditarГЎ segГєn el tipo actual.",
+    "invalid_stars": "Introduce un nГєmero entero de Stars entre 1 y 150000.",
+    "stars_range": "El importe debe estar entre 1 y 150000 Telegram Stars.",
+    "invoice": "{title}\n{description}\n\nA pagar: {stars} Telegram Stars.",
+    "need_email": "Pago recibido.\nEnvГ­a tu email y crearГ© tu cuenta CherryX, aplicando el paquete o saldo.",
+    "applied": "Pago recibido y aplicado.\n{title}\nCherryX: {cherryx}",
+    "account_created": "Cuenta CherryX creada, pago aplicado.\n\nLogin: {email}\nContraseГ±a: {password}\nURL de acceso: {login_url}\n\nCambia la contraseГ±a despuГ©s del primer acceso.",
+}
+BILLING_TEXT["it"] = {
+    **BILLING_TEXT["en"],
+    "intro": "Bot CherryX Pay\n\nPaga un pacchetto, ricarica il saldo e controlla l'account.\n\n/link CODE - collega account web\n/status - stato accesso\n/wallet - saldo CherryX\n/paysupport - supporto pagamenti",
+    "choose": "Scegli un pacchetto o ricarica il saldo:",
+    "topup": "Ricarica saldo",
+    "enter_stars": "Inserisci l'importo in Telegram Stars.\nMinimo: 1 Star. Massimo: 150000 Stars.\nCherryX verrГ  accreditato al tasso attuale.",
+    "invalid_stars": "Inserisci un numero intero di Stars da 1 a 150000.",
+    "stars_range": "L'importo deve essere tra 1 e 150000 Telegram Stars.",
+    "invoice": "{title}\n{description}\n\nDa pagare: {stars} Telegram Stars.",
+    "need_email": "Pagamento ricevuto.\nInvia la tua email e creerГІ l'account CherryX, applicando pacchetto o saldo.",
+    "applied": "Pagamento ricevuto e applicato.\n{title}\nCherryX: {cherryx}",
+    "account_created": "Account CherryX creato, pagamento applicato.\n\nLogin: {email}\nPassword: {password}\nURL login: {login_url}\n\nCambia la password dopo il primo accesso.",
+}
+BILLING_TEXT["ru"] = {
+    **BILLING_TEXT["en"],
+    "intro": "CherryX Pay Р±РѕС‚\n\nР—РґРµСЃСЊ РјРѕР¶РЅРѕ РѕРїР»Р°С‚РёС‚СЊ РїР°РєРµС‚, РїРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ Рё РїСЂРѕРІРµСЂРёС‚СЊ Р°РєРєР°СѓРЅС‚.\n\n/link CODE - РїСЂРёРІСЏР·Р°С‚СЊ Р°РєРєР°СѓРЅС‚ СЃР°Р№С‚Р°\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°\n/wallet - Р±Р°Р»Р°РЅСЃ CherryX\n/paysupport - РїРѕРјРѕС‰СЊ СЃ РѕРїР»Р°С‚РѕР№",
+    "help": "Р­С‚РѕС‚ Р±РѕС‚ СЂР°Р±РѕС‚Р°РµС‚ РґР»СЏ РѕРїР»Р°С‚ CherryX Рё РјРѕРЅРёС‚РѕСЂРёРЅРіР° Р°РєРєР°СѓРЅС‚Р°.\n\n/subscribe - РѕРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°\n/wallet - Р±Р°Р»Р°РЅСЃ Рё РїСЂРёРІСЏР·РєР°\n/link CODE - РїСЂРёРІСЏР·Р°С‚СЊ Р°РєРєР°СѓРЅС‚ СЃР°Р№С‚Р°\n/paysupport - РїРѕРјРѕС‰СЊ СЃ РѕРїР»Р°С‚РѕР№\n/id - Telegram ID",
+    "only": "Р‘РѕС‚ РїСЂРёРЅРёРјР°РµС‚ РѕРїР»Р°С‚С‹ Рё РїРѕРєР°Р·С‹РІР°РµС‚ СЃС‚Р°С‚СѓСЃ CherryX. РСЃРїРѕР»СЊР·СѓР№С‚Рµ /subscribe, /status, /wallet РёР»Рё /paysupport.",
+    "choose": "Р’С‹Р±РµСЂРёС‚Рµ РїР°РєРµС‚ РёР»Рё РїРѕРїРѕР»РЅРµРЅРёРµ Р±Р°Р»Р°РЅСЃР°:",
+    "topup": "РџРѕРїРѕР»РЅРёС‚СЊ Р±Р°Р»Р°РЅСЃ",
+    "enter_stars": "Р’РІРµРґРёС‚Рµ СЃСѓРјРјСѓ РїРѕРїРѕР»РЅРµРЅРёСЏ РІ Telegram Stars.\nРњРёРЅРёРјСѓРј: 1 Star. РњР°РєСЃРёРјСѓРј: 150000 Stars.\nРќР° Р±Р°Р»Р°РЅСЃ CherryX РїСЂРёРґРµС‚ СЃСѓРјРјР° РїРѕ С‚РµРєСѓС‰РµРјСѓ РєСѓСЂСЃСѓ.",
+    "invalid_stars": "Р’РІРµРґРёС‚Рµ С†РµР»РѕРµ С‡РёСЃР»Рѕ Stars РѕС‚ 1 РґРѕ 150000.",
+    "stars_range": "РЎСѓРјРјР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РѕС‚ 1 РґРѕ 150000 Telegram Stars.",
+    "invoice": "{title}\n{description}\n\nРљ РѕРїР»Р°С‚Рµ: {stars} Telegram Stars.",
+    "intent_error": "РћРїР»Р°С‚Р° РїРѕР»СѓС‡РµРЅР°, РЅРѕ РЅРµ СЃРјРѕРі РїСЂРёРјРµРЅРёС‚СЊ РµРµ Рє Р°РєРєР°СѓРЅС‚Сѓ. РќР°РїРёС€РёС‚Рµ /paysupport.",
+    "need_email": "РћРїР»Р°С‚Р° РїРѕР»СѓС‡РµРЅР°.\nРћС‚РїСЂР°РІСЊС‚Рµ email, Рё СЏ СЃРѕР·РґР°Рј CherryX Р°РєРєР°СѓРЅС‚, РїСЂРёРјРµРЅСЋ РїР°РєРµС‚ РёР»Рё Р±Р°Р»Р°РЅСЃ Рё РїСЂРёС€Р»СЋ РґР°РЅРЅС‹Рµ РґР»СЏ РІС…РѕРґР°.",
+    "applied": "РћРїР»Р°С‚Р° РїСЂРѕС€Р»Р° Рё РїСЂРёРјРµРЅРµРЅР°.\n{title}\nCherryX: {cherryx}",
+    "account_created": "CherryX Р°РєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ, РѕРїР»Р°С‚Р° РїСЂРёРјРµРЅРµРЅР°.\n\nР›РѕРіРёРЅ: {email}\nРџР°СЂРѕР»СЊ: {password}\nРЎСЃС‹Р»РєР° РґР»СЏ РІС…РѕРґР°: {login_url}\n\nРџРѕСЃР»Рµ РїРµСЂРІРѕРіРѕ РІС…РѕРґР° СЃРјРµРЅРёС‚Рµ РїР°СЂРѕР»СЊ.",
+    "open_cherryx": "РћС‚РєСЂС‹С‚СЊ CherryX",
+    "email_exists": "РўР°РєРѕР№ email СѓР¶Рµ РµСЃС‚СЊ РІ CherryX.\nР’РѕР№РґРёС‚Рµ РЅР° СЃР°Р№С‚Рµ, РѕС‚РєСЂРѕР№С‚Рµ CherryX Pay, СЃРєРѕРїРёСЂСѓР№С‚Рµ /link CODE Рё РѕС‚РїСЂР°РІСЊС‚Рµ СЃСЋРґР°. РћРїР»Р°С‚Р° Р±СѓРґРµС‚ Р¶РґР°С‚СЊ РїСЂРёРІСЏР·РєРё.",
+    "email_invalid": "РћС‚РїСЂР°РІСЊС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ email.",
+}
+BILLING_TEXT["uk"] = {
+    **BILLING_TEXT["en"],
+    "intro": "CherryX Pay Р±РѕС‚\n\nРўСѓС‚ РјРѕР¶РЅР° РѕРїР»Р°С‚РёС‚Рё РїР°РєРµС‚, РїРѕРїРѕРІРЅРёС‚Рё Р±Р°Р»Р°РЅСЃ С– РїРµСЂРµРІС–СЂРёС‚Рё Р°РєР°СѓРЅС‚.\n\n/link CODE - РїСЂРёРІ'СЏР·Р°С‚Рё Р°РєР°СѓРЅС‚ СЃР°Р№С‚Сѓ\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїСѓ\n/wallet - Р±Р°Р»Р°РЅСЃ CherryX\n/paysupport - РґРѕРїРѕРјРѕРіР° Р· РѕРїР»Р°С‚РѕСЋ",
+    "help": "Р¦РµР№ Р±РѕС‚ РїСЂР°С†СЋС” РґР»СЏ РѕРїР»Р°С‚ CherryX С– РјРѕРЅС–С‚РѕСЂРёРЅРіСѓ Р°РєР°СѓРЅС‚Р°.\n\n/subscribe - РѕРїР»Р°С‚Р° С‡РµСЂРµР· Telegram Stars\n/status - СЃС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїСѓ\n/wallet - Р±Р°Р»Р°РЅСЃ С– РїСЂРёРІ'СЏР·РєР°\n/link CODE - РїСЂРёРІ'СЏР·Р°С‚Рё Р°РєР°СѓРЅС‚ СЃР°Р№С‚Сѓ\n/paysupport - РґРѕРїРѕРјРѕРіР° Р· РѕРїР»Р°С‚РѕСЋ\n/id - Telegram ID",
+    "only": "Р‘РѕС‚ РїСЂРёР№РјР°С” РѕРїР»Р°С‚Рё С– РїРѕРєР°Р·СѓС” СЃС‚Р°С‚СѓСЃ CherryX. Р’РёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ /subscribe, /status, /wallet Р°Р±Рѕ /paysupport.",
+    "choose": "РћР±РµСЂС–С‚СЊ РїР°РєРµС‚ Р°Р±Рѕ РїРѕРїРѕРІРЅРµРЅРЅСЏ Р±Р°Р»Р°РЅСЃСѓ:",
+    "topup": "РџРѕРїРѕРІРЅРёС‚Рё Р±Р°Р»Р°РЅСЃ",
+    "enter_stars": "Р’РІРµРґС–С‚СЊ СЃСѓРјСѓ РїРѕРїРѕРІРЅРµРЅРЅСЏ РІ Telegram Stars.\nРњС–РЅС–РјСѓРј: 1 Star. РњР°РєСЃРёРјСѓРј: 150000 Stars.\nРќР° Р±Р°Р»Р°РЅСЃ CherryX РїСЂРёР№РґРµ СЃСѓРјР° Р·Р° РїРѕС‚РѕС‡РЅРёРј РєСѓСЂСЃРѕРј.",
+    "invalid_stars": "Р’РІРµРґС–С‚СЊ С†С–Р»Рµ С‡РёСЃР»Рѕ Stars РІС–Рґ 1 РґРѕ 150000.",
+    "stars_range": "РЎСѓРјР° РјР°С” Р±СѓС‚Рё РІС–Рґ 1 РґРѕ 150000 Telegram Stars.",
+    "invoice": "{title}\n{description}\n\nР”Рѕ РѕРїР»Р°С‚Рё: {stars} Telegram Stars.",
+    "intent_error": "РћРїР»Р°С‚Сѓ РѕС‚СЂРёРјР°РЅРѕ, Р°Р»Рµ РЅРµ РІРґР°Р»РѕСЃСЏ Р·Р°СЃС‚РѕСЃСѓРІР°С‚Рё С—С— РґРѕ Р°РєР°СѓРЅС‚Р°. РќР°РїРёС€С–С‚СЊ /paysupport.",
+    "need_email": "РћРїР»Р°С‚Сѓ РѕС‚СЂРёРјР°РЅРѕ.\nРќР°РґС–С€Р»С–С‚СЊ email, С– СЏ СЃС‚РІРѕСЂСЋ CherryX Р°РєР°СѓРЅС‚, Р·Р°СЃС‚РѕСЃСѓСЋ РїР°РєРµС‚ Р°Р±Рѕ Р±Р°Р»Р°РЅСЃ С– РЅР°РґС–С€Р»СЋ РґР°РЅС– РґР»СЏ РІС…РѕРґСѓ.",
+    "applied": "РћРїР»Р°С‚Сѓ РїСЂРѕРІРµРґРµРЅРѕ С– Р·Р°СЃС‚РѕСЃРѕРІР°РЅРѕ.\n{title}\nCherryX: {cherryx}",
+    "account_created": "CherryX Р°РєР°СѓРЅС‚ СЃС‚РІРѕСЂРµРЅРѕ, РѕРїР»Р°С‚Сѓ Р·Р°СЃС‚РѕСЃРѕРІР°РЅРѕ.\n\nР›РѕРіС–РЅ: {email}\nРџР°СЂРѕР»СЊ: {password}\nРџРѕСЃРёР»Р°РЅРЅСЏ РґР»СЏ РІС…РѕРґСѓ: {login_url}\n\nРџС–СЃР»СЏ РїРµСЂС€РѕРіРѕ РІС…РѕРґСѓ Р·РјС–РЅС–С‚СЊ РїР°СЂРѕР»СЊ.",
+    "open_cherryx": "Р’С–РґРєСЂРёС‚Рё CherryX",
+    "email_exists": "РўР°РєРёР№ email СѓР¶Рµ С” РІ CherryX.\nРЈРІС–Р№РґС–С‚СЊ РЅР° СЃР°Р№С‚С–, РІС–РґРєСЂРёР№С‚Рµ CherryX Pay, СЃРєРѕРїС–СЋР№С‚Рµ /link CODE С– РЅР°РґС–С€Р»С–С‚СЊ СЃСЋРґРё. РћРїР»Р°С‚Р° С‡РµРєР°С‚РёРјРµ РїСЂРёРІ'СЏР·РєРё.",
+    "email_invalid": "РќР°РґС–С€Р»С–С‚СЊ РєРѕСЂРµРєС‚РЅРёР№ email.",
+}
+BILLING_TEXT["ka"] = {
+    **BILLING_TEXT["en"],
+    "intro": "CherryX Pay бѓ‘бѓќбѓўбѓ\n\nбѓђбѓҐ бѓЁбѓ”бѓ’бѓбѓ«бѓљбѓбѓђбѓ— бѓћбѓђбѓ™бѓ”бѓўбѓбѓЎ бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ, бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓбѓЎ бѓЁбѓ”бѓ•бѓЎбѓ”бѓ‘бѓђ бѓ“бѓђ бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓбѓЎ бѓЁбѓ”бѓ›бѓќбѓ¬бѓ›бѓ”бѓ‘бѓђ.\n\n/link CODE - бѓЎбѓђбѓбѓўбѓбѓЎ бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓбѓЎ бѓ›бѓбѓ‘бѓ›бѓђ\n/status - бѓ¬бѓ•бѓ“бѓќбѓ›бѓбѓЎ бѓЎбѓўбѓђбѓўбѓЈбѓЎбѓ\n/wallet - CherryX бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓ\n/paysupport - бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓбѓЎ бѓ“бѓђбѓ®бѓ›бѓђбѓ бѓ”бѓ‘бѓђ",
+    "choose": "бѓђбѓбѓ бѓ©бѓбѓ”бѓ— бѓћбѓђбѓ™бѓ”бѓўбѓ бѓђбѓњ бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓбѓЎ бѓЁбѓ”бѓ•бѓЎбѓ”бѓ‘бѓђ:",
+    "topup": "бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓбѓЎ бѓЁбѓ”бѓ•бѓЎбѓ”бѓ‘бѓђ",
+    "enter_stars": "бѓЁбѓ”бѓбѓ§бѓ•бѓђбѓњбѓ”бѓ— бѓ—бѓђбѓњбѓ®бѓђ Telegram Stars-бѓЁбѓ.\nбѓ›бѓбѓњбѓбѓ›бѓЈбѓ›бѓ: 1 Star. бѓ›бѓђбѓҐбѓЎбѓбѓ›бѓЈбѓ›бѓ: 150000 Stars.\nCherryX бѓ©бѓђбѓбѓ бѓбѓЄбѓ®бѓ”бѓ‘бѓђ бѓ›бѓбѓ›бѓ“бѓбѓњбѓђбѓ бѓ” бѓ™бѓЈбѓ бѓЎбѓбѓ—.",
+    "invalid_stars": "бѓЁбѓ”бѓбѓ§бѓ•бѓђбѓњбѓ”бѓ— бѓ›бѓ—бѓ”бѓљбѓ бѓ бѓбѓЄбѓ®бѓ•бѓ 1-бѓ“бѓђбѓњ 150000 Stars-бѓ›бѓ“бѓ”.",
+    "stars_range": "бѓ—бѓђбѓњбѓ®бѓђ бѓЈбѓњбѓ“бѓђ бѓбѓ§бѓќбѓЎ 1-бѓ“бѓђбѓњ 150000 Telegram Stars-бѓ›бѓ“бѓ”.",
+    "invoice": "{title}\n{description}\n\nбѓ’бѓђбѓ“бѓђбѓЎбѓђбѓ®бѓ“бѓ”бѓљбѓ: {stars} Telegram Stars.",
+    "need_email": "бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ бѓ›бѓбѓ¦бѓ”бѓ‘бѓЈбѓљбѓбѓђ.\nбѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓ”бѓ— email бѓ“бѓђ бѓЁбѓ”бѓ•бѓҐбѓ›бѓњбѓ CherryX бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓЎ, бѓ›бѓбѓ•бѓђбѓ‘бѓђбѓ› бѓћбѓђбѓ™бѓ”бѓўбѓЎ бѓђбѓњ бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓЎ бѓ“бѓђ бѓ’бѓђбѓ›бѓќбѓ’бѓбѓ’бѓ–бѓђбѓ•бѓњбѓбѓ— бѓЁбѓ”бѓЎбѓ•бѓљбѓбѓЎ бѓ›бѓќбѓњбѓђбѓЄбѓ”бѓ›бѓ”бѓ‘бѓЎ.",
+    "applied": "бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ бѓ›бѓбѓ¦бѓ”бѓ‘бѓЈбѓљбѓбѓђ бѓ“бѓђ бѓ’бѓђбѓ›бѓќбѓ§бѓ”бѓњбѓ”бѓ‘бѓЈбѓљбѓбѓђ.\n{title}\nCherryX: {cherryx}",
+    "account_created": "CherryX бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓ бѓЁбѓ”бѓбѓҐбѓ›бѓњбѓђ бѓ“бѓђ бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ бѓ’бѓђбѓ›бѓќбѓ§бѓ”бѓњбѓ”бѓ‘бѓЈбѓљбѓбѓђ.\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nбѓћбѓбѓ бѓ•бѓ”бѓљбѓ бѓЁбѓ”бѓЎбѓ•бѓљбѓбѓЎ бѓЁбѓ”бѓ›бѓ“бѓ”бѓ’ бѓЁбѓ”бѓЄбѓ•бѓђбѓљбѓ”бѓ— бѓћбѓђбѓ бѓќбѓљбѓ.",
+    "open_cherryx": "CherryX-бѓбѓЎ бѓ’бѓђбѓ®бѓЎбѓњбѓђ",
+    "email_invalid": "бѓ’бѓ—бѓ®бѓќбѓ•бѓ—, бѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓќбѓ— бѓЎбѓ¬бѓќбѓ бѓ email.",
+}
+BILLING_TEXT["hy"] = {
+    **BILLING_TEXT["en"],
+    "intro": "CherryX Pay ХўХёХї\n\nФ±ХµХЅХїХҐХІ ХЇХЎЦЂХёХІ ХҐЦ„ ХѕХіХЎЦЂХҐХ¬ ЦѓХЎХ©ХҐХ©Х« Х°ХЎХґХЎЦЂ, Х°ХЎХґХЎХ¬ЦЂХҐХ¬ ХўХЎХ¬ХЎХ¶ХЅХЁ Ц‡ ХЅХїХёЦ‚ХЈХҐХ¬ Х°ХЎХ·Х«ХѕХЁЦ‰\n\n/link CODE - ХЇХЎХєХҐХ¬ ХЇХЎХµЦ„Х« Х°ХЎХ·Х«ХѕХЁ\n/status - Х°ХЎХЅХЎХ¶ХҐХ¬Х«ХёЦ‚Х©ХµХЎХ¶ ХЇХЎЦЂХЈХЎХѕХ«ХіХЎХЇ\n/wallet - CherryX ХўХЎХ¬ХЎХ¶ХЅ\n/paysupport - ХѕХіХЎЦЂХґХЎХ¶ Ц…ХЈХ¶ХёЦ‚Х©ХµХёЦ‚Х¶",
+    "choose": "ФёХ¶ХїЦЂХҐЦ„ ЦѓХЎХ©ХҐХ© ХЇХЎХґ ХўХЎХ¬ХЎХ¶ХЅХ« Х°ХЎХґХЎХ¬ЦЂХёЦ‚Хґ.",
+    "topup": "ХЂХЎХґХЎХ¬ЦЂХҐХ¬ ХўХЎХ¬ХЎХ¶ХЅХЁ",
+    "enter_stars": "Х„ХёЦ‚ХїЦ„ХЎХЈЦЂХҐЦ„ Х°ХЎХґХЎХ¬ЦЂХґХЎХ¶ ХЈХёЦ‚ХґХЎЦЂХЁ Telegram Stars-ХёХѕЦ‰\nХ†ХѕХЎХ¦ХЎХЈХёЦ‚ХµХ¶ХЁХќ 1 StarЦ‰ Ф±ХјХЎХѕХҐХ¬ХЎХЈХёЦ‚ХµХ¶ХЁХќ 150000 StarsЦ‰\nCherryX-ХЁ ХЇХЎХѕХҐХ¬ХЎЦЃХѕХ« ХЁХ¶Х©ХЎЦЃХ«ХЇ ЦѓХёХ­ХЎЦЂХЄХҐЦ„ХёХѕЦ‰",
+    "invalid_stars": "Х„ХёЦ‚ХїЦ„ХЎХЈЦЂХҐЦ„ ХЎХґХўХёХІХ» Х©Х«Хѕ 1-Х«ЦЃ 150000 Stars ХґХ«Х»ХЎХЇХЎХµЦ„ХёЦ‚ХґЦ‰",
+    "stars_range": "ФіХёЦ‚ХґХЎЦЂХЁ ХєХҐХїЦ„ Х§ Х¬Х«Х¶Х« 1-Х«ЦЃ 150000 Telegram StarsЦ‰",
+    "invoice": "{title}\n{description}\n\nХЋХіХЎЦЂХґХЎХ¶ ХҐХ¶Х©ХЎХЇХЎХќ {stars} Telegram StarsЦ‰",
+    "need_email": "ХЋХіХЎЦЂХёЦ‚ХґХЁ ХЅХїХЎЦЃХѕХҐХ¬ Х§Ц‰\nХ€Ц‚ХІХЎЦЂХЇХҐЦ„ email-ХЁ, Ц‡ ХҐХЅ ХЇХЅХїХҐХІХ®ХҐХґ CherryX Х°ХЎХ·Х«Хѕ, ХЇХЇХ«ЦЂХЎХјХҐХґ ЦѓХЎХ©ХҐХ©ХЁ ХЇХЎХґ ХўХЎХ¬ХЎХ¶ХЅХЁ Ц‡ ХЇХёЦ‚ХІХЎЦЂХЇХҐХґ ХґХёЦ‚ХїЦ„Х« ХїХѕХµХЎХ¬Х¶ХҐЦЂХЁЦ‰",
+    "applied": "ХЋХіХЎЦЂХёЦ‚ХґХЁ ХЅХїХЎЦЃХѕХҐХ¬ Ц‡ ХЇХ«ЦЂХЎХјХѕХҐХ¬ Х§Ц‰\n{title}\nCherryX: {cherryx}",
+    "account_created": "CherryX Х°ХЎХ·Х«ХѕХЁ ХЅХїХҐХІХ®ХѕХҐХ¬ Х§, ХѕХіХЎЦЂХёЦ‚ХґХЁ ХЇХ«ЦЂХЎХјХѕХҐХ¬ Х§Ц‰\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nФ±ХјХЎХ»Х«Х¶ ХґХёЦ‚ХїЦ„Х«ЦЃ Х°ХҐХїХё ЦѓХёХ­ХҐЦ„ ХЈХЎХІХїХ¶ХЎХўХЎХјХЁЦ‰",
+    "open_cherryx": "ФІХЎЦЃХҐХ¬ CherryX-ХЁ",
+    "email_invalid": "ФЅХ¶Х¤ЦЂХёЦ‚Хґ ХҐХ¶Ц„ ХёЦ‚ХІХЎЦЂХЇХҐХ¬ ХіХ«Х·Хї emailЦ‰",
+}
+BILLING_TEXT.update({
+    "ru": {
+        **BILLING_TEXT["ru"],
+        "pay_button": "РћРїР»Р°С‚РёС‚СЊ Stars",
+        "status_button": "РЎС‚Р°С‚СѓСЃ",
+        "wallet_button": "Р‘Р°Р»Р°РЅСЃ",
+        "support_button": "РџРѕРґРґРµСЂР¶РєР°",
+        "language_button": "РЇР·С‹Рє",
+        "mini_app": "РћС‚РєСЂС‹С‚СЊ CherryX",
+        "payment_link_invalid": "РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ СѓСЃС‚Р°СЂРµР»Р° РёР»Рё РЅРµРґРѕСЃС‚СѓРїРЅР°.",
+        "cancelled": "РћРє, РѕС‚РјРµРЅРёР».",
+        "pro_price": "Р”РѕСЃС‚СѓРї CherryX СЃС‚РѕРёС‚ {stars} Stars РЅР° {days} РґРЅРµР№.",
+        "wallet_error": "РќРµ СЃРјРѕРі РїСЂРѕРІРµСЂРёС‚СЊ Р°РєРєР°СѓРЅС‚ СЃРµР№С‡Р°СЃ. РџРѕРїСЂРѕР±СѓР№С‚Рµ /wallet РїРѕР·Р¶Рµ.",
+        "wallet_linked": "CherryX Р°РєРєР°СѓРЅС‚ РїСЂРёРІСЏР·Р°РЅ.\nР‘Р°Р»Р°РЅСЃ: {balance} CherryX.\nР”РѕСЃС‚СѓРї: {access}.",
+        "wallet_not_linked": "Telegram РїРѕРєР° РЅРµ РїСЂРёРІСЏР·Р°РЅ Рє Р°РєРєР°СѓРЅС‚Сѓ CherryX.\nРћР¶РёРґР°РµС‚ РїСЂРёРІСЏР·РєРё: {pending} CherryX.\n\nРћС‚РєСЂРѕР№С‚Рµ CherryX Pay РЅР° СЃР°Р№С‚Рµ, СЃРєРѕРїРёСЂСѓР№С‚Рµ /link CODE Рё РѕС‚РїСЂР°РІСЊС‚Рµ СЃСЋРґР°.",
+        "not_active": "РЅРµС‚ Р°РєС‚РёРІРЅРѕРіРѕ РґРѕСЃС‚СѓРїР°",
+        "link_missing": "РћС‚РїСЂР°РІСЊС‚Рµ РєРѕРјР°РЅРґСѓ СЃ РєРѕРґРѕРј РёР· CherryX Pay: /link CODE",
+        "link_failed": "РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ РїСЂРёРІСЏР·Р°С‚СЊ Р°РєРєР°СѓРЅС‚. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР»СѓС‡РёС‚СЊ РЅРѕРІС‹Р№ РєРѕРґ РІ CherryX Pay.",
+        "link_not_found": "РљРѕРґ РЅРµ РЅР°Р№РґРµРЅ РёР»Рё СѓР¶Рµ РёСЃРїРѕР»СЊР·РѕРІР°РЅ. РџРѕР»СѓС‡РёС‚Рµ РЅРѕРІС‹Р№ РєРѕРґ РІ CherryX Pay Рё РѕС‚РїСЂР°РІСЊС‚Рµ /link CODE.",
+        "link_success": "Р“РѕС‚РѕРІРѕ, Telegram РїСЂРёРІСЏР·Р°РЅ Рє CherryX Р°РєРєР°СѓРЅС‚Сѓ.\nР‘Р°Р»Р°РЅСЃ: {balance} CherryX.\nРўРµРїРµСЂСЊ РѕРїР»Р°С‚С‹ Stars С‡РµСЂРµР· Р±РѕС‚Р° Р±СѓРґСѓС‚ РїРѕРїР°РґР°С‚СЊ РІ СЌС‚РѕС‚ Р°РєРєР°СѓРЅС‚.",
+        "pay_support": "РџРѕРґРґРµСЂР¶РєР° РѕРїР»Р°С‚ CherryX С‡РµСЂРµР· Telegram Stars.\n\nР•СЃР»Рё Stars СЃРїРёСЃР°Р»РёСЃСЊ, РЅРѕ РґРѕСЃС‚СѓРї РёР»Рё Р±Р°Р»Р°РЅСЃ РЅРµ РїРѕСЏРІРёР»СЃСЏ: РѕС‚РїСЂР°РІСЊС‚Рµ СЃСЋРґР° СЃРєСЂРёРЅ РѕРїР»Р°С‚С‹, Telegram ID РёР· /id Рё РїСЂРёРјРµСЂРЅРѕРµ РІСЂРµРјСЏ РїР»Р°С‚РµР¶Р°.\nР”Р»СЏ РїСЂРёРІСЏР·РєРё Р°РєРєР°СѓРЅС‚Р° РёСЃРїРѕР»СЊР·СѓР№С‚Рµ /link CODE РёР· CherryX Pay. Р”Р»СЏ РїСЂРѕРІРµСЂРєРё Р±Р°Р»Р°РЅСЃР° вЂ” /wallet.",
+        "topup_invalid": "РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ СЃСѓРјРјР° РїРѕРїРѕР»РЅРµРЅРёСЏ.",
+        "precheckout_currency": "РћРїР»Р°С‚Р° РїСЂРёРЅРёРјР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РІ Telegram Stars.",
+        "precheckout_expired": "РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ СѓСЃС‚Р°СЂРµР»Р° РёР»Рё СѓР¶Рµ РёСЃРїРѕР»СЊР·РѕРІР°РЅР°.",
+        "precheckout_amount": "РЎСѓРјРјР° СЃС‡РµС‚Р° РЅРµ СЃРѕРІРїР°РґР°РµС‚.",
+    },
+    "uk": {
+        **BILLING_TEXT["uk"],
+        "pay_button": "РћРїР»Р°С‚РёС‚Рё Stars",
+        "status_button": "РЎС‚Р°С‚СѓСЃ",
+        "wallet_button": "Р‘Р°Р»Р°РЅСЃ",
+        "support_button": "РџС–РґС‚СЂРёРјРєР°",
+        "language_button": "РњРѕРІР°",
+        "mini_app": "Р’С–РґРєСЂРёС‚Рё CherryX",
+        "payment_link_invalid": "РџРѕСЃРёР»Р°РЅРЅСЏ РЅР° РѕРїР»Р°С‚Сѓ Р·Р°СЃС‚Р°СЂС–Р»Рѕ Р°Р±Рѕ РЅРµРґРѕСЃС‚СѓРїРЅРµ.",
+        "cancelled": "РћРє, СЃРєР°СЃРѕРІР°РЅРѕ.",
+        "pro_price": "Р”РѕСЃС‚СѓРї CherryX РєРѕС€С‚СѓС” {stars} Stars РЅР° {days} РґРЅС–РІ.",
+        "wallet_error": "РќРµ РІРґР°Р»РѕСЃСЏ РїРµСЂРµРІС–СЂРёС‚Рё Р°РєР°СѓРЅС‚ Р·Р°СЂР°Р·. РЎРїСЂРѕР±СѓР№С‚Рµ /wallet РїС–Р·РЅС–С€Рµ.",
+        "wallet_linked": "CherryX Р°РєР°СѓРЅС‚ РїСЂРёРІ'СЏР·Р°РЅРѕ.\nР‘Р°Р»Р°РЅСЃ: {balance} CherryX.\nР”РѕСЃС‚СѓРї: {access}.",
+        "wallet_not_linked": "Telegram РїРѕРєРё РЅРµ РїСЂРёРІ'СЏР·Р°РЅРёР№ РґРѕ Р°РєР°СѓРЅС‚Р° CherryX.\nРћС‡С–РєСѓС” РїСЂРёРІ'СЏР·РєРё: {pending} CherryX.\n\nР’С–РґРєСЂРёР№С‚Рµ CherryX Pay РЅР° СЃР°Р№С‚С–, СЃРєРѕРїС–СЋР№С‚Рµ /link CODE С– РЅР°РґС–С€Р»С–С‚СЊ СЃСЋРґРё.",
+        "not_active": "РЅРµРјР°С” Р°РєС‚РёРІРЅРѕРіРѕ РґРѕСЃС‚СѓРїСѓ",
+        "link_missing": "РќР°РґС–С€Р»С–С‚СЊ РєРѕРјР°РЅРґСѓ Р· РєРѕРґРѕРј С–Р· CherryX Pay: /link CODE",
+        "link_failed": "РќРµ РІРґР°Р»РѕСЃСЏ РїСЂРёРІ'СЏР·Р°С‚Рё Р°РєР°СѓРЅС‚. РЎРїСЂРѕР±СѓР№С‚Рµ РѕС‚СЂРёРјР°С‚Рё РЅРѕРІРёР№ РєРѕРґ Сѓ CherryX Pay.",
+        "link_not_found": "РљРѕРґ РЅРµ Р·РЅР°Р№РґРµРЅРѕ Р°Р±Рѕ РІР¶Рµ РІРёРєРѕСЂРёСЃС‚Р°РЅРѕ. РћС‚СЂРёРјР°Р№С‚Рµ РЅРѕРІРёР№ РєРѕРґ Сѓ CherryX Pay С– РЅР°РґС–С€Р»С–С‚СЊ /link CODE.",
+        "link_success": "Р“РѕС‚РѕРІРѕ, Telegram РїСЂРёРІ'СЏР·Р°РЅРѕ РґРѕ CherryX Р°РєР°СѓРЅС‚Р°.\nР‘Р°Р»Р°РЅСЃ: {balance} CherryX.\nРўРµРїРµСЂ РѕРїР»Р°С‚Рё Stars С‡РµСЂРµР· Р±РѕС‚Р° РїРѕС‚СЂР°РїР»СЏС‚РёРјСѓС‚СЊ Сѓ С†РµР№ Р°РєР°СѓРЅС‚.",
+        "pay_support": "РџС–РґС‚СЂРёРјРєР° РѕРїР»Р°С‚ CherryX С‡РµСЂРµР· Telegram Stars.\n\nРЇРєС‰Рѕ Stars СЃРїРёСЃР°Р»РёСЃСЊ, Р°Р»Рµ РґРѕСЃС‚СѓРї Р°Р±Рѕ Р±Р°Р»Р°РЅСЃ РЅРµ Р·'СЏРІРёРІСЃСЏ: РЅР°РґС–С€Р»С–С‚СЊ СЃСЋРґРё СЃРєСЂРёРЅ РѕРїР»Р°С‚Рё, Telegram ID Р· /id С– РїСЂРёР±Р»РёР·РЅРёР№ С‡Р°СЃ РїР»Р°С‚РµР¶Сѓ.\nР”Р»СЏ РїСЂРёРІ'СЏР·РєРё Р°РєР°СѓРЅС‚Р° РІРёРєРѕСЂРёСЃС‚РѕРІСѓР№С‚Рµ /link CODE С–Р· CherryX Pay. Р”Р»СЏ РїРµСЂРµРІС–СЂРєРё Р±Р°Р»Р°РЅСЃСѓ вЂ” /wallet.",
+        "topup_invalid": "РќРµРєРѕСЂРµРєС‚РЅР° СЃСѓРјР° РїРѕРїРѕРІРЅРµРЅРЅСЏ.",
+        "precheckout_currency": "РћРїР»Р°С‚Р° РїСЂРёР№РјР°С”С‚СЊСЃСЏ С‚С–Р»СЊРєРё РІ Telegram Stars.",
+        "precheckout_expired": "РџРѕСЃРёР»Р°РЅРЅСЏ РЅР° РѕРїР»Р°С‚Сѓ Р·Р°СЃС‚Р°СЂС–Р»Рѕ Р°Р±Рѕ РІР¶Рµ РІРёРєРѕСЂРёСЃС‚Р°РЅРµ.",
+        "precheckout_amount": "РЎСѓРјР° СЂР°С…СѓРЅРєСѓ РЅРµ Р·Р±С–РіР°С”С‚СЊСЃСЏ.",
+    },
+    "en": {
+        **BILLING_TEXT["en"],
+        "pay_button": "Pay Stars",
+        "status_button": "Status",
+        "wallet_button": "Wallet",
+        "support_button": "Support",
+        "language_button": "Language",
+        "mini_app": "Open CherryX",
+        "payment_link_invalid": "Payment link is expired or unavailable.",
+        "cancelled": "Cancelled.",
+        "pro_price": "CherryX access costs {stars} Stars for {days} days.",
+        "wallet_error": "Could not check wallet now. Try /wallet later.",
+        "wallet_linked": "CherryX account linked.\nBalance: {balance} CherryX.\nAccess: {access}.",
+        "wallet_not_linked": "Telegram is not linked to a CherryX account yet.\nPending: {pending} CherryX.\n\nOpen CherryX Pay on the website, copy /link CODE and send it here.",
+        "not_active": "not active",
+        "link_missing": "Send the command with the code from CherryX Pay: /link CODE",
+        "link_failed": "Could not link the account. Try getting a new code in CherryX Pay.",
+        "link_not_found": "Code was not found or has already been used. Get a new code in CherryX Pay and send /link CODE.",
+        "link_success": "Done, Telegram is linked to your CherryX account.\nBalance: {balance} CherryX.\nStars payments through the bot will now go to this account.",
+        "pay_support": "CherryX payment support via Telegram Stars.\n\nIf Stars were charged but access or balance did not appear, send a payment screenshot, Telegram ID from /id, and the approximate payment time.\nTo link an account, use /link CODE from CherryX Pay. To check balance, use /wallet.",
+        "topup_invalid": "Invalid top up amount.",
+        "precheckout_currency": "Payment is accepted only in Telegram Stars.",
+        "precheckout_expired": "Payment link is expired or already used.",
+        "precheckout_amount": "Invoice amount does not match.",
+    },
+    "fr": {
+        **BILLING_TEXT["fr"],
+        "pay_button": "Payer Stars",
+        "status_button": "Statut",
+        "wallet_button": "Solde",
+        "support_button": "Support",
+        "language_button": "Langue",
+        "mini_app": "Ouvrir CherryX",
+        "payment_link_invalid": "Le lien de paiement a expirГ© ou n'est pas disponible.",
+        "cancelled": "AnnulГ©.",
+        "pro_price": "L'accГЁs CherryX coГ»te {stars} Stars pour {days} jours.",
+        "wallet_error": "Impossible de vГ©rifier le solde maintenant. RГ©essayez avec /wallet plus tard.",
+        "wallet_linked": "Compte CherryX liГ©.\nSolde : {balance} CherryX.\nAccГЁs : {access}.",
+        "wallet_not_linked": "Telegram n'est pas encore liГ© Г  un compte CherryX.\nEn attente : {pending} CherryX.\n\nOuvrez CherryX Pay sur le site, copiez /link CODE et envoyez-le ici.",
+        "not_active": "non actif",
+        "link_missing": "Envoyez la commande avec le code de CherryX Pay : /link CODE",
+        "link_failed": "Impossible de lier le compte. GГ©nГ©rez un nouveau code dans CherryX Pay.",
+        "link_not_found": "Code introuvable ou dГ©jГ  utilisГ©. GГ©nГ©rez un nouveau code dans CherryX Pay et envoyez /link CODE.",
+        "link_success": "C'est fait, Telegram est liГ© au compte CherryX.\nSolde : {balance} CherryX.\nLes paiements Stars via le bot iront maintenant sur ce compte.",
+        "pay_support": "Support des paiements CherryX via Telegram Stars.\n\nSi les Stars ont Г©tГ© dГ©bitГ©es mais que l'accГЁs ou le solde n'apparaГ®t pas, envoyez une capture du paiement, votre Telegram ID depuis /id et l'heure approximative du paiement.\nPour lier un compte, utilisez /link CODE depuis CherryX Pay. Pour vГ©rifier le solde, utilisez /wallet.",
+        "topup_invalid": "Montant de recharge invalide.",
+        "precheckout_currency": "Le paiement est acceptГ© uniquement en Telegram Stars.",
+        "precheckout_expired": "Le lien de paiement a expirГ© ou a dГ©jГ  Г©tГ© utilisГ©.",
+        "precheckout_amount": "Le montant de la facture ne correspond pas.",
+    },
+    "de": {
+        **BILLING_TEXT["de"],
+        "pay_button": "Stars zahlen",
+        "status_button": "Status",
+        "wallet_button": "Guthaben",
+        "support_button": "Support",
+        "language_button": "Sprache",
+        "mini_app": "CherryX Г¶ffnen",
+        "payment_link_invalid": "Der Zahlungslink ist abgelaufen oder nicht verfГјgbar.",
+        "cancelled": "Abgebrochen.",
+        "pro_price": "CherryX-Zugang kostet {stars} Stars fГјr {days} Tage.",
+        "wallet_error": "Guthaben konnte jetzt nicht geprГјft werden. Versuchen Sie spГ¤ter /wallet.",
+        "wallet_linked": "CherryX-Konto verknГјpft.\nGuthaben: {balance} CherryX.\nZugang: {access}.",
+        "wallet_not_linked": "Telegram ist noch nicht mit einem CherryX-Konto verknГјpft.\nWartend: {pending} CherryX.\n\nГ–ffnen Sie CherryX Pay auf der Website, kopieren Sie /link CODE und senden Sie ihn hier.",
+        "not_active": "nicht aktiv",
+        "link_missing": "Senden Sie den Befehl mit dem Code aus CherryX Pay: /link CODE",
+        "link_failed": "Konto konnte nicht verknГјpft werden. Holen Sie einen neuen Code in CherryX Pay.",
+        "link_not_found": "Code nicht gefunden oder bereits verwendet. Holen Sie einen neuen Code in CherryX Pay und senden Sie /link CODE.",
+        "link_success": "Fertig, Telegram ist mit dem CherryX-Konto verknГјpft.\nGuthaben: {balance} CherryX.\nStars-Zahlungen Гјber den Bot gehen jetzt auf dieses Konto.",
+        "pay_support": "CherryX-Zahlungssupport Гјber Telegram Stars.\n\nWenn Stars abgebucht wurden, aber Zugang oder Guthaben nicht erschienen sind, senden Sie einen Zahlungs-Screenshot, Telegram ID aus /id und die ungefГ¤hre Zahlungszeit.\nZum VerknГјpfen nutzen Sie /link CODE aus CherryX Pay. Zum PrГјfen des Guthabens nutzen Sie /wallet.",
+        "topup_invalid": "UngГјltiger Aufladebetrag.",
+        "precheckout_currency": "Zahlung wird nur in Telegram Stars akzeptiert.",
+        "precheckout_expired": "Der Zahlungslink ist abgelaufen oder bereits verwendet.",
+        "precheckout_amount": "Der Rechnungsbetrag stimmt nicht Гјberein.",
+    },
+    "es": {
+        **BILLING_TEXT["es"],
+        "pay_button": "Pagar Stars",
+        "status_button": "Estado",
+        "wallet_button": "Saldo",
+        "support_button": "Soporte",
+        "language_button": "Idioma",
+        "mini_app": "Abrir CherryX",
+        "payment_link_invalid": "El enlace de pago expirГі o no estГЎ disponible.",
+        "cancelled": "Cancelado.",
+        "pro_price": "El acceso CherryX cuesta {stars} Stars por {days} dГ­as.",
+        "wallet_error": "No se pudo consultar el saldo ahora. Prueba /wallet mГЎs tarde.",
+        "wallet_linked": "Cuenta CherryX vinculada.\nSaldo: {balance} CherryX.\nAcceso: {access}.",
+        "wallet_not_linked": "Telegram aГєn no estГЎ vinculado a una cuenta CherryX.\nPendiente: {pending} CherryX.\n\nAbre CherryX Pay en el sitio, copia /link CODE y envГ­alo aquГ­.",
+        "not_active": "no activo",
+        "link_missing": "EnvГ­a el comando con el cГіdigo de CherryX Pay: /link CODE",
+        "link_failed": "No se pudo vincular la cuenta. Genera un cГіdigo nuevo en CherryX Pay.",
+        "link_not_found": "CГіdigo no encontrado o ya usado. Genera un cГіdigo nuevo en CherryX Pay y envГ­a /link CODE.",
+        "link_success": "Listo, Telegram estГЎ vinculado a la cuenta CherryX.\nSaldo: {balance} CherryX.\nLos pagos Stars desde el bot irГЎn ahora a esta cuenta.",
+        "pay_support": "Soporte de pagos CherryX con Telegram Stars.\n\nSi se cobraron Stars pero no apareciГі el acceso o saldo, envГ­a una captura del pago, Telegram ID de /id y la hora aproximada del pago.\nPara vincular una cuenta, usa /link CODE desde CherryX Pay. Para revisar saldo, usa /wallet.",
+        "topup_invalid": "Importe de recarga invГЎlido.",
+        "precheckout_currency": "El pago solo se acepta en Telegram Stars.",
+        "precheckout_expired": "El enlace de pago expirГі o ya fue usado.",
+        "precheckout_amount": "El importe de la factura no coincide.",
+    },
+    "it": {
+        **BILLING_TEXT["it"],
+        "pay_button": "Paga Stars",
+        "status_button": "Stato",
+        "wallet_button": "Saldo",
+        "support_button": "Supporto",
+        "language_button": "Lingua",
+        "mini_app": "Apri CherryX",
+        "payment_link_invalid": "Il link di pagamento ГЁ scaduto o non disponibile.",
+        "cancelled": "Annullato.",
+        "pro_price": "L'accesso CherryX costa {stars} Stars per {days} giorni.",
+        "wallet_error": "Impossibile controllare il saldo ora. Prova /wallet piГ№ tardi.",
+        "wallet_linked": "Account CherryX collegato.\nSaldo: {balance} CherryX.\nAccesso: {access}.",
+        "wallet_not_linked": "Telegram non ГЁ ancora collegato a un account CherryX.\nIn attesa: {pending} CherryX.\n\nApri CherryX Pay sul sito, copia /link CODE e invialo qui.",
+        "not_active": "non attivo",
+        "link_missing": "Invia il comando con il codice da CherryX Pay: /link CODE",
+        "link_failed": "Impossibile collegare l'account. Genera un nuovo codice in CherryX Pay.",
+        "link_not_found": "Codice non trovato o giГ  usato. Genera un nuovo codice in CherryX Pay e invia /link CODE.",
+        "link_success": "Fatto, Telegram ГЁ collegato all'account CherryX.\nSaldo: {balance} CherryX.\nI pagamenti Stars tramite bot andranno ora su questo account.",
+        "pay_support": "Supporto pagamenti CherryX tramite Telegram Stars.\n\nSe gli Stars sono stati addebitati ma accesso o saldo non sono apparsi, invia screenshot del pagamento, Telegram ID da /id e orario approssimativo del pagamento.\nPer collegare un account usa /link CODE da CherryX Pay. Per controllare il saldo usa /wallet.",
+        "topup_invalid": "Importo di ricarica non valido.",
+        "precheckout_currency": "Il pagamento ГЁ accettato solo in Telegram Stars.",
+        "precheckout_expired": "Il link di pagamento ГЁ scaduto o giГ  usato.",
+        "precheckout_amount": "L'importo della fattura non corrisponde.",
+    },
+    "ka": {
+        **BILLING_TEXT["ka"],
+        "pay_button": "Stars бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ",
+        "status_button": "бѓЎбѓўбѓђбѓўбѓЈбѓЎбѓ",
+        "wallet_button": "бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓ",
+        "support_button": "бѓ›бѓ®бѓђбѓ бѓ“бѓђбѓ­бѓ”бѓ бѓђ",
+        "language_button": "бѓ”бѓњбѓђ",
+        "mini_app": "CherryX-бѓбѓЎ бѓ’бѓђбѓ®бѓЎбѓњбѓђ",
+        "payment_link_invalid": "бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓбѓЎ бѓ‘бѓ›бѓЈбѓљбѓ бѓ•бѓђбѓ“бѓђбѓ’бѓђбѓЎбѓЈбѓљбѓбѓђ бѓђбѓњ бѓ›бѓбѓЈбѓ¬бѓ•бѓ“бѓќбѓ›бѓ”бѓљбѓбѓђ.",
+        "cancelled": "бѓ’бѓђбѓЈбѓҐбѓ›бѓ“бѓђ.",
+        "pro_price": "CherryX бѓ¬бѓ•бѓ“бѓќбѓ›бѓђ бѓ¦бѓбѓ бѓЎ {stars} Stars {days} бѓ“бѓ¦бѓбѓ—.",
+        "wallet_error": "бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓбѓЎ бѓЁбѓ”бѓ›бѓќбѓ¬бѓ›бѓ”бѓ‘бѓђ бѓђбѓ®бѓљбѓђ бѓ•бѓ”бѓ  бѓ›бѓќбѓ®бѓ”бѓ бѓ®бѓ“бѓђ. бѓЎбѓЄбѓђбѓ“бѓ”бѓ— /wallet бѓ›бѓќбѓ’бѓ•бѓбѓђбѓњбѓ”бѓ‘бѓбѓ—.",
+        "wallet_linked": "CherryX бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓ бѓ›бѓбѓ‘бѓ›бѓЈбѓљбѓбѓђ.\nбѓ‘бѓђбѓљбѓђбѓњбѓЎбѓ: {balance} CherryX.\nбѓ¬бѓ•бѓ“бѓќбѓ›бѓђ: {access}.",
+        "wallet_not_linked": "Telegram бѓЇбѓ”бѓ  бѓђбѓ  бѓђбѓ бѓбѓЎ бѓ›бѓбѓ‘бѓ›бѓЈбѓљбѓ CherryX бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓ—бѓђбѓњ.\nбѓ›бѓќбѓљбѓќбѓ“бѓбѓњбѓЁбѓбѓђ: {pending} CherryX.\n\nбѓ’бѓђбѓ®бѓЎбѓ”бѓњбѓбѓ— CherryX Pay бѓЎбѓђбѓбѓўбѓ–бѓ”, бѓ“бѓђбѓђбѓ™бѓќбѓћбѓбѓ бѓ”бѓ— /link CODE бѓ“бѓђ бѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓ”бѓ— бѓђбѓҐ.",
+        "not_active": "бѓђбѓ бѓђбѓђбѓҐбѓўбѓбѓЈбѓ бѓ",
+        "link_missing": "бѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓ”бѓ— бѓ‘бѓ бѓ«бѓђбѓњбѓ”бѓ‘бѓђ CherryX Pay-бѓбѓЎ бѓ™бѓќбѓ“бѓбѓ—: /link CODE",
+        "link_failed": "бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓбѓЎ бѓ›бѓбѓ‘бѓ›бѓђ бѓ•бѓ”бѓ  бѓ›бѓќбѓ®бѓ”бѓ бѓ®бѓ“бѓђ. бѓ›бѓбѓбѓ¦бѓ”бѓ— бѓђбѓ®бѓђбѓљбѓ бѓ™бѓќбѓ“бѓ CherryX Pay-бѓЁбѓ.",
+        "link_not_found": "бѓ™бѓќбѓ“бѓ бѓ•бѓ”бѓ  бѓ›бѓќбѓбѓ«бѓ”бѓ‘бѓњбѓђ бѓђбѓњ бѓЈбѓ™бѓ•бѓ” бѓ’бѓђбѓ›бѓќбѓ§бѓ”бѓњбѓ”бѓ‘бѓЈбѓљбѓбѓђ. бѓ›бѓбѓбѓ¦бѓ”бѓ— бѓђбѓ®бѓђбѓљбѓ бѓ™бѓќбѓ“бѓ CherryX Pay-бѓЁбѓ бѓ“бѓђ бѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓ”бѓ— /link CODE.",
+        "link_success": "бѓ›бѓ–бѓђбѓ“бѓђбѓђ, Telegram бѓ›бѓбѓ‘бѓ›бѓЈбѓљбѓбѓђ CherryX бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓ—бѓђбѓњ.\nбѓ‘бѓђбѓљбѓђбѓњбѓЎбѓ: {balance} CherryX.\nStars бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓ”бѓ‘бѓ бѓ‘бѓќбѓўбѓбѓ“бѓђбѓњ бѓђбѓ®бѓљбѓђ бѓђбѓ› бѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓ–бѓ” бѓ©бѓђбѓбѓ бѓбѓЄбѓ®бѓ”бѓ‘бѓђ.",
+        "pay_support": "CherryX бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓ”бѓ‘бѓбѓЎ бѓ›бѓ®бѓђбѓ бѓ“бѓђбѓ­бѓ”бѓ бѓђ Telegram Stars-бѓбѓ—.\n\nбѓ—бѓЈ Stars бѓ©бѓђбѓ›бѓќбѓбѓ­бѓ бѓђ, бѓ›бѓђбѓ’бѓ бѓђбѓ› бѓ¬бѓ•бѓ“бѓќбѓ›бѓђ бѓђбѓњ бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓ бѓђбѓ  бѓ’бѓђбѓ›бѓќбѓ©бѓњбѓ“бѓђ, бѓ’бѓђбѓ›бѓќбѓ’бѓ–бѓђбѓ•бѓњбѓ”бѓ— бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓбѓЎ бѓЎбѓҐбѓ бѓбѓњбѓ, Telegram ID /id-бѓ“бѓђбѓњ бѓ“бѓђ бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓбѓЎ бѓЎбѓђбѓ•бѓђбѓ бѓђбѓЈбѓ“бѓќ бѓ“бѓ бѓќ.\nбѓђбѓњбѓ’бѓђбѓ бѓбѓЁбѓбѓЎ бѓ›бѓбѓЎбѓђбѓ‘бѓ›бѓ”бѓљбѓђбѓ“ бѓ’бѓђбѓ›бѓќбѓбѓ§бѓ”бѓњбѓ”бѓ— /link CODE CherryX Pay-бѓ“бѓђбѓњ. бѓ‘бѓђбѓљбѓђбѓњбѓЎбѓбѓЎ бѓЁбѓ”бѓЎбѓђбѓ›бѓќбѓ¬бѓ›бѓ”бѓ‘бѓљбѓђбѓ“ бѓ’бѓђбѓ›бѓќбѓбѓ§бѓ”бѓњбѓ”бѓ— /wallet.",
+        "topup_invalid": "бѓЁбѓ”бѓ•бѓЎбѓ”бѓ‘бѓбѓЎ бѓ—бѓђбѓњбѓ®бѓђ бѓђбѓ бѓђбѓЎбѓ¬бѓќбѓ бѓбѓђ.",
+        "precheckout_currency": "бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓђ бѓ›бѓбѓбѓ¦бѓ”бѓ‘бѓђ бѓ›бѓ®бѓќбѓљбѓќбѓ“ Telegram Stars-бѓбѓ—.",
+        "precheckout_expired": "бѓ’бѓђбѓ“бѓђбѓ®бѓ“бѓбѓЎ бѓ‘бѓ›бѓЈбѓљбѓ бѓ•бѓђбѓ“бѓђбѓ’бѓђбѓЎбѓЈбѓљбѓбѓђ бѓђбѓњ бѓЈбѓ™бѓ•бѓ” бѓ’бѓђбѓ›бѓќбѓ§бѓ”бѓњбѓ”бѓ‘бѓЈбѓљбѓбѓђ.",
+        "precheckout_amount": "бѓбѓњбѓ•бѓќбѓбѓЎбѓбѓЎ бѓ—бѓђбѓњбѓ®бѓђ бѓђбѓ  бѓ”бѓ›бѓ—бѓ®бѓ•бѓ”бѓ•бѓђ.",
+    },
+    "hy": {
+        **BILLING_TEXT["hy"],
+        "pay_button": "ХЋХіХЎЦЂХҐХ¬ Stars",
+        "status_button": "ФїХЎЦЂХЈХЎХѕХ«ХіХЎХЇ",
+        "wallet_button": "ФІХЎХ¬ХЎХ¶ХЅ",
+        "support_button": "Ф±Х»ХЎХЇЦЃХёЦ‚Х©ХµХёЦ‚Х¶",
+        "language_button": "ФјХҐХ¦ХёЦ‚",
+        "mini_app": "ФІХЎЦЃХҐХ¬ CherryX-ХЁ",
+        "payment_link_invalid": "ХЋХіХЎЦЂХґХЎХ¶ Х°ХІХёЦ‚ХґХЁ ХЄХЎХґХЇХҐХїХЎХ¶ЦЃ Х§ ХЇХЎХґ ХЎХ¶Х°ХЎХЅХЎХ¶ХҐХ¬Х«Ц‰",
+        "cancelled": "Х‰ХҐХІХЎЦЂХЇХѕХЎХ® Х§Ц‰",
+        "pro_price": "CherryX Х°ХЎХЅХЎХ¶ХҐХ¬Х«ХёЦ‚Х©ХµХёЦ‚Х¶ХЁ ХЎЦЂХЄХҐ {stars} Stars {days} Ц…ЦЂХёХѕЦ‰",
+        "wallet_error": "Х‰Х°ХЎХ»ХёХІХѕХҐЦЃ ХЅХїХёЦ‚ХЈХҐХ¬ ХўХЎХ¬ХЎХ¶ХЅХЁ Х°Х«ХґХЎЦ‰ Х“ХёЦЂХ±ХҐЦ„ /wallet ХЎХѕХҐХ¬Х« ХёЦ‚Х·Ц‰",
+        "wallet_linked": "CherryX Х°ХЎХ·Х«ХѕХЁ ХЇХЎХєХѕХЎХ® Х§Ц‰\nФІХЎХ¬ХЎХ¶ХЅХќ {balance} CherryXЦ‰\nХЂХЎХЅХЎХ¶ХҐХ¬Х«ХёЦ‚Х©ХµХёЦ‚Х¶Хќ {access}Ц‰",
+        "wallet_not_linked": "Telegram-ХЁ Х¤ХҐХј ХЇХЎХєХѕХЎХ® Х№Х§ CherryX Х°ХЎХ·ХѕХ« Х°ХҐХїЦ‰\nХЌХєХЎХЅХёЦ‚Хґ Х§Хќ {pending} CherryXЦ‰\n\nФІХЎЦЃХҐЦ„ CherryX Pay-ХЁ ХЇХЎХµЦ„ХёЦ‚Хґ, ХєХЎХїХіХҐХ¶ХҐЦ„ /link CODE Ц‡ ХёЦ‚ХІХЎЦЂХЇХҐЦ„ ХЎХµХЅХїХҐХІЦ‰",
+        "not_active": "ХЎХЇХїХ«Хѕ Х№Х§",
+        "link_missing": "Х€Ц‚ХІХЎЦЂХЇХҐЦ„ Х°ЦЂХЎХґХЎХ¶ХЁ CherryX Pay-Х« ХЇХёХ¤ХёХѕХќ /link CODE",
+        "link_failed": "Х‰Х°ХЎХ»ХёХІХѕХҐЦЃ ХЇХЎХєХҐХ¬ Х°ХЎХ·Х«ХѕХЁЦ‰ ХЌХїХЎЦЃХҐЦ„ Х¶ХёЦЂ ХЇХёХ¤ CherryX Pay-ХёЦ‚ХґЦ‰",
+        "link_not_found": "ФїХёХ¤ХЁ Х№Х« ХЈХїХ¶ХѕХҐХ¬ ХЇХЎХґ ХЎЦЂХ¤ХҐХ¶ Ц…ХЈХїХЎХЈХёЦЂХ®ХѕХҐХ¬ Х§Ц‰ ХЌХїХЎЦЃХҐЦ„ Х¶ХёЦЂ ХЇХёХ¤ CherryX Pay-ХёЦ‚Хґ Ц‡ ХёЦ‚ХІХЎЦЂХЇХҐЦ„ /link CODEЦ‰",
+        "link_success": "ХЉХЎХїЦЂХЎХЅХї Х§, Telegram-ХЁ ХЇХЎХєХѕХЎХ® Х§ CherryX Х°ХЎХ·ХѕХ« Х°ХҐХїЦ‰\nФІХЎХ¬ХЎХ¶ХЅХќ {balance} CherryXЦ‰\nBot-Х« Stars ХѕХіХЎЦЂХёЦ‚ХґХ¶ХҐЦЂХЁ ХЎХµХЄХґ ХЇХЈХ¶ХЎХ¶ ХЎХµХЅ Х°ХЎХ·ХѕХ«Х¶Ц‰",
+        "pay_support": "CherryX ХѕХіХЎЦЂХёЦ‚ХґХ¶ХҐЦЂХ« ХЎХ»ХЎХЇЦЃХёЦ‚Х©ХµХёЦ‚Х¶ Telegram Stars-ХёХѕЦ‰\n\nФµХ©ХҐ Stars-ХЁ ХЈХЎХ¶Х±ХѕХҐХ¬ Х§, ХўХЎХµЦЃ Х°ХЎХЅХЎХ¶ХҐХ¬Х«ХёЦ‚Х©ХµХёЦ‚Х¶ХЁ ХЇХЎХґ ХўХЎХ¬ХЎХ¶ХЅХЁ Х№Х« Х°ХЎХµХїХ¶ХѕХҐХ¬, ХёЦ‚ХІХЎЦЂХЇХҐЦ„ ХѕХіХЎЦЂХґХЎХ¶ ХЅЦ„ЦЂХ«Х¶ХЁ, Telegram ID-Х¶ /id-Х«ЦЃ Ц‡ ХѕХіХЎЦЂХґХЎХ¶ ХґХёХїХЎХѕХёЦЂ ХЄХЎХґХЁЦ‰\nХЂХЎХ·Х«Хѕ ХЇХЎХєХҐХ¬ХёЦ‚ Х°ХЎХґХЎЦЂ Ц…ХЈХїХЎХЈХёЦЂХ®ХҐЦ„ /link CODE CherryX Pay-Х«ЦЃЦ‰ ФІХЎХ¬ХЎХ¶ХЅХЁ ХЅХїХёЦ‚ХЈХҐХ¬ХёЦ‚ Х°ХЎХґХЎЦЂХќ /walletЦ‰",
+        "topup_invalid": "ХЂХЎХґХЎХ¬ЦЂХґХЎХ¶ ХЈХёЦ‚ХґХЎЦЂХЁ ХЅХ­ХЎХ¬ Х§Ц‰",
+        "precheckout_currency": "ХЋХіХЎЦЂХёЦ‚ХґХ¶ ХЁХ¶Х¤ХёЦ‚Х¶ХѕХёЦ‚Хґ Х§ ХґХ«ХЎХµХ¶ Telegram Stars-ХёХѕЦ‰",
+        "precheckout_expired": "ХЋХіХЎЦЂХґХЎХ¶ Х°ХІХёЦ‚ХґХЁ ХЄХЎХґХЇХҐХїХЎХ¶ЦЃ Х§ ХЇХЎХґ ХЎЦЂХ¤ХҐХ¶ Ц…ХЈХїХЎХЈХёЦЂХ®ХѕХҐХ¬ Х§Ц‰",
+        "precheckout_amount": "Ф»Х¶ХѕХёХµХЅХ« ХЈХёЦ‚ХґХЎЦЂХЁ Х№Х« Х°ХЎХґХЁХ¶ХЇХ¶ХёЦ‚ХґЦ‰",
+    },
+})
+
+
+BILLING_TEXT.update({
+    "ru": {
+        **BILLING_TEXT["ru"],
+        "pay_button": "Оплатить Stars",
+        "status_button": "Статус",
+        "wallet_button": "Баланс",
+        "support_button": "Поддержка",
+        "language_button": "Язык",
+        "mini_app": "Открыть CherryX",
+        "payment_link_invalid": "Ссылка на оплату устарела или недоступна.",
+        "cancelled": "Ок, отменил.",
+        "pro_price": "Доступ CherryX стоит {stars} Stars на {days} дней.",
+        "wallet_error": "Не смог проверить баланс сейчас. Попробуйте /wallet позже.",
+        "wallet_linked": "CherryX аккаунт привязан.\nБаланс: {balance} CherryX.\nДоступ: {access}.",
+        "wallet_not_linked": "Telegram пока не привязан к аккаунту CherryX.\nОжидает привязки: {pending} CherryX.\n\nОткройте CherryX Pay на сайте, скопируйте /link CODE и отправьте сюда.",
+        "not_active": "нет активного доступа",
+        "link_missing": "Отправьте команду с кодом из CherryX Pay: /link CODE",
+        "link_failed": "Не получилось привязать аккаунт. Попробуйте получить новый код в CherryX Pay.",
+        "link_not_found": "Код не найден или уже использован. Получите новый код в CherryX Pay и отправьте /link CODE.",
+        "link_success": "Готово, Telegram привязан к CherryX аккаунту.\nБаланс: {balance} CherryX.\nТеперь оплаты Stars через бота будут попадать в этот аккаунт.",
+        "pay_support": "Поддержка оплат CherryX через Telegram Stars.\n\nЕсли Stars списались, но доступ или баланс не появился: отправьте сюда скрин оплаты, Telegram ID из /id и примерное время платежа.\nДля привязки аккаунта используйте /link CODE из CherryX Pay. Для проверки баланса — /wallet.",
+        "topup_invalid": "Некорректная сумма пополнения.",
+        "precheckout_currency": "Оплата принимается только в Telegram Stars.",
+        "precheckout_expired": "Ссылка на оплату устарела или уже использована.",
+        "precheckout_amount": "Сумма счета не совпадает.",
+    },
+    "uk": {
+        **BILLING_TEXT["uk"],
+        "pay_button": "Оплатити Stars",
+        "status_button": "Статус",
+        "wallet_button": "Баланс",
+        "support_button": "Підтримка",
+        "language_button": "Мова",
+        "mini_app": "Відкрити CherryX",
+        "payment_link_invalid": "Посилання на оплату застаріло або недоступне.",
+        "cancelled": "Ок, скасовано.",
+        "pro_price": "Доступ CherryX коштує {stars} Stars на {days} днів.",
+        "wallet_error": "Не вдалося перевірити баланс зараз. Спробуйте /wallet пізніше.",
+        "wallet_linked": "CherryX акаунт прив'язано.\nБаланс: {balance} CherryX.\nДоступ: {access}.",
+        "wallet_not_linked": "Telegram поки не прив'язаний до акаунта CherryX.\nОчікує прив'язки: {pending} CherryX.\n\nВідкрийте CherryX Pay на сайті, скопіюйте /link CODE і надішліть сюди.",
+        "not_active": "немає активного доступу",
+        "link_missing": "Надішліть команду з кодом із CherryX Pay: /link CODE",
+        "link_failed": "Не вдалося прив'язати акаунт. Спробуйте отримати новий код у CherryX Pay.",
+        "link_not_found": "Код не знайдено або вже використано. Отримайте новий код у CherryX Pay і надішліть /link CODE.",
+        "link_success": "Готово, Telegram прив'язано до CherryX акаунта.\nБаланс: {balance} CherryX.\nТепер оплати Stars через бота потраплятимуть у цей акаунт.",
+        "pay_support": "Підтримка оплат CherryX через Telegram Stars.\n\nЯкщо Stars списались, але доступ або баланс не з'явився: надішліть сюди скрин оплати, Telegram ID з /id і приблизний час платежу.\nДля прив'язки акаунта використовуйте /link CODE із CherryX Pay. Для перевірки балансу — /wallet.",
+        "topup_invalid": "Некоректна сума поповнення.",
+        "precheckout_currency": "Оплата приймається тільки в Telegram Stars.",
+        "precheckout_expired": "Посилання на оплату застаріло або вже використане.",
+        "precheckout_amount": "Сума рахунку не збігається.",
+    },
+    "en": {
+        **BILLING_TEXT["en"],
+        "pay_button": "Pay Stars",
+        "status_button": "Status",
+        "wallet_button": "Wallet",
+        "support_button": "Support",
+        "language_button": "Language",
+        "mini_app": "Open CherryX",
+        "payment_link_invalid": "Payment link is expired or unavailable.",
+        "cancelled": "Cancelled.",
+        "pro_price": "CherryX access costs {stars} Stars for {days} days.",
+        "wallet_error": "Could not check wallet now. Try /wallet later.",
+        "wallet_linked": "CherryX account linked.\nBalance: {balance} CherryX.\nAccess: {access}.",
+        "wallet_not_linked": "Telegram is not linked to a CherryX account yet.\nPending: {pending} CherryX.\n\nOpen CherryX Pay on the website, copy /link CODE and send it here.",
+        "not_active": "not active",
+        "link_missing": "Send the command with the code from CherryX Pay: /link CODE",
+        "link_failed": "Could not link the account. Try getting a new code in CherryX Pay.",
+        "link_not_found": "Code was not found or has already been used. Get a new code in CherryX Pay and send /link CODE.",
+        "link_success": "Done, Telegram is linked to your CherryX account.\nBalance: {balance} CherryX.\nStars payments through the bot will now go to this account.",
+        "pay_support": "CherryX payment support via Telegram Stars.\n\nIf Stars were charged but access or balance did not appear, send a payment screenshot, Telegram ID from /id, and the approximate payment time.\nTo link an account, use /link CODE from CherryX Pay. To check balance, use /wallet.",
+        "topup_invalid": "Invalid top up amount.",
+        "precheckout_currency": "Payment is accepted only in Telegram Stars.",
+        "precheckout_expired": "Payment link is expired or already used.",
+        "precheckout_amount": "Invoice amount does not match.",
+    },
+    "fr": {
+        **BILLING_TEXT["fr"],
+        "pay_button": "Payer Stars",
+        "status_button": "Statut",
+        "wallet_button": "Solde",
+        "support_button": "Support",
+        "language_button": "Langue",
+        "mini_app": "Ouvrir CherryX",
+        "payment_link_invalid": "Le lien de paiement a expiré ou n'est pas disponible.",
+        "cancelled": "Annulé.",
+        "pro_price": "L'accès CherryX coûte {stars} Stars pour {days} jours.",
+        "wallet_error": "Impossible de vérifier le solde maintenant. Réessayez avec /wallet plus tard.",
+        "wallet_linked": "Compte CherryX lié.\nSolde : {balance} CherryX.\nAccès : {access}.",
+        "wallet_not_linked": "Telegram n'est pas encore lié à un compte CherryX.\nEn attente : {pending} CherryX.\n\nOuvrez CherryX Pay sur le site, copiez /link CODE et envoyez-le ici.",
+        "not_active": "non actif",
+        "link_missing": "Envoyez la commande avec le code de CherryX Pay : /link CODE",
+        "link_failed": "Impossible de lier le compte. Générez un nouveau code dans CherryX Pay.",
+        "link_not_found": "Code introuvable ou déjà utilisé. Générez un nouveau code dans CherryX Pay et envoyez /link CODE.",
+        "link_success": "C'est fait, Telegram est lié au compte CherryX.\nSolde : {balance} CherryX.\nLes paiements Stars via le bot iront maintenant sur ce compte.",
+        "pay_support": "Support des paiements CherryX via Telegram Stars.\n\nSi les Stars ont été débitées mais que l'accès ou le solde n'apparaît pas, envoyez une capture du paiement, votre Telegram ID depuis /id et l'heure approximative du paiement.\nPour lier un compte, utilisez /link CODE depuis CherryX Pay. Pour vérifier le solde, utilisez /wallet.",
+        "topup_invalid": "Montant de recharge invalide.",
+        "precheckout_currency": "Le paiement est accepté uniquement en Telegram Stars.",
+        "precheckout_expired": "Le lien de paiement a expiré ou a déjà été utilisé.",
+        "precheckout_amount": "Le montant de la facture ne correspond pas.",
+    },
+    "de": {
+        **BILLING_TEXT["de"],
+        "pay_button": "Stars zahlen",
+        "status_button": "Status",
+        "wallet_button": "Guthaben",
+        "support_button": "Support",
+        "language_button": "Sprache",
+        "mini_app": "CherryX öffnen",
+        "payment_link_invalid": "Der Zahlungslink ist abgelaufen oder nicht verfügbar.",
+        "cancelled": "Abgebrochen.",
+        "pro_price": "CherryX-Zugang kostet {stars} Stars für {days} Tage.",
+        "wallet_error": "Guthaben konnte jetzt nicht geprüft werden. Versuchen Sie später /wallet.",
+        "wallet_linked": "CherryX-Konto verknüpft.\nGuthaben: {balance} CherryX.\nZugang: {access}.",
+        "wallet_not_linked": "Telegram ist noch nicht mit einem CherryX-Konto verknüpft.\nWartend: {pending} CherryX.\n\nÖffnen Sie CherryX Pay auf der Website, kopieren Sie /link CODE und senden Sie ihn hier.",
+        "not_active": "nicht aktiv",
+        "link_missing": "Senden Sie den Befehl mit dem Code aus CherryX Pay: /link CODE",
+        "link_failed": "Konto konnte nicht verknüpft werden. Holen Sie einen neuen Code in CherryX Pay.",
+        "link_not_found": "Code nicht gefunden oder bereits verwendet. Holen Sie einen neuen Code in CherryX Pay und senden Sie /link CODE.",
+        "link_success": "Fertig, Telegram ist mit dem CherryX-Konto verknüpft.\nGuthaben: {balance} CherryX.\nStars-Zahlungen über den Bot gehen jetzt auf dieses Konto.",
+        "pay_support": "CherryX-Zahlungssupport über Telegram Stars.\n\nWenn Stars abgebucht wurden, aber Zugang oder Guthaben nicht erschienen sind, senden Sie einen Zahlungs-Screenshot, Telegram ID aus /id und die ungefähre Zahlungszeit.\nZum Verknüpfen nutzen Sie /link CODE aus CherryX Pay. Zum Prüfen des Guthabens nutzen Sie /wallet.",
+        "topup_invalid": "Ungültiger Aufladebetrag.",
+        "precheckout_currency": "Zahlung wird nur in Telegram Stars akzeptiert.",
+        "precheckout_expired": "Der Zahlungslink ist abgelaufen oder bereits verwendet.",
+        "precheckout_amount": "Der Rechnungsbetrag stimmt nicht überein.",
+    },
+    "es": {
+        **BILLING_TEXT["es"],
+        "pay_button": "Pagar Stars",
+        "status_button": "Estado",
+        "wallet_button": "Saldo",
+        "support_button": "Soporte",
+        "language_button": "Idioma",
+        "mini_app": "Abrir CherryX",
+        "payment_link_invalid": "El enlace de pago expiró o no está disponible.",
+        "cancelled": "Cancelado.",
+        "pro_price": "El acceso CherryX cuesta {stars} Stars por {days} días.",
+        "wallet_error": "No se pudo consultar el saldo ahora. Prueba /wallet más tarde.",
+        "wallet_linked": "Cuenta CherryX vinculada.\nSaldo: {balance} CherryX.\nAcceso: {access}.",
+        "wallet_not_linked": "Telegram aún no está vinculado a una cuenta CherryX.\nPendiente: {pending} CherryX.\n\nAbre CherryX Pay en el sitio, copia /link CODE y envíalo aquí.",
+        "not_active": "no activo",
+        "link_missing": "Envía el comando con el código de CherryX Pay: /link CODE",
+        "link_failed": "No se pudo vincular la cuenta. Genera un código nuevo en CherryX Pay.",
+        "link_not_found": "Código no encontrado o ya usado. Genera un código nuevo en CherryX Pay y envía /link CODE.",
+        "link_success": "Listo, Telegram está vinculado a la cuenta CherryX.\nSaldo: {balance} CherryX.\nLos pagos Stars desde el bot irán ahora a esta cuenta.",
+        "pay_support": "Soporte de pagos CherryX con Telegram Stars.\n\nSi se cobraron Stars pero no apareció el acceso o saldo, envía una captura del pago, Telegram ID de /id y la hora aproximada del pago.\nPara vincular una cuenta, usa /link CODE desde CherryX Pay. Para revisar saldo, usa /wallet.",
+        "topup_invalid": "Importe de recarga inválido.",
+        "precheckout_currency": "El pago solo se acepta en Telegram Stars.",
+        "precheckout_expired": "El enlace de pago expiró o ya fue usado.",
+        "precheckout_amount": "El importe de la factura no coincide.",
+    },
+    "it": {
+        **BILLING_TEXT["it"],
+        "pay_button": "Paga Stars",
+        "status_button": "Stato",
+        "wallet_button": "Saldo",
+        "support_button": "Supporto",
+        "language_button": "Lingua",
+        "mini_app": "Apri CherryX",
+        "payment_link_invalid": "Il link di pagamento è scaduto o non disponibile.",
+        "cancelled": "Annullato.",
+        "pro_price": "L'accesso CherryX costa {stars} Stars per {days} giorni.",
+        "wallet_error": "Impossibile controllare il saldo ora. Prova /wallet più tardi.",
+        "wallet_linked": "Account CherryX collegato.\nSaldo: {balance} CherryX.\nAccesso: {access}.",
+        "wallet_not_linked": "Telegram non è ancora collegato a un account CherryX.\nIn attesa: {pending} CherryX.\n\nApri CherryX Pay sul sito, copia /link CODE e invialo qui.",
+        "not_active": "non attivo",
+        "link_missing": "Invia il comando con il codice da CherryX Pay: /link CODE",
+        "link_failed": "Impossibile collegare l'account. Genera un nuovo codice in CherryX Pay.",
+        "link_not_found": "Codice non trovato o già usato. Genera un nuovo codice in CherryX Pay e invia /link CODE.",
+        "link_success": "Fatto, Telegram è collegato all'account CherryX.\nSaldo: {balance} CherryX.\nI pagamenti Stars tramite bot andranno ora su questo account.",
+        "pay_support": "Supporto pagamenti CherryX tramite Telegram Stars.\n\nSe gli Stars sono stati addebitati ma accesso o saldo non sono apparsi, invia screenshot del pagamento, Telegram ID da /id e orario approssimativo del pagamento.\nPer collegare un account usa /link CODE da CherryX Pay. Per controllare il saldo usa /wallet.",
+        "topup_invalid": "Importo di ricarica non valido.",
+        "precheckout_currency": "Il pagamento è accettato solo in Telegram Stars.",
+        "precheckout_expired": "Il link di pagamento è scaduto o già usato.",
+        "precheckout_amount": "L'importo della fattura non corrisponde.",
+    },
+    "ka": {
+        **BILLING_TEXT["ka"],
+        "pay_button": "Stars გადახდა",
+        "status_button": "სტატუსი",
+        "wallet_button": "ბალანსი",
+        "support_button": "მხარდაჭერა",
+        "language_button": "ენა",
+        "mini_app": "CherryX-ის გახსნა",
+        "payment_link_invalid": "გადახდის ბმული ვადაგასულია ან მიუწვდომელია.",
+        "cancelled": "გაუქმდა.",
+        "pro_price": "CherryX წვდომა ღირს {stars} Stars {days} დღით.",
+        "wallet_error": "ბალანსის შემოწმება ახლა ვერ მოხერხდა. სცადეთ /wallet მოგვიანებით.",
+        "wallet_linked": "CherryX ანგარიში მიბმულია.\nბალანსი: {balance} CherryX.\nწვდომა: {access}.",
+        "wallet_not_linked": "Telegram ჯერ არ არის მიბმული CherryX ანგარიშთან.\nმოლოდინშია: {pending} CherryX.\n\nგახსენით CherryX Pay საიტზე, დააკოპირეთ /link CODE და გამოგზავნეთ აქ.",
+        "not_active": "არააქტიური",
+        "link_missing": "გამოგზავნეთ ბრძანება CherryX Pay-ის კოდით: /link CODE",
+        "link_failed": "ანგარიშის მიბმა ვერ მოხერხდა. მიიღეთ ახალი კოდი CherryX Pay-ში.",
+        "link_not_found": "კოდი ვერ მოიძებნა ან უკვე გამოყენებულია. მიიღეთ ახალი კოდი CherryX Pay-ში და გამოგზავნეთ /link CODE.",
+        "link_success": "მზადაა, Telegram მიბმულია CherryX ანგარიშთან.\nბალანსი: {balance} CherryX.\nStars გადახდები ბოტიდან ახლა ამ ანგარიშზე ჩაირიცხება.",
+        "pay_support": "CherryX გადახდების მხარდაჭერა Telegram Stars-ით.\n\nთუ Stars ჩამოიჭრა, მაგრამ წვდომა ან ბალანსი არ გამოჩნდა, გამოგზავნეთ გადახდის სქრინი, Telegram ID /id-დან და გადახდის სავარაუდო დრო.\nანგარიშის მისაბმელად გამოიყენეთ /link CODE CherryX Pay-დან. ბალანსის შესამოწმებლად გამოიყენეთ /wallet.",
+        "topup_invalid": "შევსების თანხა არასწორია.",
+        "precheckout_currency": "გადახდა მიიღება მხოლოდ Telegram Stars-ით.",
+        "precheckout_expired": "გადახდის ბმული ვადაგასულია ან უკვე გამოყენებულია.",
+        "precheckout_amount": "ინვოისის თანხა არ ემთხვევა.",
+    },
+    "hy": {
+        **BILLING_TEXT["hy"],
+        "pay_button": "Վճարել Stars",
+        "status_button": "Կարգավիճակ",
+        "wallet_button": "Բալանս",
+        "support_button": "Աջակցություն",
+        "language_button": "Լեզու",
+        "mini_app": "Բացել CherryX-ը",
+        "payment_link_invalid": "Վճարման հղումը ժամկետանց է կամ անհասանելի։",
+        "cancelled": "Չեղարկված է։",
+        "pro_price": "CherryX հասանելիությունը արժե {stars} Stars {days} օրով։",
+        "wallet_error": "Չհաջողվեց ստուգել բալանսը հիմա։ Փորձեք /wallet ավելի ուշ։",
+        "wallet_linked": "CherryX հաշիվը կապված է։\nԲալանս՝ {balance} CherryX։\nՀասանելիություն՝ {access}։",
+        "wallet_not_linked": "Telegram-ը դեռ կապված չէ CherryX հաշվի հետ։\nՍպասում է՝ {pending} CherryX։\n\nԲացեք CherryX Pay-ը կայքում, պատճենեք /link CODE և ուղարկեք այստեղ։",
+        "not_active": "ակտիվ չէ",
+        "link_missing": "Ուղարկեք հրամանը CherryX Pay-ի կոդով՝ /link CODE",
+        "link_failed": "Չհաջողվեց կապել հաշիվը։ Ստացեք նոր կոդ CherryX Pay-ում։",
+        "link_not_found": "Կոդը չի գտնվել կամ արդեն օգտագործվել է։ Ստացեք նոր կոդ CherryX Pay-ում և ուղարկեք /link CODE։",
+        "link_success": "Պատրաստ է, Telegram-ը կապված է CherryX հաշվի հետ։\nԲալանս՝ {balance} CherryX։\nBot-ի Stars վճարումները այժմ կգնան այս հաշվին։",
+        "pay_support": "CherryX վճարումների աջակցություն Telegram Stars-ով։\n\nԵթե Stars-ը գանձվել է, բայց հասանելիությունը կամ բալանսը չի հայտնվել, ուղարկեք վճարման սքրինը, Telegram ID-ն /id-ից և վճարման մոտավոր ժամը։\nՀաշիվ կապելու համար օգտագործեք /link CODE CherryX Pay-ից։ Բալանսը ստուգելու համար՝ /wallet։",
+        "topup_invalid": "Համալրման գումարը սխալ է։",
+        "precheckout_currency": "Վճարումն ընդունվում է միայն Telegram Stars-ով։",
+        "precheckout_expired": "Վճարման հղումը ժամկետանց է կամ արդեն օգտագործվել է։",
+        "precheckout_amount": "Ինվոյսի գումարը չի համընկնում։",
+    },
+})
+
+
+BILLING_TEXT.update({
+    "ru": {
+        **BILLING_TEXT["ru"],
+        "intro": "CherryX Pay бот\n\nЗдесь можно оплатить пакет, пополнить баланс и проверить аккаунт.\n\n/link CODE - привязать аккаунт сайта\n/status - статус доступа\n/wallet - баланс CherryX\n/paysupport - помощь с оплатой",
+        "help": "Этот бот работает для оплат CherryX и мониторинга аккаунта.\n\n/subscribe - оплата через Telegram Stars\n/status - статус доступа\n/wallet - баланс и привязка\n/link CODE - привязать аккаунт сайта\n/paysupport - помощь с оплатой\n/id - Telegram ID",
+        "only": "Бот принимает оплаты и показывает статус CherryX. Используйте /subscribe, /status, /wallet или /paysupport.",
+        "choose": "Выберите пакет или пополнение баланса:",
+        "topup": "Пополнить баланс",
+        "enter_stars": "Введите сумму пополнения в Telegram Stars.\nМинимум: 1 Star. Максимум: 150000 Stars.\nНа баланс CherryX придет сумма по текущему курсу.",
+        "invalid_stars": "Введите целое число Stars от 1 до 150000.",
+        "stars_range": "Сумма должна быть от 1 до 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nК оплате: {stars} Telegram Stars.",
+        "intent_error": "Оплата получена, но не смог применить ее к аккаунту. Напишите /paysupport.",
+        "need_email": "Оплата получена.\nОтправьте email, и я создам CherryX аккаунт, применю пакет или баланс и пришлю данные для входа.",
+        "applied": "Оплата прошла и применена.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX аккаунт создан, оплата применена.\n\nЛогин: {email}\nПароль: {password}\nСсылка для входа: {login_url}\n\nПосле первого входа смените пароль.",
+        "open_cherryx": "Открыть CherryX",
+        "email_exists": "Такой email уже есть в CherryX.\nВойдите на сайте, откройте CherryX Pay, скопируйте /link CODE и отправьте сюда. Оплата будет ждать привязки.",
+        "email_invalid": "Отправьте корректный email.",
+    },
+    "uk": {
+        **BILLING_TEXT["uk"],
+        "intro": "CherryX Pay бот\n\nТут можна оплатити пакет, поповнити баланс і перевірити акаунт.\n\n/link CODE - прив'язати акаунт сайту\n/status - статус доступу\n/wallet - баланс CherryX\n/paysupport - допомога з оплатою",
+        "help": "Цей бот працює для оплат CherryX і моніторингу акаунта.\n\n/subscribe - оплата через Telegram Stars\n/status - статус доступу\n/wallet - баланс і прив'язка\n/link CODE - прив'язати акаунт сайту\n/paysupport - допомога з оплатою\n/id - Telegram ID",
+        "only": "Бот приймає оплати і показує статус CherryX. Використовуйте /subscribe, /status, /wallet або /paysupport.",
+        "choose": "Оберіть пакет або поповнення балансу:",
+        "topup": "Поповнити баланс",
+        "enter_stars": "Введіть суму поповнення в Telegram Stars.\nМінімум: 1 Star. Максимум: 150000 Stars.\nНа баланс CherryX прийде сума за поточним курсом.",
+        "invalid_stars": "Введіть ціле число Stars від 1 до 150000.",
+        "stars_range": "Сума має бути від 1 до 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nДо оплати: {stars} Telegram Stars.",
+        "intent_error": "Оплату отримано, але не вдалося застосувати її до акаунта. Напишіть /paysupport.",
+        "need_email": "Оплату отримано.\nНадішліть email, і я створю CherryX акаунт, застосую пакет або баланс і надішлю дані для входу.",
+        "applied": "Оплату проведено і застосовано.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX акаунт створено, оплату застосовано.\n\nЛогін: {email}\nПароль: {password}\nПосилання для входу: {login_url}\n\nПісля першого входу змініть пароль.",
+        "open_cherryx": "Відкрити CherryX",
+        "email_exists": "Такий email уже є в CherryX.\nУвійдіть на сайті, відкрийте CherryX Pay, скопіюйте /link CODE і надішліть сюди. Оплата чекатиме прив'язки.",
+        "email_invalid": "Надішліть коректний email.",
+    },
+    "en": {
+        **BILLING_TEXT["en"],
+        "intro": "CherryX Pay bot\n\nPay for a package, top up balance, and monitor your account.\n\n/link CODE - link website account\n/status - access status\n/wallet - CherryX balance\n/paysupport - payment help",
+        "help": "This bot is used for CherryX payments and account monitoring.\n\n/subscribe - pay with Telegram Stars\n/status - access status\n/wallet - CherryX balance and linked account\n/link CODE - link Telegram with the website account\n/paysupport - payment support\n/id - Telegram ID",
+        "only": "This bot accepts payments and monitors CherryX access. Use /subscribe, /status, /wallet or /paysupport.",
+        "choose": "Choose a package or top up balance:",
+        "topup": "Top up balance",
+        "enter_stars": "Enter the top up amount in Telegram Stars.\nMinimum: 1 Star. Maximum: 150000 Stars.\nCherryX will be credited by the current rate.",
+        "invalid_stars": "Enter a whole Stars amount from 1 to 150000.",
+        "stars_range": "Amount must be from 1 to 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nTo pay: {stars} Telegram Stars.",
+        "intent_error": "Payment was received, but it could not be applied. Please contact /paysupport.",
+        "need_email": "Payment received.\nSend your email and I will create your CherryX account, apply the package or balance, and send login details.",
+        "applied": "Payment received and applied.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX account created and payment applied.\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nChange the password after first login.",
+        "open_cherryx": "Open CherryX",
+        "email_exists": "This email already exists on CherryX.\nLog in on the website, open CherryX Pay, copy /link CODE and send it here. The paid intent will wait for linking.",
+        "email_invalid": "Please send a valid email address.",
+    },
+    "fr": {
+        **BILLING_TEXT["fr"],
+        "intro": "Bot CherryX Pay\n\nPayez un forfait, rechargez le solde et vérifiez votre compte.\n\n/link CODE - lier le compte du site\n/status - statut d'accès\n/wallet - solde CherryX\n/paysupport - aide au paiement",
+        "help": "Ce bot sert aux paiements CherryX et au suivi du compte.\n\n/subscribe - payer avec Telegram Stars\n/status - statut d'accès\n/wallet - solde et compte lié\n/link CODE - lier le compte du site\n/paysupport - support paiement\n/id - Telegram ID",
+        "only": "Ce bot accepte les paiements et montre le statut CherryX. Utilisez /subscribe, /status, /wallet ou /paysupport.",
+        "choose": "Choisissez un forfait ou rechargez le solde :",
+        "topup": "Recharger le solde",
+        "enter_stars": "Entrez le montant en Telegram Stars.\nMinimum : 1 Star. Maximum : 150000 Stars.\nCherryX sera crédité selon le taux actuel.",
+        "invalid_stars": "Entrez un nombre entier de Stars entre 1 et 150000.",
+        "stars_range": "Le montant doit être entre 1 et 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nÀ payer : {stars} Telegram Stars.",
+        "intent_error": "Paiement reçu, mais impossible de l'appliquer. Contactez /paysupport.",
+        "need_email": "Paiement reçu.\nEnvoyez votre email et je créerai votre compte CherryX, puis j'appliquerai le forfait ou le solde.",
+        "applied": "Paiement reçu et appliqué.\n{title}\nCherryX : {cherryx}",
+        "account_created": "Compte CherryX créé, paiement appliqué.\n\nLogin : {email}\nMot de passe : {password}\nURL de connexion : {login_url}\n\nChangez le mot de passe après la première connexion.",
+        "open_cherryx": "Ouvrir CherryX",
+        "email_exists": "Cet email existe déjà sur CherryX.\nConnectez-vous au site, ouvrez CherryX Pay, copiez /link CODE et envoyez-le ici. Le paiement attendra la liaison.",
+        "email_invalid": "Envoyez une adresse email valide.",
+    },
+    "de": {
+        **BILLING_TEXT["de"],
+        "intro": "CherryX Pay Bot\n\nPaket bezahlen, Guthaben aufladen und Konto prüfen.\n\n/link CODE - Website-Konto verknüpfen\n/status - Zugriffsstatus\n/wallet - CherryX Guthaben\n/paysupport - Zahlungshilfe",
+        "help": "Dieser Bot ist für CherryX-Zahlungen und Kontostatus.\n\n/subscribe - mit Telegram Stars zahlen\n/status - Zugriffsstatus\n/wallet - Guthaben und Verknüpfung\n/link CODE - Website-Konto verknüpfen\n/paysupport - Zahlungssupport\n/id - Telegram ID",
+        "only": "Dieser Bot akzeptiert Zahlungen und zeigt den CherryX-Status. Nutzen Sie /subscribe, /status, /wallet oder /paysupport.",
+        "choose": "Paket wählen oder Guthaben aufladen:",
+        "topup": "Guthaben aufladen",
+        "enter_stars": "Geben Sie den Betrag in Telegram Stars ein.\nMinimum: 1 Star. Maximum: 150000 Stars.\nCherryX wird zum aktuellen Kurs gutgeschrieben.",
+        "invalid_stars": "Geben Sie eine ganze Stars-Zahl von 1 bis 150000 ein.",
+        "stars_range": "Der Betrag muss zwischen 1 und 150000 Telegram Stars liegen.",
+        "invoice": "{title}\n{description}\n\nZu zahlen: {stars} Telegram Stars.",
+        "intent_error": "Zahlung erhalten, konnte aber nicht angewendet werden. Kontaktieren Sie /paysupport.",
+        "need_email": "Zahlung erhalten.\nSenden Sie Ihre E-Mail, dann erstelle ich Ihr CherryX-Konto und wende Paket oder Guthaben an.",
+        "applied": "Zahlung erhalten und angewendet.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX-Konto erstellt, Zahlung angewendet.\n\nLogin: {email}\nPasswort: {password}\nLogin-URL: {login_url}\n\nÄndern Sie das Passwort nach dem ersten Login.",
+        "open_cherryx": "CherryX öffnen",
+        "email_exists": "Diese E-Mail existiert bereits auf CherryX.\nMelden Sie sich auf der Website an, öffnen Sie CherryX Pay, kopieren Sie /link CODE und senden Sie ihn hier.",
+        "email_invalid": "Bitte senden Sie eine gültige E-Mail-Adresse.",
+    },
+    "es": {
+        **BILLING_TEXT["es"],
+        "intro": "Bot CherryX Pay\n\nPaga un paquete, recarga saldo y revisa tu cuenta.\n\n/link CODE - vincular cuenta web\n/status - estado de acceso\n/wallet - saldo CherryX\n/paysupport - ayuda con pagos",
+        "help": "Este bot sirve para pagos CherryX y monitoreo de cuenta.\n\n/subscribe - pagar con Telegram Stars\n/status - estado de acceso\n/wallet - saldo y cuenta vinculada\n/link CODE - vincular cuenta web\n/paysupport - soporte de pagos\n/id - Telegram ID",
+        "only": "Este bot acepta pagos y muestra el estado CherryX. Usa /subscribe, /status, /wallet o /paysupport.",
+        "choose": "Elige un paquete o recarga saldo:",
+        "topup": "Recargar saldo",
+        "enter_stars": "Introduce el importe en Telegram Stars.\nMínimo: 1 Star. Máximo: 150000 Stars.\nCherryX se acreditará según el tipo actual.",
+        "invalid_stars": "Introduce un número entero de Stars entre 1 y 150000.",
+        "stars_range": "El importe debe estar entre 1 y 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nA pagar: {stars} Telegram Stars.",
+        "intent_error": "Pago recibido, pero no se pudo aplicar. Contacta /paysupport.",
+        "need_email": "Pago recibido.\nEnvía tu email y crearé tu cuenta CherryX, aplicando el paquete o saldo.",
+        "applied": "Pago recibido y aplicado.\n{title}\nCherryX: {cherryx}",
+        "account_created": "Cuenta CherryX creada, pago aplicado.\n\nLogin: {email}\nContraseña: {password}\nURL de acceso: {login_url}\n\nCambia la contraseña después del primer acceso.",
+        "open_cherryx": "Abrir CherryX",
+        "email_exists": "Este email ya existe en CherryX.\nInicia sesión en el sitio, abre CherryX Pay, copia /link CODE y envíalo aquí.",
+        "email_invalid": "Envía un email válido.",
+    },
+    "it": {
+        **BILLING_TEXT["it"],
+        "intro": "Bot CherryX Pay\n\nPaga un pacchetto, ricarica il saldo e controlla l'account.\n\n/link CODE - collega account web\n/status - stato accesso\n/wallet - saldo CherryX\n/paysupport - supporto pagamenti",
+        "help": "Questo bot serve per pagamenti CherryX e monitoraggio account.\n\n/subscribe - paga con Telegram Stars\n/status - stato accesso\n/wallet - saldo e account collegato\n/link CODE - collega account web\n/paysupport - supporto pagamenti\n/id - Telegram ID",
+        "only": "Questo bot accetta pagamenti e mostra lo stato CherryX. Usa /subscribe, /status, /wallet o /paysupport.",
+        "choose": "Scegli un pacchetto o ricarica il saldo:",
+        "topup": "Ricarica saldo",
+        "enter_stars": "Inserisci l'importo in Telegram Stars.\nMinimo: 1 Star. Massimo: 150000 Stars.\nCherryX verrà accreditato al tasso attuale.",
+        "invalid_stars": "Inserisci un numero intero di Stars da 1 a 150000.",
+        "stars_range": "L'importo deve essere tra 1 e 150000 Telegram Stars.",
+        "invoice": "{title}\n{description}\n\nDa pagare: {stars} Telegram Stars.",
+        "intent_error": "Pagamento ricevuto, ma non è stato possibile applicarlo. Contatta /paysupport.",
+        "need_email": "Pagamento ricevuto.\nInvia la tua email e creerò l'account CherryX, applicando pacchetto o saldo.",
+        "applied": "Pagamento ricevuto e applicato.\n{title}\nCherryX: {cherryx}",
+        "account_created": "Account CherryX creato, pagamento applicato.\n\nLogin: {email}\nPassword: {password}\nURL login: {login_url}\n\nCambia la password dopo il primo accesso.",
+        "open_cherryx": "Apri CherryX",
+        "email_exists": "Questa email esiste già su CherryX.\nAccedi al sito, apri CherryX Pay, copia /link CODE e invialo qui.",
+        "email_invalid": "Invia un indirizzo email valido.",
+    },
+    "ka": {
+        **BILLING_TEXT["ka"],
+        "intro": "CherryX Pay ბოტი\n\nაქ შეგიძლიათ პაკეტის გადახდა, ბალანსის შევსება და ანგარიშის შემოწმება.\n\n/link CODE - საიტის ანგარიშის მიბმა\n/status - წვდომის სტატუსი\n/wallet - CherryX ბალანსი\n/paysupport - გადახდის დახმარება",
+        "help": "ეს ბოტი მუშაობს CherryX გადახდებისთვის და ანგარიშის მონიტორინგისთვის.\n\n/subscribe - გადახდა Telegram Stars-ით\n/status - წვდომის სტატუსი\n/wallet - ბალანსი და მიბმა\n/link CODE - საიტის ანგარიშის მიბმა\n/paysupport - გადახდის დახმარება\n/id - Telegram ID",
+        "only": "ბოტი იღებს გადახდებს და აჩვენებს CherryX სტატუსს. გამოიყენეთ /subscribe, /status, /wallet ან /paysupport.",
+        "choose": "აირჩიეთ პაკეტი ან ბალანსის შევსება:",
+        "topup": "ბალანსის შევსება",
+        "enter_stars": "შეიყვანეთ თანხა Telegram Stars-ში.\nმინიმუმი: 1 Star. მაქსიმუმი: 150000 Stars.\nCherryX ჩაირიცხება მიმდინარე კურსით.",
+        "invalid_stars": "შეიყვანეთ მთელი რიცხვი 1-დან 150000 Stars-მდე.",
+        "stars_range": "თანხა უნდა იყოს 1-დან 150000 Telegram Stars-მდე.",
+        "invoice": "{title}\n{description}\n\nგადასახდელი: {stars} Telegram Stars.",
+        "intent_error": "გადახდა მიღებულია, მაგრამ ანგარიშზე გამოყენება ვერ მოხერხდა. დაწერეთ /paysupport.",
+        "need_email": "გადახდა მიღებულია.\nგამოგზავნეთ email და შევქმნი CherryX ანგარიშს, მივაბამ პაკეტს ან ბალანსს.",
+        "applied": "გადახდა მიღებულია და გამოყენებულია.\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX ანგარიში შეიქმნა და გადახდა გამოყენებულია.\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nპირველი შესვლის შემდეგ შეცვალეთ პაროლი.",
+        "open_cherryx": "CherryX-ის გახსნა",
+        "email_exists": "ეს email უკვე არსებობს CherryX-ში.\nშედით საიტზე, გახსენით CherryX Pay, დააკოპირეთ /link CODE და გამოგზავნეთ აქ.",
+        "email_invalid": "გთხოვთ, გამოგზავნოთ სწორი email.",
+    },
+    "hy": {
+        **BILLING_TEXT["hy"],
+        "intro": "CherryX Pay բոտ\n\nԱյստեղ կարող եք վճարել փաթեթի համար, համալրել բալանսը և ստուգել հաշիվը։\n\n/link CODE - կապել կայքի հաշիվը\n/status - հասանելիության կարգավիճակ\n/wallet - CherryX բալանս\n/paysupport - վճարման օգնություն",
+        "help": "Այս բոտը CherryX վճարումների և հաշվի մոնիթորինգի համար է։\n\n/subscribe - վճարել Telegram Stars-ով\n/status - հասանելիության կարգավիճակ\n/wallet - բալանս և կապում\n/link CODE - կապել կայքի հաշիվը\n/paysupport - վճարման աջակցություն\n/id - Telegram ID",
+        "only": "Բոտը ընդունում է վճարումներ և ցույց է տալիս CherryX կարգավիճակը։ Օգտագործեք /subscribe, /status, /wallet կամ /paysupport։",
+        "choose": "Ընտրեք փաթեթ կամ բալանսի համալրում.",
+        "topup": "Համալրել բալանսը",
+        "enter_stars": "Մուտքագրեք համալրման գումարը Telegram Stars-ով։\nՆվազագույնը՝ 1 Star։ Առավելագույնը՝ 150000 Stars։\nCherryX-ը կավելացվի ընթացիկ փոխարժեքով։",
+        "invalid_stars": "Մուտքագրեք ամբողջ թիվ 1-ից 150000 Stars միջակայքում։",
+        "stars_range": "Գումարը պետք է լինի 1-ից 150000 Telegram Stars։",
+        "invoice": "{title}\n{description}\n\nՎճարման ենթակա՝ {stars} Telegram Stars։",
+        "intent_error": "Վճարումը ստացվել է, բայց չհաջողվեց կիրառել այն հաշվին։ Գրեք /paysupport։",
+        "need_email": "Վճարումը ստացվել է։\nՈւղարկեք email-ը, և ես կստեղծեմ CherryX հաշիվ, կկիրառեմ փաթեթը կամ բալանսը։",
+        "applied": "Վճարումը ստացվել և կիրառվել է։\n{title}\nCherryX: {cherryx}",
+        "account_created": "CherryX հաշիվը ստեղծվել է, վճարումը կիրառվել է։\n\nLogin: {email}\nPassword: {password}\nLogin URL: {login_url}\n\nԱռաջին մուտքից հետո փոխեք գաղտնաբառը։",
+        "open_cherryx": "Բացել CherryX-ը",
+        "email_exists": "Այս email-ը արդեն կա CherryX-ում։\nՄուտք գործեք կայքում, բացեք CherryX Pay-ը, պատճենեք /link CODE և ուղարկեք այստեղ։",
+        "email_invalid": "Խնդրում ենք ուղարկել ճիշտ email։",
+    },
+})
+
+
+def billing_text(lang: str, key: str, **kwargs: object) -> str:
+    template = BILLING_TEXT.get(lang, BILLING_TEXT["en"]).get(key, BILLING_TEXT["en"].get(key, key))
+    return template.format(**kwargs)
+
+
+def billing_intro_text(lang: str = "en") -> str:
+    return billing_text(lang, "intro")
+
+
+def billing_help_text(lang: str = "en") -> str:
+    return billing_text(lang, "help")
+
+
+def billing_only_text(lang: str = "en") -> str:
+    return billing_text(lang, "only")
+
+
+def billing_direct_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Start - 100 CherryX", callback_data="tgplan:free"),
+            InlineKeyboardButton(text="Starter - 900", callback_data="tgplan:starter"),
+        ],
+        [
+            InlineKeyboardButton(text="Creator Pro - 1900", callback_data="tgplan:pro"),
+            InlineKeyboardButton(text="Studio - 4900", callback_data="tgplan:studio"),
+        ],
+        [
+            InlineKeyboardButton(text=billing_text(lang, "topup"), callback_data="tgtopup:custom"),
+        ],
+    ])
+
+
+def open_cherryx_keyboard(url: str, lang: str = "en") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=billing_text(lang, "open_cherryx"), url=url)]
+    ])
+
+
+async def send_intent_invoice(message: Message, bot: Bot, intent: dict[str, object]) -> None:
+    await message.answer(
+        billing_text(
+            user_lang(message),
+            "invoice",
+            title=intent.get("title") or "CherryX",
+            description=intent.get("description") or "CherryX payment",
+            stars=intent.get("stars_amount") or 1,
+        )
+    )
+    await bot(
+        SendInvoice(
+            chat_id=message.chat.id,
+            title=str(intent.get("title") or "CherryX"),
+            description=str(intent.get("description") or "CherryX payment"),
+            payload=str(intent.get("payload") or ""),
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=str(intent.get("title") or "CherryX"), amount=int(intent.get("stars_amount") or 1))],
+        )
+    )
 
 
 def free_action_limit(action: str) -> int:
@@ -629,9 +1620,9 @@ async def ensure_paid_access(message: Message, user_id: int, feature: str) -> bo
         return True
     lang = user_lang(message)
     await message.answer(
-        f"{feature} доступно после оплаты Stars.\n\n"
-        "Если ваш Telegram ID добавлен в FREE_USER_IDS в .env, доступ будет бесплатным автоматически."
-        + next_steps_text("нажми оплату ниже", "или напиши /id и добавь ID в FREE_USER_IDS", lang=lang),
+        f"{feature} РґРѕСЃС‚СѓРїРЅРѕ РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹ Stars.\n\n"
+        "Р•СЃР»Рё РІР°С€ Telegram ID РґРѕР±Р°РІР»РµРЅ РІ FREE_USER_IDS РІ .env, РґРѕСЃС‚СѓРї Р±СѓРґРµС‚ Р±РµСЃРїР»Р°С‚РЅС‹Рј Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё."
+        + next_steps_text("РЅР°Р¶РјРё РѕРїР»Р°С‚Сѓ РЅРёР¶Рµ", "РёР»Рё РЅР°РїРёС€Рё /id Рё РґРѕР±Р°РІСЊ ID РІ FREE_USER_IDS", lang=lang),
         reply_markup=main_menu(lang),
     )
     return False
@@ -639,13 +1630,13 @@ async def ensure_paid_access(message: Message, user_id: int, feature: str) -> bo
 
 async def ensure_action_allowed(message: Message, user_id: int, action: str, detail: str = "") -> bool:
     paid_only_features = {
-        "image": "Конвертация изображений",
-        "video": "Конвертация видео",
-        "resume": "PDF-резюме",
-        "cover": "PNG-обложки",
-        "youtube": "YouTube-монтаж",
-        "subtitles": "Автосубтитры",
-        "package": "Пакет публикации ZIP",
+        "image": "РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёР№",
+        "video": "РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ",
+        "resume": "PDF-СЂРµР·СЋРјРµ",
+        "cover": "PNG-РѕР±Р»РѕР¶РєРё",
+        "youtube": "YouTube-РјРѕРЅС‚Р°Р¶",
+        "subtitles": "РђРІС‚РѕСЃСѓР±С‚РёС‚СЂС‹",
+        "package": "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё ZIP",
     }
     if action in paid_only_features:
         return await ensure_paid_access(message, user_id, paid_only_features[action])
@@ -668,23 +1659,23 @@ async def ensure_pro_feature(message: Message, user_id: int, feature: str) -> bo
 
 def pro_limit_text(action: str, used: int, limit: int, detail: str = "") -> str:
     labels = {
-        "image": "конвертаций изображений",
-        "video": "конвертаций видео",
-        "resume": "PDF-резюме",
-        "cover": "обложек",
-        "youtube": "YouTube-монтажей",
-        "subtitles": "субтитров",
-        "package": "пакетов публикации",
+        "image": "РєРѕРЅРІРµСЂС‚Р°С†РёР№ РёР·РѕР±СЂР°Р¶РµРЅРёР№",
+        "video": "РєРѕРЅРІРµСЂС‚Р°С†РёР№ РІРёРґРµРѕ",
+        "resume": "PDF-СЂРµР·СЋРјРµ",
+        "cover": "РѕР±Р»РѕР¶РµРє",
+        "youtube": "YouTube-РјРѕРЅС‚Р°Р¶РµР№",
+        "subtitles": "СЃСѓР±С‚РёС‚СЂРѕРІ",
+        "package": "РїР°РєРµС‚РѕРІ РїСѓР±Р»РёРєР°С†РёРё",
     }
-    feature = labels.get(action, "обработок")
+    feature = labels.get(action, "РѕР±СЂР°Р±РѕС‚РѕРє")
     limit_text = f"{used}/{limit}" if limit else "0"
     lines = [
-        f"Free-лимит на сегодня исчерпан: {limit_text} {feature}.",
-        "Pro открывает полный набор: YouTube, субтитры, обложки, пакеты публикации и больше обработок.",
+        f"Free-Р»РёРјРёС‚ РЅР° СЃРµРіРѕРґРЅСЏ РёСЃС‡РµСЂРїР°РЅ: {limit_text} {feature}.",
+        "Pro РѕС‚РєСЂС‹РІР°РµС‚ РїРѕР»РЅС‹Р№ РЅР°Р±РѕСЂ: YouTube, СЃСѓР±С‚РёС‚СЂС‹, РѕР±Р»РѕР¶РєРё, РїР°РєРµС‚С‹ РїСѓР±Р»РёРєР°С†РёРё Рё Р±РѕР»СЊС€Рµ РѕР±СЂР°Р±РѕС‚РѕРє.",
     ]
     if detail:
         lines.append(detail)
-    lines.append(next_steps_text("нажми оплату ниже", "или вернись завтра к Free-лимиту"))
+    lines.append(next_steps_text("РЅР°Р¶РјРё РѕРїР»Р°С‚Сѓ РЅРёР¶Рµ", "РёР»Рё РІРµСЂРЅРёСЃСЊ Р·Р°РІС‚СЂР° Рє Free-Р»РёРјРёС‚Сѓ"))
     return "\n".join(lines)
 
 
@@ -705,9 +1696,29 @@ def prune_sessions() -> None:
 
 
 @router.message(CommandStart())
-async def start(message: Message) -> None:
+async def start(message: Message, bot: Bot) -> None:
     await ensure_user(message)
     lang = user_lang(message)
+    if billing_bot_mode():
+        arg = (message.text or "").split(maxsplit=1)[1].strip() if len((message.text or "").split(maxsplit=1)) > 1 else ""
+        if arg.startswith("pay_") and message.from_user:
+            token = arg[4:]
+            intent = await asyncio.to_thread(
+                claim_payment_intent,
+                token,
+                message.from_user.id,
+                message.from_user.username or "",
+                message.from_user.first_name or "",
+                getattr(message.from_user, "language_code", "") or "",
+            )
+            if not intent.get("ok"):
+                await message.answer(billing_text(lang, "payment_link_invalid"), reply_markup=billing_direct_keyboard(lang))
+                return
+            await send_intent_invoice(message, bot, intent)
+            return
+        await message.answer(billing_intro_text(lang), reply_markup=persistent_menu_keyboard(lang))
+        await message.answer(billing_text(lang, "choose"), reply_markup=billing_direct_keyboard(lang))
+        return
     await message.answer(
         tr(
             lang,
@@ -717,9 +1728,9 @@ async def start(message: Message) -> None:
             days=settings.subscription_days,
         )
         + next_steps_text(
-            "отправь картинку или видео для конвертации",
-            "отправь YouTube-ссылку для Shorts или Preview",
-            "после результата нажимай Subtitles или Redo, если нужно продолжить обработку",
+            "РѕС‚РїСЂР°РІСЊ РєР°СЂС‚РёРЅРєСѓ РёР»Рё РІРёРґРµРѕ РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё",
+            "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ Shorts РёР»Рё Preview",
+            "РїРѕСЃР»Рµ СЂРµР·СѓР»СЊС‚Р°С‚Р° РЅР°Р¶РёРјР°Р№ Subtitles РёР»Рё Redo, РµСЃР»Рё РЅСѓР¶РЅРѕ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РѕР±СЂР°Р±РѕС‚РєСѓ",
             lang=lang,
         ),
         reply_markup=persistent_menu_keyboard(lang),
@@ -731,12 +1742,15 @@ async def start(message: Message) -> None:
 async def help_command(message: Message) -> None:
     await ensure_user(message)
     lang = user_lang(message)
+    if billing_bot_mode():
+        await message.answer(billing_help_text(lang), reply_markup=main_menu(lang))
+        return
     await message.answer(
         tr(lang, "help_menu")
         + next_steps_text(
-            "отправь файл для конвертации",
-            "отправь YouTube-ссылку для монтажа",
-            "после готового MP4 можно добавить субтитры",
+            "РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё",
+            "РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°",
+            "РїРѕСЃР»Рµ РіРѕС‚РѕРІРѕРіРѕ MP4 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹",
             lang=lang,
         ),
         reply_markup=help_navigation_keyboard(lang),
@@ -748,9 +1762,12 @@ async def id_command(message: Message) -> None:
     await ensure_user(message)
     if message.from_user:
         lang = user_lang(message)
+        if billing_bot_mode():
+            await message.answer(f"Telegram ID: {message.from_user.id}")
+            return
         await message.answer(
             tr(lang, "id", user_id=message.from_user.id)
-            + next_steps_text("используй этот ID для списка бесплатного доступа", "или отправь файл/ссылку для обработки", lang=lang)
+            + next_steps_text("РёСЃРїРѕР»СЊР·СѓР№ СЌС‚РѕС‚ ID РґР»СЏ СЃРїРёСЃРєР° Р±РµСЃРїР»Р°С‚РЅРѕРіРѕ РґРѕСЃС‚СѓРїР°", "РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»/СЃСЃС‹Р»РєСѓ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё", lang=lang)
         )
 
 
@@ -759,9 +1776,12 @@ async def cancel_command(message: Message, state: FSMContext) -> None:
     await ensure_user(message)
     lang = user_lang(message)
     await state.clear()
+    if billing_bot_mode():
+        await message.answer(billing_text(lang, "cancelled"), reply_markup=main_menu(lang))
+        return
     await message.answer(
         tr(lang, "cancelled")
-        + next_steps_text("отправь новый файл", "или отправь YouTube-ссылку для монтажа", lang=lang)
+        + next_steps_text("РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°", lang=lang)
     )
 
 
@@ -779,10 +1799,10 @@ async def language_command(message: Message) -> None:
 async def subscribe(message: Message, bot: Bot) -> None:
     await ensure_user(message)
     lang = user_lang(message)
-    if message.from_user and is_free_user(message.from_user.id):
+    if not billing_bot_mode() and message.from_user and is_free_user(message.from_user.id):
         await message.answer(
             tr(lang, "free_access")
-            + next_steps_text("отправь файл для конвертации", "или YouTube-ссылку для монтажа", lang=lang)
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё", "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°", lang=lang)
         )
         return
     await send_subscription_invoice(message, bot)
@@ -792,6 +1812,12 @@ async def subscribe(message: Message, bot: Bot) -> None:
 async def pro_command(message: Message) -> None:
     await ensure_user(message)
     lang = user_lang(message)
+    if billing_bot_mode():
+        await message.answer(
+            billing_text(lang, "pro_price", stars=settings.subscription_stars, days=settings.subscription_days),
+            reply_markup=main_menu(lang),
+        )
+        return
     await message.answer(
         tr(lang, "help_pro", days=settings.subscription_days),
         reply_markup=help_navigation_keyboard(lang),
@@ -804,9 +1830,121 @@ async def status_command(message: Message) -> None:
     await send_status(message)
 
 
+@router.message(Command("wallet"))
+async def wallet_command(message: Message) -> None:
+    await ensure_user(message)
+    if not message.from_user:
+        return
+    lang = user_lang(message)
+    try:
+        wallet = await asyncio.to_thread(telegram_wallet, message.from_user.id)
+    except Exception:
+        logger.exception("Telegram wallet lookup failed for %s", message.from_user.id)
+        await message.answer(billing_text(lang, "wallet_error"))
+        return
+    if wallet.get("linked"):
+        active_until = wallet.get("active_until")
+        until_text = active_until.strftime("%Y-%m-%d %H:%M UTC") if active_until else billing_text(lang, "not_active")
+        await message.answer(
+            billing_text(lang, "wallet_linked", balance=wallet.get("balance", 0), access=until_text),
+            reply_markup=main_menu(lang),
+        )
+    else:
+        pending = int(wallet.get("pending_cherryx") or 0)
+        await message.answer(
+            billing_text(lang, "wallet_not_linked", pending=pending),
+            reply_markup=main_menu(lang),
+        )
+
+@router.message(Command("link"))
+async def link_command(message: Message) -> None:
+    await ensure_user(message)
+    if not message.from_user:
+        return
+    lang = user_lang(message)
+    token = (message.text or "").split(maxsplit=1)[1].strip() if len((message.text or "").split(maxsplit=1)) > 1 else ""
+    if not token:
+        await message.answer(billing_text(lang, "link_missing"))
+        return
+    try:
+        result = await asyncio.to_thread(
+            link_telegram_account,
+            token,
+            message.from_user.id,
+            message.from_user.username or "",
+            message.from_user.first_name or "",
+        )
+    except Exception:
+        logger.exception("Telegram account link failed for %s", message.from_user.id)
+        await message.answer(billing_text(lang, "link_failed"))
+        return
+    if not result.get("ok"):
+        await message.answer(billing_text(lang, "link_not_found"))
+        return
+    await message.answer(
+        billing_text(lang, "link_success", balance=result.get("balance", 0)),
+        reply_markup=main_menu(lang),
+    )
+
+@router.message(Command("paysupport"))
+async def pay_support_command(message: Message) -> None:
+    await ensure_user(message)
+    await message.answer(billing_text(user_lang(message), "pay_support"), reply_markup=main_menu(user_lang(message)))
+
+@router.message(Command("admin_stats"))
+async def admin_stats_command(message: Message) -> None:
+    await ensure_user(message)
+    if not is_admin_user(message.from_user.id if message.from_user else None):
+        return
+    stats = await db.bot_stats()
+    await message.answer(
+        "Bot stats\n"
+        f"Users: {stats['users']}\n"
+        f"Active local subscriptions: {stats['active']}\n"
+        f"Stars payments: {stats['payments']}\n"
+        f"Stars total: {stats['stars']}"
+    )
+
+
+@router.message(Command("broadcast"))
+async def broadcast_command(message: Message, bot: Bot) -> None:
+    await ensure_user(message)
+    if not is_admin_user(message.from_user.id if message.from_user else None):
+        return
+    text = (message.text or "").split(maxsplit=1)[1].strip() if len((message.text or "").split(maxsplit=1)) > 1 else ""
+    if not text:
+        await message.answer("Usage: /broadcast message text")
+        return
+    user_ids = await db.all_user_ids()
+    sent = 0
+    failed = 0
+    status = await message.answer(f"Broadcast started. Users: {len(user_ids)}")
+    for user_id in user_ids:
+        try:
+            await bot.send_message(user_id, text)
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)
+    await safe_edit(status, f"Broadcast finished.\nSent: {sent}\nFailed: {failed}")
+
+
 @router.message(Command("history"))
 async def history_command(message: Message) -> None:
     await ensure_user(message)
+    if billing_bot_mode():
+        if not message.from_user:
+            return
+        payments = await db.recent_payments(message.from_user.id, 10)
+        if not payments:
+            await message.answer("No Stars payments yet.", reply_markup=main_menu(user_lang(message)))
+            return
+        lines = ["Recent Stars payments:"]
+        for payment in payments:
+            created = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(payment.created_at))
+            lines.append(f"- {created}: {payment.total_amount} {payment.currency}")
+        await message.answer("\n".join(lines))
+        return
     await send_history(message)
 
 
@@ -815,7 +1953,7 @@ async def resume_command(message: Message, state: FSMContext) -> None:
     await ensure_user(message)
     if not message.from_user:
         return
-    if not await ensure_pro_feature(message, message.from_user.id, "PDF-резюме"):
+    if not await ensure_pro_feature(message, message.from_user.id, "PDF-СЂРµР·СЋРјРµ"):
         return
     lang = user_lang(message)
     await state.set_state(ResumeState.waiting_name)
@@ -845,7 +1983,7 @@ async def resume_contact(message: Message, state: FSMContext) -> None:
     lang = (await state.get_data()).get("lang", user_lang(message))
     await state.set_state(ResumeState.waiting_links)
     await message.answer(
-        "Ссылки: LinkedIn, GitHub, Behance, портфолио, сайт или Telegram-канал. Можно пропустить.",
+        "РЎСЃС‹Р»РєРё: LinkedIn, GitHub, Behance, РїРѕСЂС‚С„РѕР»РёРѕ, СЃР°Р№С‚ РёР»Рё Telegram-РєР°РЅР°Р». РњРѕР¶РЅРѕ РїСЂРѕРїСѓСЃС‚РёС‚СЊ.",
         reply_markup=bot_keyboards.resume_links_skip_keyboard(lang),
     )
 
@@ -966,13 +2104,13 @@ async def resume_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     if message.photo:
         file_id = message.photo[-1].file_id
         if message.photo[-1].file_size and message.photo[-1].file_size > max_size_bytes("image"):
-            await message.answer(f"Фото слишком большое. Лимит: {settings.max_image_mb} MB.")
+            await message.answer(f"Р¤РѕС‚Рѕ СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕРµ. Р›РёРјРёС‚: {settings.max_image_mb} MB.")
             return
     elif message.document and (message.document.mime_type or "").startswith("image/"):
         file_id = message.document.file_id
         original_name = message.document.file_name or original_name
         if message.document.file_size and message.document.file_size > max_size_bytes("image"):
-            await message.answer(f"Картинка слишком большая. Лимит: {settings.max_image_mb} MB.")
+            await message.answer(f"РљР°СЂС‚РёРЅРєР° СЃР»РёС€РєРѕРј Р±РѕР»СЊС€Р°СЏ. Р›РёРјРёС‚: {settings.max_image_mb} MB.")
             return
 
     if not file_id:
@@ -998,30 +2136,30 @@ async def resume_photo_wrong_input(message: Message, state: FSMContext) -> None:
 
 
 RESUME_FIELD_LABELS = {
-    "name": "Имя",
-    "position": "Должность",
-    "contact": "Контакты",
-    "links": "Ссылки",
-    "summary": "О себе",
-    "experience": "Опыт",
-    "education": "Образование",
-    "skills": "Навыки",
-    "achievements": "Достижения",
-    "additional": "Дополнительно",
+    "name": "РРјСЏ",
+    "position": "Р”РѕР»Р¶РЅРѕСЃС‚СЊ",
+    "contact": "РљРѕРЅС‚Р°РєС‚С‹",
+    "links": "РЎСЃС‹Р»РєРё",
+    "summary": "Рћ СЃРµР±Рµ",
+    "experience": "РћРїС‹С‚",
+    "education": "РћР±СЂР°Р·РѕРІР°РЅРёРµ",
+    "skills": "РќР°РІС‹РєРё",
+    "achievements": "Р”РѕСЃС‚РёР¶РµРЅРёСЏ",
+    "additional": "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ",
 }
 
 
 RESUME_FIELD_HINTS = {
-    "name": "Введите имя и фамилию.",
-    "position": "Введите желаемую должность или роль.",
-    "contact": "Введите контакты: телефон, email, Telegram, LinkedIn, город.",
-    "links": "Введите ссылки: LinkedIn, GitHub, портфолио, сайт, Behance или Telegram-канал. Если ссылок нет, напишите «нет».",
-    "summary": "Введите короткий профессиональный профиль на 1-3 предложения.",
-    "experience": "Введите опыт. Можно с переносами строк и списками через дефис.",
-    "education": "Введите образование, курсы или сертификаты.",
-    "skills": "Введите навыки через запятую.",
-    "achievements": "Введите достижения/проекты или напишите «нет».",
-    "additional": "Введите языки, инструменты, детали или напишите «нет».",
+    "name": "Р’РІРµРґРёС‚Рµ РёРјСЏ Рё С„Р°РјРёР»РёСЋ.",
+    "position": "Р’РІРµРґРёС‚Рµ Р¶РµР»Р°РµРјСѓСЋ РґРѕР»Р¶РЅРѕСЃС‚СЊ РёР»Рё СЂРѕР»СЊ.",
+    "contact": "Р’РІРµРґРёС‚Рµ РєРѕРЅС‚Р°РєС‚С‹: С‚РµР»РµС„РѕРЅ, email, Telegram, LinkedIn, РіРѕСЂРѕРґ.",
+    "links": "Р’РІРµРґРёС‚Рµ СЃСЃС‹Р»РєРё: LinkedIn, GitHub, РїРѕСЂС‚С„РѕР»РёРѕ, СЃР°Р№С‚, Behance РёР»Рё Telegram-РєР°РЅР°Р». Р•СЃР»Рё СЃСЃС‹Р»РѕРє РЅРµС‚, РЅР°РїРёС€РёС‚Рµ В«РЅРµС‚В».",
+    "summary": "Р’РІРµРґРёС‚Рµ РєРѕСЂРѕС‚РєРёР№ РїСЂРѕС„РµСЃСЃРёРѕРЅР°Р»СЊРЅС‹Р№ РїСЂРѕС„РёР»СЊ РЅР° 1-3 РїСЂРµРґР»РѕР¶РµРЅРёСЏ.",
+    "experience": "Р’РІРµРґРёС‚Рµ РѕРїС‹С‚. РњРѕР¶РЅРѕ СЃ РїРµСЂРµРЅРѕСЃР°РјРё СЃС‚СЂРѕРє Рё СЃРїРёСЃРєР°РјРё С‡РµСЂРµР· РґРµС„РёСЃ.",
+    "education": "Р’РІРµРґРёС‚Рµ РѕР±СЂР°Р·РѕРІР°РЅРёРµ, РєСѓСЂСЃС‹ РёР»Рё СЃРµСЂС‚РёС„РёРєР°С‚С‹.",
+    "skills": "Р’РІРµРґРёС‚Рµ РЅР°РІС‹РєРё С‡РµСЂРµР· Р·Р°РїСЏС‚СѓСЋ.",
+    "achievements": "Р’РІРµРґРёС‚Рµ РґРѕСЃС‚РёР¶РµРЅРёСЏ/РїСЂРѕРµРєС‚С‹ РёР»Рё РЅР°РїРёС€РёС‚Рµ В«РЅРµС‚В».",
+    "additional": "Р’РІРµРґРёС‚Рµ СЏР·С‹РєРё, РёРЅСЃС‚СЂСѓРјРµРЅС‚С‹, РґРµС‚Р°Р»Рё РёР»Рё РЅР°РїРёС€РёС‚Рµ В«РЅРµС‚В».",
 }
 
 
@@ -1031,12 +2169,12 @@ def resume_clip(value: str, limit: int = 260) -> str:
 
 def resume_review_text(data: dict) -> str:
     prepared = resume_section_data(data)
-    rows = ["Проверьте резюме перед PDF:\n"]
+    rows = ["РџСЂРѕРІРµСЂСЊС‚Рµ СЂРµР·СЋРјРµ РїРµСЂРµРґ PDF:\n"]
     for key, label in RESUME_FIELD_LABELS.items():
-        value = prepared.get(key) or "не указано"
+        value = prepared.get(key) or "РЅРµ СѓРєР°Р·Р°РЅРѕ"
         rows.append(f"<b>{label}:</b> {escape(resume_clip(value), quote=False)}")
-    rows.append(f"<b>Фото:</b> {'добавлено' if data.get('photo_path') else 'без фото'}")
-    rows.append("\nМожно отредактировать любой блок или сразу выбрать шаблон.")
+    rows.append(f"<b>Р¤РѕС‚Рѕ:</b> {'РґРѕР±Р°РІР»РµРЅРѕ' if data.get('photo_path') else 'Р±РµР· С„РѕС‚Рѕ'}")
+    rows.append("\nРњРѕР¶РЅРѕ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ Р»СЋР±РѕР№ Р±Р»РѕРє РёР»Рё СЃСЂР°Р·Сѓ РІС‹Р±СЂР°С‚СЊ С€Р°Р±Р»РѕРЅ.")
     return "\n".join(rows)
 
 
@@ -1081,13 +2219,13 @@ async def resume_polish(callback: CallbackQuery, state: FSMContext) -> None:
         achievements="" if resume_is_empty(normalize_resume_text(data.get("achievements"))) else polish_resume_block(data.get("achievements", ""), bulletize=True),
         additional="" if resume_is_empty(normalize_resume_text(data.get("additional"))) else polish_resume_block(data.get("additional", "")),
     )
-    await callback.answer("Структуру привел в порядок")
+    await callback.answer("РЎС‚СЂСѓРєС‚СѓСЂСѓ РїСЂРёРІРµР» РІ РїРѕСЂСЏРґРѕРє")
     await show_resume_review(callback.message, state)
 
 
 @router.callback_query(ResumeState.waiting_review, F.data == "resume_remove_photo")
 async def resume_remove_photo(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer("Фото убрано")
+    await callback.answer("Р¤РѕС‚Рѕ СѓР±СЂР°РЅРѕ")
     await state.update_data(photo_path="")
     await show_resume_review(callback.message, state)
 
@@ -1113,9 +2251,9 @@ async def resume_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message:
         current = normalize_resume_text((await state.get_data()).get(field))
         await callback.message.answer(
-            f"Редактируем: {RESUME_FIELD_LABELS[field]}.\n"
+            f"Р РµРґР°РєС‚РёСЂСѓРµРј: {RESUME_FIELD_LABELS[field]}.\n"
             f"{RESUME_FIELD_HINTS[field]}\n\n"
-            f"Сейчас:\n{current or 'пусто'}"
+            f"РЎРµР№С‡Р°СЃ:\n{current or 'РїСѓСЃС‚Рѕ'}"
         )
 
 
@@ -1127,7 +2265,7 @@ async def resume_edit_value(message: Message, state: FSMContext) -> None:
         await show_resume_review(message, state)
         return
     await state.update_data(**{field: message.text or "", "edit_field": ""})
-    await message.answer("Обновил блок.")
+    await message.answer("РћР±РЅРѕРІРёР» Р±Р»РѕРє.")
     await show_resume_review(message, state)
 
 
@@ -1140,7 +2278,7 @@ async def show_resume_templates(target: Message | None, state: FSMContext) -> No
         preview_path = await asyncio.to_thread(create_resume_template_preview_sheet, settings.output_dir)
         await target.answer_photo(
             FSInputFile(preview_path),
-            caption="Примерно так отличаются шаблоны по расположению блоков. Ниже выберите номер.",
+            caption="РџСЂРёРјРµСЂРЅРѕ С‚Р°Рє РѕС‚Р»РёС‡Р°СЋС‚СЃСЏ С€Р°Р±Р»РѕРЅС‹ РїРѕ СЂР°СЃРїРѕР»РѕР¶РµРЅРёСЋ Р±Р»РѕРєРѕРІ. РќРёР¶Рµ РІС‹Р±РµСЂРёС‚Рµ РЅРѕРјРµСЂ.",
         )
     except Exception:
         logger.exception("Could not create resume template preview")
@@ -1172,15 +2310,15 @@ async def resume_choose_template_again(callback: CallbackQuery, state: FSMContex
 
 @router.callback_query(ResumeState.waiting_template, F.data == "resume_finish")
 async def resume_finish(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer("Готово")
+    await callback.answer("Р“РѕС‚РѕРІРѕ")
     await state.clear()
     if callback.message:
-        await callback.message.answer("Ок, мастер резюме закрыт. Для нового резюме используйте /resume.")
+        await callback.message.answer("РћРє, РјР°СЃС‚РµСЂ СЂРµР·СЋРјРµ Р·Р°РєСЂС‹С‚. Р”Р»СЏ РЅРѕРІРѕРіРѕ СЂРµР·СЋРјРµ РёСЃРїРѕР»СЊР·СѓР№С‚Рµ /resume.")
 
 
 @router.callback_query(ResumeState.waiting_template, F.data.startswith("template_"))
 async def resume_template(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
-    await callback.answer("Готовлю PDF...")
+    await callback.answer("Р“РѕС‚РѕРІР»СЋ PDF...")
     template = callback.data.split("_")[1]
     data = await state.get_data()
     await state.update_data(last_template=template)
@@ -1190,7 +2328,7 @@ async def resume_template(callback: CallbackQuery, state: FSMContext, bot: Bot) 
         await bot.send_document(
             callback.from_user.id,
             FSInputFile(pdf_path),
-            caption="Ваше резюме готово. Можно сразу собрать другой шаблон или отредактировать данные.",
+            caption="Р’Р°С€Рµ СЂРµР·СЋРјРµ РіРѕС‚РѕРІРѕ. РњРѕР¶РЅРѕ СЃСЂР°Р·Сѓ СЃРѕР±СЂР°С‚СЊ РґСЂСѓРіРѕР№ С€Р°Р±Р»РѕРЅ РёР»Рё РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ РґР°РЅРЅС‹Рµ.",
             reply_markup=resume_after_pdf_keyboard(),
         )
         await db.add_conversion(
@@ -1205,34 +2343,34 @@ async def resume_template(callback: CallbackQuery, state: FSMContext, bot: Bot) 
     except Exception as exc:
         logger.exception("Resume PDF generation failed")
         if callback.message:
-            await callback.message.answer(f"Не получилось собрать PDF-резюме: {exc}")
+            await callback.message.answer(f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ PDF-СЂРµР·СЋРјРµ: {exc}")
     finally:
         if pdf_path:
             pdf_path.unlink(missing_ok=True)
 
 
-@router.message(StateFilter(None), F.text.in_({"Статус", "Status"}))
+@router.message(StateFilter(None), F.text.in_({"РЎС‚Р°С‚СѓСЃ", "Status"}))
 async def status_button(message: Message) -> None:
     await ensure_user(message)
     await send_status(message)
 
 
-@router.message(StateFilter(None), F.text.in_({"Помощь", "Help", "Допомога"}))
+@router.message(StateFilter(None), F.text.in_({"РџРѕРјРѕС‰СЊ", "Help", "Р”РѕРїРѕРјРѕРіР°"}))
 async def help_button(message: Message) -> None:
     await help_command(message)
 
 
-@router.message(StateFilter(None), F.text.in_({"История", "History", "Історія"}))
+@router.message(StateFilter(None), F.text.in_({"РСЃС‚РѕСЂРёСЏ", "History", "Р†СЃС‚РѕСЂС–СЏ"}))
 async def history_button(message: Message) -> None:
     await history_command(message)
 
 
-@router.message(StateFilter(None), F.text.in_({"Язык", "Language", "Мова"}))
+@router.message(StateFilter(None), F.text.in_({"РЇР·С‹Рє", "Language", "РњРѕРІР°"}))
 async def language_button(message: Message) -> None:
     await language_command(message)
 
 
-@router.message(StateFilter(None), F.text.in_({"Резюме", "Resume"}))
+@router.message(StateFilter(None), F.text.in_({"Р РµР·СЋРјРµ", "Resume"}))
 async def resume_button(message: Message, state: FSMContext) -> None:
     await resume_command(message, state)
 
@@ -1241,9 +2379,9 @@ async def resume_button(message: Message, state: FSMContext) -> None:
 async def youtube_hint_button(message: Message) -> None:
     await ensure_user(message)
     await message.answer(
-        "Отправь ссылку YouTube, и я дам кнопки: Shorts, Preview или обложка PNG.\n\n"
-        "Shorts теперь выбираются по лицам, движению и сменам кадра. "
-        "Preview собирает один широкий 16:9 ролик с лучшими моментами.",
+        "РћС‚РїСЂР°РІСЊ СЃСЃС‹Р»РєСѓ YouTube, Рё СЏ РґР°Рј РєРЅРѕРїРєРё: Shorts, Preview РёР»Рё РѕР±Р»РѕР¶РєР° PNG.\n\n"
+        "Shorts С‚РµРїРµСЂСЊ РІС‹Р±РёСЂР°СЋС‚СЃСЏ РїРѕ Р»РёС†Р°Рј, РґРІРёР¶РµРЅРёСЋ Рё СЃРјРµРЅР°Рј РєР°РґСЂР°. "
+        "Preview СЃРѕР±РёСЂР°РµС‚ РѕРґРёРЅ С€РёСЂРѕРєРёР№ 16:9 СЂРѕР»РёРє СЃ Р»СѓС‡С€РёРјРё РјРѕРјРµРЅС‚Р°РјРё.",
         reply_markup=persistent_menu_keyboard(user_lang(message)),
     )
 
@@ -1257,7 +2395,7 @@ async def pay_callback(callback: CallbackQuery, bot: Bot) -> None:
             lang = user_lang(callback)
             await callback.message.answer(
                 tr(lang, "free_access")
-                + next_steps_text("отправь файл", "или YouTube-ссылку", lang=lang)
+                + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»", "РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ", lang=lang)
             )
         return
     if callback.message:
@@ -1272,6 +2410,32 @@ async def status_callback(callback: CallbackQuery) -> None:
         await send_status(callback.message, callback.from_user.id, user_lang(callback))
 
 
+@router.callback_query(F.data == "wallet")
+async def wallet_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await ensure_callback_user(callback)
+    if not callback.message or not callback.from_user:
+        return
+    lang = user_lang(callback)
+    try:
+        wallet = await asyncio.to_thread(telegram_wallet, callback.from_user.id)
+    except Exception:
+        logger.exception("Telegram wallet lookup failed for %s", callback.from_user.id)
+        await callback.message.answer(billing_text(lang, "wallet_error"))
+        return
+    if wallet.get("linked"):
+        active_until = wallet.get("active_until")
+        until_text = active_until.strftime("%Y-%m-%d %H:%M UTC") if active_until else billing_text(lang, "not_active")
+        await callback.message.answer(
+            billing_text(lang, "wallet_linked", balance=wallet.get("balance", 0), access=until_text),
+            reply_markup=main_menu(lang),
+        )
+    else:
+        await callback.message.answer(
+            billing_text(lang, "wallet_not_linked", pending=int(wallet.get("pending_cherryx") or 0)),
+            reply_markup=main_menu(lang),
+        )
+
 @router.callback_query(F.data.startswith("help:"))
 async def help_callback(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -1279,6 +2443,9 @@ async def help_callback(callback: CallbackQuery) -> None:
     if not callback.message or not callback.data:
         return
     lang = user_lang(callback)
+    if billing_bot_mode():
+        await callback.message.answer(billing_help_text(lang), reply_markup=main_menu(lang))
+        return
     section = callback.data.split(":", 1)[1]
     key_map = {
         "menu": "help_menu",
@@ -1312,6 +2479,37 @@ async def language_callback(callback: CallbackQuery) -> None:
         )
 
 
+@router.callback_query(F.data.startswith("tgplan:"))
+async def billing_plan_callback(callback: CallbackQuery, bot: Bot) -> None:
+    await callback.answer()
+    await ensure_callback_user(callback)
+    if not callback.message or not callback.from_user or not callback.data:
+        return
+    plan_code = callback.data.split(":", 1)[1]
+    intent = await asyncio.to_thread(create_direct_payment_intent, "plan", plan_code, None, callback.from_user.id)
+    await send_intent_invoice(callback.message, bot, intent)
+
+
+@router.callback_query(F.data.startswith("tgtopup:"))
+async def billing_topup_callback(callback: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    await callback.answer()
+    await ensure_callback_user(callback)
+    if not callback.message or not callback.from_user or not callback.data:
+        return
+    lang = user_lang(callback)
+    if callback.data == "tgtopup:custom":
+        await state.set_state(BillingAccountState.waiting_topup_stars)
+        await callback.message.answer(billing_text(lang, "enter_stars"))
+        return
+    try:
+        cherryx_amount = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.message.answer(billing_text(lang, "topup_invalid"))
+        return
+    intent = await asyncio.to_thread(create_direct_payment_intent, "topup", "", cherryx_amount, callback.from_user.id)
+    await send_intent_invoice(callback.message, bot, intent)
+
+
 @router.callback_query(F.data.startswith("lang:"))
 async def set_language_callback(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -1319,12 +2517,22 @@ async def set_language_callback(callback: CallbackQuery) -> None:
         return
     await db.upsert_user(callback.from_user.id, callback.from_user.username, callback.from_user.first_name)
     lang = callback.data.split(":", 1)[1]
-    if lang not in {"ru", "uk", "en"}:
+    if lang not in BOT_LANGUAGE_CODES:
         await callback.message.answer(tr(user_lang(callback), "unknown_language"))
         return
     language_overrides[callback.from_user.id] = lang
     await db.set_language(callback.from_user.id, lang)
-    labels = {"ru": "Русский", "uk": "Українська", "en": "English"}
+    labels = {
+        "ru": "Русский",
+        "uk": "Українська",
+        "en": "English",
+        "fr": "Français",
+        "de": "Deutsch",
+        "es": "Español",
+        "ka": "ქართული",
+        "hy": "Հայերեն",
+        "it": "Italiano",
+    }
     await callback.message.answer(
         tr(lang, "language_saved", language=labels[lang]),
         reply_markup=persistent_menu_keyboard(lang),
@@ -1332,15 +2540,23 @@ async def set_language_callback(callback: CallbackQuery) -> None:
     await callback.message.answer(tr(lang, "quick_actions"), reply_markup=main_menu(lang))
 
 
+@router.callback_query(lambda callback: billing_bot_mode())
+async def billing_mode_legacy_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await ensure_callback_user(callback)
+    if callback.message:
+        await callback.message.answer(billing_only_text(user_lang(callback)), reply_markup=main_menu(user_lang(callback)))
+
+
 @router.callback_query(F.data == "video_help")
 async def video_help(callback: CallbackQuery) -> None:
     await callback.answer()
     text = (
-        "Видео-конвертация активна: MP4, WEBM, GIF.\n"
-        "Процесс: принимаю файл, проверяю параметры, кодирую выбранный формат, отправляю результат."
-        + next_steps_text("отправь видеофайл", "или отправь YouTube-ссылку для монтажа", "после MP4 можно добавить субтитры")
+        "Р’РёРґРµРѕ-РєРѕРЅРІРµСЂС‚Р°С†РёСЏ Р°РєС‚РёРІРЅР°: MP4, WEBM, GIF.\n"
+        "РџСЂРѕС†РµСЃСЃ: РїСЂРёРЅРёРјР°СЋ С„Р°Р№Р», РїСЂРѕРІРµСЂСЏСЋ РїР°СЂР°РјРµС‚СЂС‹, РєРѕРґРёСЂСѓСЋ РІС‹Р±СЂР°РЅРЅС‹Р№ С„РѕСЂРјР°С‚, РѕС‚РїСЂР°РІР»СЏСЋ СЂРµР·СѓР»СЊС‚Р°С‚."
+        + next_steps_text("РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕС„Р°Р№Р»", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°", "РїРѕСЃР»Рµ MP4 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹")
         if ffmpeg_available()
-        else "Обработчик видео недоступен." + next_steps_text("обнови зависимости", "перезапусти бота")
+        else "РћР±СЂР°Р±РѕС‚С‡РёРє РІРёРґРµРѕ РЅРµРґРѕСЃС‚СѓРїРµРЅ." + next_steps_text("РѕР±РЅРѕРІРё Р·Р°РІРёСЃРёРјРѕСЃС‚Рё", "РїРµСЂРµР·Р°РїСѓСЃС‚Рё Р±РѕС‚Р°")
     )
     if callback.message:
         await callback.message.answer(text)
@@ -1350,29 +2566,32 @@ async def send_subscription_invoice(message: Message, bot: Bot) -> None:
     user_id = message.from_user.id if message.from_user else message.chat.id
     payload = build_subscription_payload(user_id, settings.subscription_days, settings.subscription_stars)
     lang = user_lang(message)
+    if billing_bot_mode():
+        await message.answer(billing_text(lang, "choose"), reply_markup=billing_direct_keyboard(lang))
+        return
     await message.answer(
         tr(lang, "pay_intro", stars=settings.subscription_stars, days=settings.subscription_days),
         reply_markup=help_navigation_keyboard(lang),
     )
     await message.answer(
         process_stage_text(
-            "Подготовка доступа",
-            ["проверяю запрос", "формирую счет", "жду подтверждение оплаты"],
+            "РџРѕРґРіРѕС‚РѕРІРєР° РґРѕСЃС‚СѓРїР°",
+            ["РїСЂРѕРІРµСЂСЏСЋ Р·Р°РїСЂРѕСЃ", "С„РѕСЂРјРёСЂСѓСЋ СЃС‡РµС‚", "Р¶РґСѓ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РѕРїР»Р°С‚С‹"],
             2,
-            f"Период: {settings.subscription_days} дней",
+            f"РџРµСЂРёРѕРґ: {settings.subscription_days} РґРЅРµР№",
             lang=lang,
         )
-        + next_steps_text("оплати счет ниже", "после оплаты отправь файл или YouTube-ссылку", lang=lang)
+        + next_steps_text("РѕРїР»Р°С‚Рё СЃС‡РµС‚ РЅРёР¶Рµ", "РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹ РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ", lang=lang)
     )
     await bot(
         SendInvoice(
             chat_id=message.chat.id,
             title="Image Converter Pro",
-            description=f"Доступ к видео, фото, PDF-резюме, YouTube, субтитрам и обложкам на {settings.subscription_days} дней.",
+            description=f"Р”РѕСЃС‚СѓРї Рє РІРёРґРµРѕ, С„РѕС‚Рѕ, PDF-СЂРµР·СЋРјРµ, YouTube, СЃСѓР±С‚РёС‚СЂР°Рј Рё РѕР±Р»РѕР¶РєР°Рј РЅР° {settings.subscription_days} РґРЅРµР№.",
             payload=payload,
             provider_token="",
             currency="XTR",
-            prices=[LabeledPrice(label=f"{settings.subscription_days} дней", amount=settings.subscription_stars)],
+            prices=[LabeledPrice(label=f"{settings.subscription_days} РґРЅРµР№", amount=settings.subscription_stars)],
             subscription_period=SUBSCRIPTION_PERIOD_SECONDS,
         )
     )
@@ -1386,7 +2605,7 @@ async def send_status(message: Message, user_id: int | None = None, lang: str | 
     if is_free_user(current_user_id):
         await message.answer(
             tr(lang, "free_access")
-            + next_steps_text("отправь файл для конвертации", "или отправь YouTube-ссылку для монтажа", lang=lang)
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°", lang=lang)
         )
         return
     sub = await db.get_subscription(current_user_id)
@@ -1396,32 +2615,32 @@ async def send_status(message: Message, user_id: int | None = None, lang: str | 
         if payments:
             paid = payments[0]
             paid_at = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(paid.created_at))
-            payment_note = f"\nПоследняя оплата: {paid.total_amount} Stars, {paid_at}."
+            payment_note = f"\nРџРѕСЃР»РµРґРЅСЏСЏ РѕРїР»Р°С‚Р°: {paid.total_amount} Stars, {paid_at}."
         await message.answer(
             tr(lang, "sub_active", date=sub.active_until_text)
-            + "\n\nПлан: Pro\nДоступно: YouTube, субтитры, обложки, пакеты публикации, больше обработок."
+            + "\n\nРџР»Р°РЅ: Pro\nР”РѕСЃС‚СѓРїРЅРѕ: YouTube, СЃСѓР±С‚РёС‚СЂС‹, РѕР±Р»РѕР¶РєРё, РїР°РєРµС‚С‹ РїСѓР±Р»РёРєР°С†РёРё, Р±РѕР»СЊС€Рµ РѕР±СЂР°Р±РѕС‚РѕРє."
             + payment_note
-            + next_steps_text("отправь файл", "или отправь YouTube-ссылку", lang=lang)
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р»", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ", lang=lang)
         )
     else:
         await message.answer(
             tr(lang, "sub_inactive")
-            + "\n\nПлан: без активной подписки\n"
-            + "Функции видео, фото, PDF-резюме, YouTube, субтитры и обложки доступны после оплаты Stars.\n"
-            + "Пользователи из FREE_USER_IDS в .env получают тот же доступ бесплатно."
-            + next_steps_text("активируй доступ кнопкой ниже", "или напиши /id и добавь ID в FREE_USER_IDS", lang=lang),
+            + "\n\nРџР»Р°РЅ: Р±РµР· Р°РєС‚РёРІРЅРѕР№ РїРѕРґРїРёСЃРєРё\n"
+            + "Р¤СѓРЅРєС†РёРё РІРёРґРµРѕ, С„РѕС‚Рѕ, PDF-СЂРµР·СЋРјРµ, YouTube, СЃСѓР±С‚РёС‚СЂС‹ Рё РѕР±Р»РѕР¶РєРё РґРѕСЃС‚СѓРїРЅС‹ РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹ Stars.\n"
+            + "РџРѕР»СЊР·РѕРІР°С‚РµР»Рё РёР· FREE_USER_IDS РІ .env РїРѕР»СѓС‡Р°СЋС‚ С‚РѕС‚ Р¶Рµ РґРѕСЃС‚СѓРї Р±РµСЃРїР»Р°С‚РЅРѕ."
+            + next_steps_text("Р°РєС‚РёРІРёСЂСѓР№ РґРѕСЃС‚СѓРї РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ", "РёР»Рё РЅР°РїРёС€Рё /id Рё РґРѕР±Р°РІСЊ ID РІ FREE_USER_IDS", lang=lang),
             reply_markup=main_menu(lang),
         )
 
 
 async def free_usage_lines(user_id: int) -> list[str]:
     items = [
-        ("image", "изображения"),
-        ("video", "видео"),
-        ("cover", "обложки"),
+        ("image", "РёР·РѕР±СЂР°Р¶РµРЅРёСЏ"),
+        ("video", "РІРёРґРµРѕ"),
+        ("cover", "РѕР±Р»РѕР¶РєРё"),
         ("youtube", "YouTube"),
-        ("subtitles", "субтитры"),
-        ("package", "пакеты"),
+        ("subtitles", "СЃСѓР±С‚РёС‚СЂС‹"),
+        ("package", "РїР°РєРµС‚С‹"),
     ]
     lines: list[str] = []
     for action, label in items:
@@ -1437,11 +2656,11 @@ async def send_history(message: Message) -> None:
     records = await db.recent_conversions(message.from_user.id, 10)
     if not records:
         await message.answer(
-            "История пока пустая."
-            + next_steps_text("отправь файл или YouTube-ссылку", "после обработки результат появится здесь")
+            "РСЃС‚РѕСЂРёСЏ РїРѕРєР° РїСѓСЃС‚Р°СЏ."
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ", "РїРѕСЃР»Рµ РѕР±СЂР°Р±РѕС‚РєРё СЂРµР·СѓР»СЊС‚Р°С‚ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ")
         )
         return
-    lines = ["Последние обработки:"]
+    lines = ["РџРѕСЃР»РµРґРЅРёРµ РѕР±СЂР°Р±РѕС‚РєРё:"]
     for index, record in enumerate(records, start=1):
         created = time.strftime("%Y-%m-%d %H:%M", time.localtime(record.created_at))
         lines.append(
@@ -1450,7 +2669,7 @@ async def send_history(message: Message) -> None:
         )
     await message.answer(
         "\n\n".join(lines)
-        + next_steps_text("отправь новый файл или ссылку", "для свежих MP4 можно добавить субтитры кнопкой под результатом")
+        + next_steps_text("РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ", "РґР»СЏ СЃРІРµР¶РёС… MP4 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹ РєРЅРѕРїРєРѕР№ РїРѕРґ СЂРµР·СѓР»СЊС‚Р°С‚РѕРј")
     )
 
 
@@ -1465,23 +2684,58 @@ def valid_subscription_payload(payload: str, user_id: int | None = None) -> bool
 
 @router.pre_checkout_query()
 async def pre_checkout(query) -> None:
+    lang = user_lang(query)
     if query.currency != "XTR":
-        await query.answer(ok=False, error_message="Оплата принимается только Telegram Stars.")
+        await query.answer(ok=False, error_message=billing_text(lang, "precheckout_currency"))
+        return
+    if (query.invoice_payload or "").startswith("intent:"):
+        intent = await asyncio.to_thread(get_payment_intent_by_payload, query.invoice_payload)
+        if not intent.get("ok") or intent.get("status") != "pending":
+            await query.answer(ok=False, error_message=billing_text(lang, "precheckout_expired"))
+            return
+        if int(intent.get("stars_amount") or 0) != query.total_amount:
+            await query.answer(ok=False, error_message=billing_text(lang, "precheckout_amount"))
+            return
+        await query.answer(ok=True)
         return
     if query.total_amount != settings.subscription_stars:
-        await query.answer(ok=False, error_message="Сумма счета не совпадает с текущим тарифом.")
+        await query.answer(ok=False, error_message=billing_text(lang, "precheckout_amount"))
         return
     if not valid_subscription_payload(query.invoice_payload, query.from_user.id):
-        await query.answer(ok=False, error_message="Счет устарел. Нажмите оплату еще раз.")
+        await query.answer(ok=False, error_message=billing_text(lang, "precheckout_expired"))
         return
     await query.answer(ok=True)
 
 
 @router.message(F.successful_payment)
-async def successful_payment(message: Message) -> None:
+async def successful_payment(message: Message, state: FSMContext) -> None:
     if not message.from_user or not message.successful_payment:
         return
     payment = message.successful_payment
+    if (payment.invoice_payload or "").startswith("intent:"):
+        result = await asyncio.to_thread(
+            record_intent_payment,
+            telegram_user_id=message.from_user.id,
+            stars_amount=payment.total_amount,
+            invoice_payload=payment.invoice_payload,
+            telegram_payment_charge_id=payment.telegram_payment_charge_id,
+            provider_payment_charge_id=payment.provider_payment_charge_id or "",
+            currency=payment.currency,
+            telegram_username=message.from_user.username or "",
+            telegram_first_name=message.from_user.first_name or "",
+        )
+        if not result.get("ok"):
+            await message.answer(billing_text(user_lang(message), "intent_error"))
+            return
+        if result.get("needs_email"):
+            await state.set_state(BillingAccountState.waiting_email)
+            await message.answer(billing_text(user_lang(message), "need_email"))
+            return
+        await message.answer(
+            billing_text(user_lang(message), "applied", title=result.get("title"), cherryx=result.get("cherryx_amount")),
+            reply_markup=main_menu(user_lang(message)),
+        )
+        return
     if payment.currency != "XTR" or payment.total_amount != settings.subscription_stars:
         logger.warning("Unexpected payment from %s: %s %s", message.from_user.id, payment.currency, payment.total_amount)
         return
@@ -1501,17 +2755,122 @@ async def successful_payment(message: Message) -> None:
         payment.provider_payment_charge_id,
         active_until,
     )
+    account_note = ""
+    try:
+        account_result = await asyncio.to_thread(
+            record_stars_payment,
+            telegram_user_id=message.from_user.id,
+            stars_amount=payment.total_amount,
+            invoice_payload=payment.invoice_payload,
+            telegram_payment_charge_id=payment.telegram_payment_charge_id,
+            provider_payment_charge_id=payment.provider_payment_charge_id or "",
+            currency=payment.currency,
+            telegram_username=message.from_user.username or "",
+            telegram_first_name=message.from_user.first_name or "",
+        )
+        if account_result.get("linked"):
+            account_note = (
+                f"РќР° CherryX Р°РєРєР°СѓРЅС‚ Р·Р°С‡РёСЃР»РµРЅРѕ: {account_result.get('cherryx', 0)} CherryX.\n"
+                f"Р‘Р°Р»Р°РЅСЃ: {account_result.get('balance', 0)} CherryX."
+            )
+        else:
+            account_note = (
+                f"РџР»Р°С‚С‘Р¶ СЃРѕС…СЂР°РЅС‘РЅ: {account_result.get('cherryx', 0)} CherryX Р¶РґСѓС‚ РїСЂРёРІСЏР·РєРё Р°РєРєР°СѓРЅС‚Р°.\n"
+                "РћС‚РєСЂРѕР№ CherryX Pay РЅР° СЃР°Р№С‚Рµ Рё РѕС‚РїСЂР°РІСЊ СЃСЋРґР° РєРѕРјР°РЅРґСѓ /link РєРѕРґ."
+            )
+    except Exception:
+        logger.exception("Failed to sync Telegram Stars payment with CherryX account for %s", message.from_user.id)
+        account_note = "РџР»Р°С‚С‘Р¶ СЃРѕС…СЂР°РЅС‘РЅ РІ Р±РѕС‚Рµ. Р•СЃР»Рё Р±Р°Р»Р°РЅСЃ СЃР°Р№С‚Р° РЅРµ РѕР±РЅРѕРІРёР»СЃСЏ, РЅР°РїРёС€Рё /paysupport."
     await message.answer(
-        "Оплата прошла.\n"
-        f"Подписка активна до {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(active_until))}.\n"
-        + next_steps_text("отправь изображение или видео", "или отправь YouTube-ссылку для монтажа")
+        "РћРїР»Р°С‚Р° РїСЂРѕС€Р»Р°.\n"
+        f"РџРѕРґРїРёСЃРєР° Р°РєС‚РёРІРЅР° РґРѕ {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(active_until))}.\n"
+        + next_steps_text("РѕС‚РїСЂР°РІСЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ РёР»Рё РІРёРґРµРѕ", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РґР»СЏ РјРѕРЅС‚Р°Р¶Р°")
     )
+    if account_note:
+        await message.answer(account_note)
+
+
+@router.message(BillingAccountState.waiting_topup_stars)
+async def billing_topup_stars_amount(message: Message, bot: Bot, state: FSMContext) -> None:
+    await ensure_user(message)
+    if not message.from_user or not message.text:
+        return
+    raw_amount = message.text.strip().replace(" ", "")
+    if not raw_amount.isdigit():
+        await message.answer(billing_text(user_lang(message), "invalid_stars"))
+        return
+    stars_amount = int(raw_amount)
+    if stars_amount < 1 or stars_amount > 150000:
+        await message.answer(billing_text(user_lang(message), "stars_range"))
+        return
+    try:
+        intent = await asyncio.to_thread(create_direct_topup_by_stars, stars_amount, message.from_user.id)
+    except ValueError:
+        await message.answer(billing_text(user_lang(message), "stars_range"))
+        return
+    await state.clear()
+    await send_intent_invoice(message, bot, intent)
+
+
+@router.message(BillingAccountState.waiting_email)
+async def billing_account_email(message: Message, state: FSMContext) -> None:
+    await ensure_user(message)
+    if not message.from_user or not message.text:
+        return
+    email = message.text.strip()
+    result = await asyncio.to_thread(
+        create_account_for_paid_intent,
+        message.from_user.id,
+        email,
+        message.from_user.username or "",
+        message.from_user.first_name or "",
+    )
+    if result.get("ok"):
+        await state.clear()
+        login_url = str(result.get("magic_login_url") or result.get("login_url") or "")
+        await message.answer(
+            billing_text(
+                user_lang(message),
+                "account_created",
+                email=result.get("email"),
+                password=result.get("password"),
+                login_url=login_url,
+            ),
+            reply_markup=open_cherryx_keyboard(login_url, user_lang(message)) if login_url else main_menu(user_lang(message)),
+        )
+        if login_url:
+            await message.answer(billing_text(user_lang(message), "choose"), reply_markup=main_menu(user_lang(message)))
+        return
+    if result.get("reason") == "email_exists":
+        await state.clear()
+        await message.answer(billing_text(user_lang(message), "email_exists"))
+        return
+    await message.answer(billing_text(user_lang(message), "email_invalid"))
 
 
 @router.message(StateFilter(None), F.text)
 async def receive_text(message: Message, bot: Bot) -> None:
     await ensure_user(message)
     if not message.from_user:
+        return
+    if billing_bot_mode():
+        text = (message.text or "").strip().lower()
+        if text in {"pay", "pay stars", "stars"}:
+            await send_subscription_invoice(message, bot)
+            return
+        if text == "status":
+            await send_status(message)
+            return
+        if text == "wallet":
+            await wallet_command(message)
+            return
+        if text in {"help", "support"}:
+            await message.answer(billing_help_text(user_lang(message)), reply_markup=main_menu(user_lang(message)))
+            return
+        if text == "language":
+            await language_command(message)
+            return
+        await message.answer(billing_only_text(user_lang(message)), reply_markup=main_menu(user_lang(message)))
         return
 
     url = extract_youtube_url(message.text)
@@ -1522,30 +2881,30 @@ async def receive_text(message: Message, bot: Bot) -> None:
             session.cover_title = prompt
             job_id = remember_cover_job(message.from_user.id, session.path, prompt, None)
             await message.answer(
-                "Текст для обложки принят.\n"
+                "РўРµРєСЃС‚ РґР»СЏ РѕР±Р»РѕР¶РєРё РїСЂРёРЅСЏС‚.\n"
                 f"{cover_prompt_preview(prompt)}\n\n"
-                "Теперь нажми «Сгенерировать обложку PNG» или «Еще 3 варианта», и я подставлю этот текст в макет.",
+                "РўРµРїРµСЂСЊ РЅР°Р¶РјРё В«РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РѕР±Р»РѕР¶РєСѓ PNGВ» РёР»Рё В«Р•С‰Рµ 3 РІР°СЂРёР°РЅС‚Р°В», Рё СЏ РїРѕРґСЃС‚Р°РІР»СЋ СЌС‚РѕС‚ С‚РµРєСЃС‚ РІ РјР°РєРµС‚.",
                 reply_markup=cover_tools_keyboard(job_id),
             )
         return
 
     lang = user_lang(message)
     source_label = video_source_label(url)
-    if not await ensure_action_allowed(message, message.from_user.id, "youtube", f"{source_label}-монтаж входит в Pro-функции."):
+    if not await ensure_action_allowed(message, message.from_user.id, "youtube", f"{source_label}-РјРѕРЅС‚Р°Р¶ РІС…РѕРґРёС‚ РІ Pro-С„СѓРЅРєС†РёРё."):
         return
 
     job_id = uuid.uuid4().hex[:10]
     pending_youtube_jobs[job_id] = (message.from_user.id, url, lang, int(time.time()))
     await message.answer(
-        f"{source_label}-ссылка принята.\n\n"
-        "Выбери режим:\n"
-        "- Скачать MP4: скачать доступный файл и при необходимости конвертировать в MP4.\n"
-        "- Shorts dynamic: короче, плотнее, больше опоры на пики звука и смены кадра.\n"
-        "- Shorts podcast: длиннее, больше внимания лицам и паузам речи.\n"
-        "- Shorts calm: меньше клипов, спокойнее темп.\n"
-        "- Preview 30/60/90: один широкий 16:9 ролик с лучшими моментами и мягкими переходами.\n\n"
-        f"- Обложка PNG: анализ видео и яркая 1280x720 обложка для {source_label}.\n\n"
-        "После выбора буду писать этапы. На долгих видео статус обновляется примерно раз в минуту.",
+        f"{source_label}-СЃСЃС‹Р»РєР° РїСЂРёРЅСЏС‚Р°.\n\n"
+        "Р’С‹Р±РµСЂРё СЂРµР¶РёРј:\n"
+        "- РЎРєР°С‡Р°С‚СЊ MP4: СЃРєР°С‡Р°С‚СЊ РґРѕСЃС‚СѓРїРЅС‹Р№ С„Р°Р№Р» Рё РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё РєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РІ MP4.\n"
+        "- Shorts dynamic: РєРѕСЂРѕС‡Рµ, РїР»РѕС‚РЅРµРµ, Р±РѕР»СЊС€Рµ РѕРїРѕСЂС‹ РЅР° РїРёРєРё Р·РІСѓРєР° Рё СЃРјРµРЅС‹ РєР°РґСЂР°.\n"
+        "- Shorts podcast: РґР»РёРЅРЅРµРµ, Р±РѕР»СЊС€Рµ РІРЅРёРјР°РЅРёСЏ Р»РёС†Р°Рј Рё РїР°СѓР·Р°Рј СЂРµС‡Рё.\n"
+        "- Shorts calm: РјРµРЅСЊС€Рµ РєР»РёРїРѕРІ, СЃРїРѕРєРѕР№РЅРµРµ С‚РµРјРї.\n"
+        "- Preview 30/60/90: РѕРґРёРЅ С€РёСЂРѕРєРёР№ 16:9 СЂРѕР»РёРє СЃ Р»СѓС‡С€РёРјРё РјРѕРјРµРЅС‚Р°РјРё Рё РјСЏРіРєРёРјРё РїРµСЂРµС…РѕРґР°РјРё.\n\n"
+        f"- РћР±Р»РѕР¶РєР° PNG: Р°РЅР°Р»РёР· РІРёРґРµРѕ Рё СЏСЂРєР°СЏ 1280x720 РѕР±Р»РѕР¶РєР° РґР»СЏ {source_label}.\n\n"
+        "РџРѕСЃР»Рµ РІС‹Р±РѕСЂР° Р±СѓРґСѓ РїРёСЃР°С‚СЊ СЌС‚Р°РїС‹. РќР° РґРѕР»РіРёС… РІРёРґРµРѕ СЃС‚Р°С‚СѓСЃ РѕР±РЅРѕРІР»СЏРµС‚СЃСЏ РїСЂРёРјРµСЂРЅРѕ СЂР°Р· РІ РјРёРЅСѓС‚Сѓ.",
         reply_markup=youtube_mode_keyboard(job_id),
     )
 
@@ -1558,38 +2917,38 @@ async def youtube_mode_callback(callback: CallbackQuery, bot: Bot) -> None:
     _prefix, mode, job_id = callback.data.split(":", 2)
     job = pending_youtube_jobs.pop(job_id, None)
     if not job:
-        await callback.message.answer("Эта YouTube-задача уже недоступна. Отправь ссылку еще раз.")
+        await callback.message.answer("Р­С‚Р° YouTube-Р·Р°РґР°С‡Р° СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРЅР°. РћС‚РїСЂР°РІСЊ СЃСЃС‹Р»РєСѓ РµС‰Рµ СЂР°Р·.")
         return
     user_id, url, lang, created_at = job
     source_label = video_source_label(url)
     if user_id != callback.from_user.id:
-        await callback.message.answer(f"Эта кнопка от другой задачи. Отправь свою {source_label}-ссылку.")
+        await callback.message.answer(f"Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕР№ Р·Р°РґР°С‡Рё. РћС‚РїСЂР°РІСЊ СЃРІРѕСЋ {source_label}-СЃСЃС‹Р»РєСѓ.")
         return
     if mode == "cancel":
         await callback.message.answer(
-            f"Ок, {source_label}-задача отменена."
-            + next_steps_text("отправь другую ссылку", "или отправь файл для конвертации")
+            f"РћРє, {source_label}-Р·Р°РґР°С‡Р° РѕС‚РјРµРЅРµРЅР°."
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ РґСЂСѓРіСѓСЋ СЃСЃС‹Р»РєСѓ", "РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё")
         )
         return
     if int(time.time()) - created_at > 900:
-        await callback.message.answer(f"Задача устарела. Отправь {source_label}-ссылку еще раз.")
+        await callback.message.answer(f"Р—Р°РґР°С‡Р° СѓСЃС‚Р°СЂРµР»Р°. РћС‚РїСЂР°РІСЊ {source_label}-СЃСЃС‹Р»РєСѓ РµС‰Рµ СЂР°Р·.")
         return
-    if not await ensure_action_allowed(callback.message, callback.from_user.id, "youtube", f"{source_label}-монтаж и обложки по ссылке входят в Pro-функции."):
+    if not await ensure_action_allowed(callback.message, callback.from_user.id, "youtube", f"{source_label}-РјРѕРЅС‚Р°Р¶ Рё РѕР±Р»РѕР¶РєРё РїРѕ СЃСЃС‹Р»РєРµ РІС…РѕРґСЏС‚ РІ Pro-С„СѓРЅРєС†РёРё."):
         return
     if mode == "download":
         if youtube_semaphore.locked():
-            await callback.message.answer(f"Сейчас уже идет {source_label}-обработка. Поставил скачивание в очередь.")
+            await callback.message.answer(f"РЎРµР№С‡Р°СЃ СѓР¶Рµ РёРґРµС‚ {source_label}-РѕР±СЂР°Р±РѕС‚РєР°. РџРѕСЃС‚Р°РІРёР» СЃРєР°С‡РёРІР°РЅРёРµ РІ РѕС‡РµСЂРµРґСЊ.")
         async with youtube_semaphore:
             await process_video_download_link(callback.message, bot, url, lang, user_id)
         return
     if mode == "cover":
         if youtube_semaphore.locked():
-            await callback.message.answer(f"Сейчас уже идет {source_label}-обработка. Поставил обложку в очередь.")
+            await callback.message.answer(f"РЎРµР№С‡Р°СЃ СѓР¶Рµ РёРґРµС‚ {source_label}-РѕР±СЂР°Р±РѕС‚РєР°. РџРѕСЃС‚Р°РІРёР» РѕР±Р»РѕР¶РєСѓ РІ РѕС‡РµСЂРµРґСЊ.")
         async with youtube_semaphore:
             await process_youtube_cover_link(callback.message, bot, url, lang, user_id)
         return
     if youtube_semaphore.locked():
-        await callback.message.answer(f"Сейчас уже идет {source_label}-нарезка. Поставил задачу в очередь.")
+        await callback.message.answer(f"РЎРµР№С‡Р°СЃ СѓР¶Рµ РёРґРµС‚ {source_label}-РЅР°СЂРµР·РєР°. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with youtube_semaphore:
         await process_youtube_link(callback.message, bot, url, lang, user_id, mode)
 
@@ -1602,19 +2961,19 @@ async def youtube_redo_callback(callback: CallbackQuery, bot: Bot) -> None:
     _prefix, mode, job_id = callback.data.split(":", 2)
     job = recent_youtube_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Эта ссылка уже не хранится. Отправь YouTube-ссылку еще раз.")
+        await callback.message.answer("Р­С‚Р° СЃСЃС‹Р»РєР° СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ. РћС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РµС‰Рµ СЂР°Р·.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другой задачи. Отправь свою YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕР№ Р·Р°РґР°С‡Рё. РћС‚РїСЂР°РІСЊ СЃРІРѕСЋ YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if int(time.time()) - job.created_at > 86400:
         recent_youtube_jobs.pop(job_id, None)
-        await callback.message.answer("Задача устарела. Отправь YouTube-ссылку еще раз.")
+        await callback.message.answer("Р—Р°РґР°С‡Р° СѓСЃС‚Р°СЂРµР»Р°. РћС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ РµС‰Рµ СЂР°Р·.")
         return
-    if not await ensure_action_allowed(callback.message, callback.from_user.id, "youtube", "Повторная YouTube-обработка входит в Pro-функции."):
+    if not await ensure_action_allowed(callback.message, callback.from_user.id, "youtube", "РџРѕРІС‚РѕСЂРЅР°СЏ YouTube-РѕР±СЂР°Р±РѕС‚РєР° РІС…РѕРґРёС‚ РІ Pro-С„СѓРЅРєС†РёРё."):
         return
     if youtube_semaphore.locked():
-        await callback.message.answer("Сейчас уже идет монтаж. Поставил переделку в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ РёРґРµС‚ РјРѕРЅС‚Р°Р¶. РџРѕСЃС‚Р°РІРёР» РїРµСЂРµРґРµР»РєСѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with youtube_semaphore:
         await process_youtube_link(callback.message, bot, job.url, job.lang, job.user_id, mode)
 
@@ -1627,14 +2986,14 @@ async def subtitle_style_callback(callback: CallbackQuery) -> None:
     _prefix, style, job_id = callback.data.split(":", 2)
     job = subtitle_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится в очереди субтитров. Пересобери ролик или отправь файл заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РІ РѕС‡РµСЂРµРґРё СЃСѓР±С‚РёС‚СЂРѕРІ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     style = style if style in SUBTITLE_STYLE_LABELS else "pop"
     await callback.message.answer(
-        f"Стиль субтитров: {SUBTITLE_STYLE_LABELS[style]}.\nВыбери язык речи для распознавания:",
+        f"РЎС‚РёР»СЊ СЃСѓР±С‚РёС‚СЂРѕРІ: {SUBTITLE_STYLE_LABELS[style]}.\nР’С‹Р±РµСЂРё СЏР·С‹Рє СЂРµС‡Рё РґР»СЏ СЂР°СЃРїРѕР·РЅР°РІР°РЅРёСЏ:",
         reply_markup=subtitle_language_keyboard(style, job_id),
     )
 
@@ -1647,14 +3006,14 @@ async def subtitle_preview_callback(callback: CallbackQuery) -> None:
     job_id = callback.data.split(":", 1)[1]
     job = subtitle_jobs.get(job_id)
     if not job or job.user_id != callback.from_user.id:
-        await callback.message.answer("Это видео уже недоступно для субтитров. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ РґР»СЏ СЃСѓР±С‚РёС‚СЂРѕРІ. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     preview_path: Path | None = None
     try:
         preview_path = await asyncio.to_thread(create_subtitle_style_preview_sheet, settings.output_dir)
         await callback.message.answer_photo(
             FSInputFile(preview_path),
-            caption="Примеры стилей субтитров. После просмотра выберите стиль кнопкой ниже.",
+            caption="РџСЂРёРјРµСЂС‹ СЃС‚РёР»РµР№ СЃСѓР±С‚РёС‚СЂРѕРІ. РџРѕСЃР»Рµ РїСЂРѕСЃРјРѕС‚СЂР° РІС‹Р±РµСЂРёС‚Рµ СЃС‚РёР»СЊ РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ.",
             reply_markup=subtitle_keyboard(job_id),
         )
     finally:
@@ -1670,9 +3029,9 @@ async def subtitle_back_callback(callback: CallbackQuery) -> None:
     job_id = callback.data.split(":", 1)[1]
     job = subtitle_jobs.get(job_id)
     if not job or job.user_id != callback.from_user.id:
-        await callback.message.answer("Это видео уже недоступно для субтитров. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ РґР»СЏ СЃСѓР±С‚РёС‚СЂРѕРІ. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
-    await callback.message.answer("Выбери стиль субтитров:", reply_markup=subtitle_keyboard(job_id))
+    await callback.message.answer("Р’С‹Р±РµСЂРё СЃС‚РёР»СЊ СЃСѓР±С‚РёС‚СЂРѕРІ:", reply_markup=subtitle_keyboard(job_id))
 
 
 @router.callback_query(F.data.startswith("cap:"))
@@ -1688,24 +3047,24 @@ async def subtitle_callback(callback: CallbackQuery, bot: Bot) -> None:
         _prefix, style, language_code, job_id = parts
         subtitle_language = normalize_subtitle_language(language_code)
     else:
-        await callback.message.answer("Не понял выбранный вариант субтитров. Нажми стиль еще раз.")
+        await callback.message.answer("РќРµ РїРѕРЅСЏР» РІС‹Р±СЂР°РЅРЅС‹Р№ РІР°СЂРёР°РЅС‚ СЃСѓР±С‚РёС‚СЂРѕРІ. РќР°Р¶РјРё СЃС‚РёР»СЊ РµС‰Рµ СЂР°Р·.")
         return
     job = subtitle_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится в очереди субтитров. Пересобери ролик или отправь файл заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РІ РѕС‡РµСЂРµРґРё СЃСѓР±С‚РёС‚СЂРѕРІ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє РёР»Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if not job.path.exists():
         subtitle_jobs.pop(job_id, None)
-        await callback.message.answer("Файл уже недоступен. Пересобери ролик, и я снова дам кнопку субтитров.")
+        await callback.message.answer("Р¤Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє, Рё СЏ СЃРЅРѕРІР° РґР°Рј РєРЅРѕРїРєСѓ СЃСѓР±С‚РёС‚СЂРѕРІ.")
         return
-    if not await ensure_action_allowed(callback.message, callback.from_user.id, "subtitles", "Субтитры входят в Pro-функции."):
+    if not await ensure_action_allowed(callback.message, callback.from_user.id, "subtitles", "РЎСѓР±С‚РёС‚СЂС‹ РІС…РѕРґСЏС‚ РІ Pro-С„СѓРЅРєС†РёРё."):
         return
 
     if subtitle_semaphore.locked():
-        await callback.message.answer("Сейчас уже делаю субтитры. Поставил задачу в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ РґРµР»Р°СЋ СЃСѓР±С‚РёС‚СЂС‹. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
 
     async with subtitle_semaphore:
         await process_subtitles(callback.message, bot, job, style, subtitle_language)
@@ -1725,24 +3084,24 @@ async def process_subtitles(
     started_at = time.time()
     state: dict[str, object] = {
         "started_at": started_at,
-        "stage": "Субтитры: подготовка",
+        "stage": "РЎСѓР±С‚РёС‚СЂС‹: РїРѕРґРіРѕС‚РѕРІРєР°",
         "detail": job.path.name,
     }
     status = await message.answer(
         process_stage_text(
-            "Добавление субтитров",
+            "Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ",
             SUBTITLE_STEPS,
             1,
-            f"Стиль: {style_label}. Язык: {language_label}. Беру чистый MP4 без повторного наложения.",
+            f"РЎС‚РёР»СЊ: {style_label}. РЇР·С‹Рє: {language_label}. Р‘РµСЂСѓ С‡РёСЃС‚С‹Р№ MP4 Р±РµР· РїРѕРІС‚РѕСЂРЅРѕРіРѕ РЅР°Р»РѕР¶РµРЅРёСЏ.",
         )
     )
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     try:
         await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
-        state["stage"] = "Субтитры: распознаю речь и верстаю текст"
+        state["stage"] = "РЎСѓР±С‚РёС‚СЂС‹: СЂР°СЃРїРѕР·РЅР°СЋ СЂРµС‡СЊ Рё РІРµСЂСЃС‚Р°СЋ С‚РµРєСЃС‚"
         await safe_edit(
             status,
-            process_stage_text("Добавление субтитров", SUBTITLE_STEPS, 2, "Извлекаю звук и ищу фразы"),
+            process_stage_text("Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ", SUBTITLE_STEPS, 2, "РР·РІР»РµРєР°СЋ Р·РІСѓРє Рё РёС‰Сѓ С„СЂР°Р·С‹"),
         )
         cues = await asyncio.to_thread(
             transcribe_subtitle_cues,
@@ -1753,18 +3112,18 @@ async def process_subtitles(
         if not cues:
             await safe_edit(
                 status,
-                "Не нашел речь для субтитров."
-                + next_steps_text("попробуй другой фрагмент", "или отправь видео с более чистым звуком"),
+                "РќРµ РЅР°С€РµР» СЂРµС‡СЊ РґР»СЏ СЃСѓР±С‚РёС‚СЂРѕРІ."
+                + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ С„СЂР°РіРјРµРЅС‚", "РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ СЃ Р±РѕР»РµРµ С‡РёСЃС‚С‹Рј Р·РІСѓРєРѕРј"),
             )
             return
-        state["stage"] = "Субтитры: верстаю стиль"
+        state["stage"] = "РЎСѓР±С‚РёС‚СЂС‹: РІРµСЂСЃС‚Р°СЋ СЃС‚РёР»СЊ"
         await safe_edit(
             status,
             process_stage_text(
-                "Добавление субтитров",
+                "Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ",
                 SUBTITLE_STEPS,
                 3,
-                f"Фраз найдено: {len(cues)}. Раскладываю текст по экрану.",
+                f"Р¤СЂР°Р· РЅР°Р№РґРµРЅРѕ: {len(cues)}. Р Р°СЃРєР»Р°РґС‹РІР°СЋ С‚РµРєСЃС‚ РїРѕ СЌРєСЂР°РЅСѓ.",
             ),
         )
         assets = await asyncio.to_thread(
@@ -1777,7 +3136,7 @@ async def process_subtitles(
         )
         await safe_edit(
             status,
-            process_stage_text("Добавление субтитров", SUBTITLE_STEPS, 4, "Вшиваю оформленные строки в видео"),
+            process_stage_text("Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ", SUBTITLE_STEPS, 4, "Р’С€РёРІР°СЋ РѕС„РѕСЂРјР»РµРЅРЅС‹Рµ СЃС‚СЂРѕРєРё РІ РІРёРґРµРѕ"),
         )
         output = await asyncio.to_thread(
             render_subtitle_assets,
@@ -1794,50 +3153,50 @@ async def process_subtitles(
             job.path.stat().st_size,
             output.path.stat().st_size,
         )
-        state["stage"] = "Субтитры: отправляю готовый MP4"
-        state["detail"] = f"Размер: {human_size(output.path.stat().st_size)}"
+        state["stage"] = "РЎСѓР±С‚РёС‚СЂС‹: РѕС‚РїСЂР°РІР»СЏСЋ РіРѕС‚РѕРІС‹Р№ MP4"
+        state["detail"] = f"Р Р°Р·РјРµСЂ: {human_size(output.path.stat().st_size)}"
         await safe_edit(
             status,
             process_stage_text(
-                "Добавление субтитров",
+                "Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ",
                 SUBTITLE_STEPS,
                 5,
-                f"Размер: {human_size(output.path.stat().st_size)}",
+                f"Р Р°Р·РјРµСЂ: {human_size(output.path.stat().st_size)}",
             ),
         )
         new_job_id = remember_subtitle_job(job.user_id, job.path, job.title)
         await message.answer_document(
             FSInputFile(output.path),
             caption=(
-                "Готово: видео с вшитыми субтитрами\n"
-                f"Стиль: {style_label}\n"
-                f"Язык: {language_label}\n"
-                f"Вес: {human_size(output.path.stat().st_size)}\n"
-                f"Время обработки: {format_duration(time.time() - started_at)}"
+                "Р“РѕС‚РѕРІРѕ: РІРёРґРµРѕ СЃ РІС€РёС‚С‹РјРё СЃСѓР±С‚РёС‚СЂР°РјРё\n"
+                f"РЎС‚РёР»СЊ: {style_label}\n"
+                f"РЇР·С‹Рє: {language_label}\n"
+                f"Р’РµСЃ: {human_size(output.path.stat().st_size)}\n"
+                f"Р’СЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё: {format_duration(time.time() - started_at)}"
                 + next_steps_text(
-                    "скачай версию с субтитрами",
-                    "можно нажать другой стиль субтитров",
-                    "можно отправить следующий файл или ссылку",
+                    "СЃРєР°С‡Р°Р№ РІРµСЂСЃРёСЋ СЃ СЃСѓР±С‚РёС‚СЂР°РјРё",
+                    "РјРѕР¶РЅРѕ РЅР°Р¶Р°С‚СЊ РґСЂСѓРіРѕР№ СЃС‚РёР»СЊ СЃСѓР±С‚РёС‚СЂРѕРІ",
+                    "РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ СЃР»РµРґСѓСЋС‰РёР№ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ",
                 )
             ),
             reply_markup=subtitle_keyboard(new_job_id),
         )
         await safe_edit(
             status,
-            process_stage_text("Добавление субтитров", SUBTITLE_STEPS, 5, "Файл отправлен", done=True)
-            + next_steps_text("проверь читаемость", "если стиль не подходит, нажми другой вариант"),
+            process_stage_text("Р”РѕР±Р°РІР»РµРЅРёРµ СЃСѓР±С‚РёС‚СЂРѕРІ", SUBTITLE_STEPS, 5, "Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ", done=True)
+            + next_steps_text("РїСЂРѕРІРµСЂСЊ С‡РёС‚Р°РµРјРѕСЃС‚СЊ", "РµСЃР»Рё СЃС‚РёР»СЊ РЅРµ РїРѕРґС…РѕРґРёС‚, РЅР°Р¶РјРё РґСЂСѓРіРѕР№ РІР°СЂРёР°РЅС‚"),
         )
     except SubtitleUnavailableError as exc:
         await safe_edit(
             status,
-            str(exc) + next_steps_text("обнови зависимости", "перезапусти бота", "нажми кнопку субтитров еще раз"),
+            str(exc) + next_steps_text("РѕР±РЅРѕРІРё Р·Р°РІРёСЃРёРјРѕСЃС‚Рё", "РїРµСЂРµР·Р°РїСѓСЃС‚Рё Р±РѕС‚Р°", "РЅР°Р¶РјРё РєРЅРѕРїРєСѓ СЃСѓР±С‚РёС‚СЂРѕРІ РµС‰Рµ СЂР°Р·"),
         )
     except Exception as exc:
         logger.exception("Subtitle job failed")
         await safe_edit(
             status,
-            f"Не получилось сделать субтитры: {exc}"
-            + next_steps_text("попробуй другой стиль", "если в ролике мало речи, отправь другой фрагмент"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРґРµР»Р°С‚СЊ СЃСѓР±С‚РёС‚СЂС‹: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ СЃС‚РёР»СЊ", "РµСЃР»Рё РІ СЂРѕР»РёРєРµ РјР°Р»Рѕ СЂРµС‡Рё, РѕС‚РїСЂР°РІСЊ РґСЂСѓРіРѕР№ С„СЂР°РіРјРµРЅС‚"),
         )
     finally:
         heartbeat_task.cancel()
@@ -1851,24 +3210,24 @@ async def cover_text_callback(callback: CallbackQuery, state: FSMContext) -> Non
     job_id = callback.data.split(":", 1)[1]
     job = cover_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится для обложки. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РґР»СЏ РѕР±Р»РѕР¶РєРё. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if not job.path.exists():
         cover_jobs.pop(job_id, None)
-        await callback.message.answer("Файл уже недоступен. Отправь видео заново.")
+        await callback.message.answer("Р¤Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ.")
         return
     await state.set_state(CoverTextState.waiting_text)
     await state.update_data(cover_job_id=job_id)
     await callback.message.answer(
-        "Напиши текст для обложки одним сообщением.\n\n"
-        "1 строка — крупный заголовок.\n"
-        "2 строка — описание/крючок помельче.\n\n"
-        "Пример:\n"
-        "Как он поднял продажи\n"
-        "разбор главного приема"
+        "РќР°РїРёС€Рё С‚РµРєСЃС‚ РґР»СЏ РѕР±Р»РѕР¶РєРё РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј.\n\n"
+        "1 СЃС‚СЂРѕРєР° вЂ” РєСЂСѓРїРЅС‹Р№ Р·Р°РіРѕР»РѕРІРѕРє.\n"
+        "2 СЃС‚СЂРѕРєР° вЂ” РѕРїРёСЃР°РЅРёРµ/РєСЂСЋС‡РѕРє РїРѕРјРµР»СЊС‡Рµ.\n\n"
+        "РџСЂРёРјРµСЂ:\n"
+        "РљР°Рє РѕРЅ РїРѕРґРЅСЏР» РїСЂРѕРґР°Р¶Рё\n"
+        "СЂР°Р·Р±РѕСЂ РіР»Р°РІРЅРѕРіРѕ РїСЂРёРµРјР°"
     )
 
 
@@ -1882,17 +3241,17 @@ async def cover_text_received(message: Message, bot: Bot, state: FSMContext) -> 
     job = cover_jobs.get(job_id)
     if not job or job.user_id != message.from_user.id or not job.path.exists():
         await state.clear()
-        await message.answer("Видео для обложки уже недоступно. Отправь файл или ссылку заново.")
+        await message.answer("Р’РёРґРµРѕ РґР»СЏ РѕР±Р»РѕР¶РєРё СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     prompt = normalize_cover_prompt_text(message.text)
     if not prompt:
-        await message.answer("Пришли заголовок и описание текстом. Первая строка будет главным заголовком.")
+        await message.answer("РџСЂРёС€Р»Рё Р·Р°РіРѕР»РѕРІРѕРє Рё РѕРїРёСЃР°РЅРёРµ С‚РµРєСЃС‚РѕРј. РџРµСЂРІР°СЏ СЃС‚СЂРѕРєР° Р±СѓРґРµС‚ РіР»Р°РІРЅС‹Рј Р·Р°РіРѕР»РѕРІРєРѕРј.")
         return
     await state.clear()
     if not await ensure_action_allowed(message, message.from_user.id, "cover"):
         return
     if cover_semaphore.locked():
-        await message.answer("Сейчас уже собираю обложку. Поставил задачу в очередь.")
+        await message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ СЃРѕР±РёСЂР°СЋ РѕР±Р»РѕР¶РєСѓ. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with cover_semaphore:
         await process_video_cover(
             message,
@@ -1906,21 +3265,21 @@ async def cover_text_received(message: Message, bot: Bot, state: FSMContext) -> 
 
 @router.callback_query(F.data.startswith("cover_session:"))
 async def cover_session_callback(callback: CallbackQuery, bot: Bot) -> None:
-    await callback.answer("Готовлю обложку...")
+    await callback.answer("Р“РѕС‚РѕРІР»СЋ РѕР±Р»РѕР¶РєСѓ...")
     if not callback.from_user or not callback.message or not callback.data:
         return
     session_id = callback.data.split(":", 1)[1]
     session = get_owned_session(session_id, callback.from_user.id)
     if not session:
-        await callback.message.answer("Этот файл уже недоступен. Отправь видео заново.")
+        await callback.message.answer("Р­С‚РѕС‚ С„Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ.")
         return
     if session.kind != "video":
-        await callback.message.answer("Обложку можно сделать только для видео.")
+        await callback.message.answer("РћР±Р»РѕР¶РєСѓ РјРѕР¶РЅРѕ СЃРґРµР»Р°С‚СЊ С‚РѕР»СЊРєРѕ РґР»СЏ РІРёРґРµРѕ.")
         return
     if not await ensure_action_allowed(callback.message, callback.from_user.id, "cover"):
         return
     if cover_semaphore.locked():
-        await callback.message.answer("Сейчас уже собираю обложку. Поставил задачу в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ СЃРѕР±РёСЂР°СЋ РѕР±Р»РѕР¶РєСѓ. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with cover_semaphore:
         await process_video_cover(
             callback.message,
@@ -1934,25 +3293,25 @@ async def cover_session_callback(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("cover:"))
 async def cover_callback(callback: CallbackQuery, bot: Bot) -> None:
-    await callback.answer("Готовлю обложку...")
+    await callback.answer("Р“РѕС‚РѕРІР»СЋ РѕР±Р»РѕР¶РєСѓ...")
     if not callback.from_user or not callback.message or not callback.data:
         return
     job_id = callback.data.split(":", 1)[1]
     job = cover_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится для обложки. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РґР»СЏ РѕР±Р»РѕР¶РєРё. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if not job.path.exists():
         cover_jobs.pop(job_id, None)
-        await callback.message.answer("Файл уже недоступен. Пересобери ролик или отправь видео заново.")
+        await callback.message.answer("Р¤Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ.")
         return
     if not await ensure_action_allowed(callback.message, callback.from_user.id, "cover"):
         return
     if cover_semaphore.locked():
-        await callback.message.answer("Сейчас уже собираю обложку. Поставил задачу в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ СЃРѕР±РёСЂР°СЋ РѕР±Р»РѕР¶РєСѓ. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with cover_semaphore:
         await process_video_cover(
             callback.message,
@@ -1966,50 +3325,50 @@ async def cover_callback(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("cover3:"))
 async def cover_variants_callback(callback: CallbackQuery, bot: Bot) -> None:
-    await callback.answer("Делаю 3 варианта...")
+    await callback.answer("Р”РµР»Р°СЋ 3 РІР°СЂРёР°РЅС‚Р°...")
     if not callback.from_user or not callback.message or not callback.data:
         return
     job_id = callback.data.split(":", 1)[1]
     job = cover_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится для обложки. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РґР»СЏ РѕР±Р»РѕР¶РєРё. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if not job.path.exists():
         cover_jobs.pop(job_id, None)
-        await callback.message.answer("Файл уже недоступен. Пересобери ролик или отправь видео заново.")
+        await callback.message.answer("Р¤Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ.")
         return
-    if not await ensure_pro_feature(callback.message, callback.from_user.id, "Еще 3 варианта обложки"):
+    if not await ensure_pro_feature(callback.message, callback.from_user.id, "Р•С‰Рµ 3 РІР°СЂРёР°РЅС‚Р° РѕР±Р»РѕР¶РєРё"):
         return
     if cover_semaphore.locked():
-        await callback.message.answer("Сейчас уже собираю обложки. Поставил задачу в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ СЃРѕР±РёСЂР°СЋ РѕР±Р»РѕР¶РєРё. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with cover_semaphore:
         await process_cover_variants(callback.message, bot, job, 3)
 
 
 @router.callback_query(F.data.startswith("package:"))
 async def publication_package_callback(callback: CallbackQuery, bot: Bot) -> None:
-    await callback.answer("Собираю пакет...")
+    await callback.answer("РЎРѕР±РёСЂР°СЋ РїР°РєРµС‚...")
     if not callback.from_user or not callback.message or not callback.data:
         return
     job_id = callback.data.split(":", 1)[1]
     job = cover_jobs.get(job_id)
     if not job:
-        await callback.message.answer("Это видео уже не хранится для пакета. Отправь файл или ссылку заново.")
+        await callback.message.answer("Р­С‚Рѕ РІРёРґРµРѕ СѓР¶Рµ РЅРµ С…СЂР°РЅРёС‚СЃСЏ РґР»СЏ РїР°РєРµС‚Р°. РћС‚РїСЂР°РІСЊ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ Р·Р°РЅРѕРІРѕ.")
         return
     if job.user_id != callback.from_user.id:
-        await callback.message.answer("Эта кнопка от другого видео. Отправь свое видео или YouTube-ссылку.")
+        await callback.message.answer("Р­С‚Р° РєРЅРѕРїРєР° РѕС‚ РґСЂСѓРіРѕРіРѕ РІРёРґРµРѕ. РћС‚РїСЂР°РІСЊ СЃРІРѕРµ РІРёРґРµРѕ РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ.")
         return
     if not job.path.exists():
         cover_jobs.pop(job_id, None)
-        await callback.message.answer("Файл уже недоступен. Пересобери ролик или отправь видео заново.")
+        await callback.message.answer("Р¤Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РџРµСЂРµСЃРѕР±РµСЂРё СЂРѕР»РёРє РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ.")
         return
-    if not await ensure_action_allowed(callback.message, callback.from_user.id, "package", "Пакет публикации входит в Pro-функции."):
+    if not await ensure_action_allowed(callback.message, callback.from_user.id, "package", "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё РІС…РѕРґРёС‚ РІ Pro-С„СѓРЅРєС†РёРё."):
         return
     if cover_semaphore.locked():
-        await callback.message.answer("Сейчас уже собираю пакет. Поставил задачу в очередь.")
+        await callback.message.answer("РЎРµР№С‡Р°СЃ СѓР¶Рµ СЃРѕР±РёСЂР°СЋ РїР°РєРµС‚. РџРѕСЃС‚Р°РІРёР» Р·Р°РґР°С‡Сѓ РІ РѕС‡РµСЂРµРґСЊ.")
     async with cover_semaphore:
         await process_publication_package(callback.message, bot, job)
 
@@ -2017,17 +3376,17 @@ async def publication_package_callback(callback: CallbackQuery, bot: Bot) -> Non
 async def process_cover_variants(message: Message, bot: Bot, job: CoverJob, count: int = 3) -> list[Path]:
     started_at = time.time()
     output_dir = settings.output_dir / str(job.user_id) / "cover_variants" / uuid.uuid4().hex[:10]
-    status = await message.answer(process_stage_text("Варианты обложки", ["готовлю видео", "генерирую варианты", "собираю ZIP", "отправляю PNG"], 1, job.title))
-    state: dict[str, object] = {"started_at": started_at, "stage": "Обложки: готовлю варианты", "detail": job.title}
+    status = await message.answer(process_stage_text("Р’Р°СЂРёР°РЅС‚С‹ РѕР±Р»РѕР¶РєРё", ["РіРѕС‚РѕРІР»СЋ РІРёРґРµРѕ", "РіРµРЅРµСЂРёСЂСѓСЋ РІР°СЂРёР°РЅС‚С‹", "СЃРѕР±РёСЂР°СЋ ZIP", "РѕС‚РїСЂР°РІР»СЏСЋ PNG"], 1, job.title))
+    state: dict[str, object] = {"started_at": started_at, "stage": "РћР±Р»РѕР¶РєРё: РіРѕС‚РѕРІР»СЋ РІР°СЂРёР°РЅС‚С‹", "detail": job.title}
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     covers: list[Path] = []
     try:
         await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
         for index in range(1, count + 1):
-            state["stage"] = f"Обложки: вариант {index}/{count}"
+            state["stage"] = f"РћР±Р»РѕР¶РєРё: РІР°СЂРёР°РЅС‚ {index}/{count}"
             await safe_edit(
                 status,
-                process_stage_text("Варианты обложки", ["готовлю видео", "генерирую варианты", "собираю ZIP", "отправляю PNG"], 2, f"Вариант {index}/{count}"),
+                process_stage_text("Р’Р°СЂРёР°РЅС‚С‹ РѕР±Р»РѕР¶РєРё", ["РіРѕС‚РѕРІР»СЋ РІРёРґРµРѕ", "РіРµРЅРµСЂРёСЂСѓСЋ РІР°СЂРёР°РЅС‚С‹", "СЃРѕР±РёСЂР°СЋ ZIP", "РѕС‚РїСЂР°РІР»СЏСЋ PNG"], 2, f"Р’Р°СЂРёР°РЅС‚ {index}/{count}"),
             )
             cover_path = await asyncio.to_thread(
                 create_business_cover,
@@ -2050,27 +3409,27 @@ async def process_cover_variants(message: Message, bot: Bot, job: CoverJob, coun
             )
             await message.answer_document(
                 FSInputFile(cover_path),
-                caption=f"Обложка {index}/{count}\nВес: {human_size(cover_path.stat().st_size)}",
+                caption=f"РћР±Р»РѕР¶РєР° {index}/{count}\nР’РµСЃ: {human_size(cover_path.stat().st_size)}",
             )
         zip_path = output_dir / "cover_variants.zip"
         await asyncio.to_thread(zip_files, covers, zip_path)
         await safe_edit(
             status,
-            process_stage_text("Варианты обложки", ["готовлю видео", "генерирую варианты", "собираю ZIP", "отправляю PNG"], 4, "Варианты отправлены", done=True),
+            process_stage_text("Р’Р°СЂРёР°РЅС‚С‹ РѕР±Р»РѕР¶РєРё", ["РіРѕС‚РѕРІР»СЋ РІРёРґРµРѕ", "РіРµРЅРµСЂРёСЂСѓСЋ РІР°СЂРёР°РЅС‚С‹", "СЃРѕР±РёСЂР°СЋ ZIP", "РѕС‚РїСЂР°РІР»СЏСЋ PNG"], 4, "Р’Р°СЂРёР°РЅС‚С‹ РѕС‚РїСЂР°РІР»РµРЅС‹", done=True),
         )
         await message.answer_document(
             FSInputFile(zip_path),
             caption=(
-                f"Готово: {count} варианта обложки одним ZIP\n"
-                f"Время: {format_duration(time.time() - started_at)}"
-                + next_steps_text("выбери лучший PNG", "если нужен полный набор, нажми «Пакет публикации ZIP»")
+                f"Р“РѕС‚РѕРІРѕ: {count} РІР°СЂРёР°РЅС‚Р° РѕР±Р»РѕР¶РєРё РѕРґРЅРёРј ZIP\n"
+                f"Р’СЂРµРјСЏ: {format_duration(time.time() - started_at)}"
+                + next_steps_text("РІС‹Р±РµСЂРё Р»СѓС‡С€РёР№ PNG", "РµСЃР»Рё РЅСѓР¶РµРЅ РїРѕР»РЅС‹Р№ РЅР°Р±РѕСЂ, РЅР°Р¶РјРё В«РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё ZIPВ»")
             ),
             reply_markup=cover_tools_keyboard(remember_cover_job(job.user_id, job.path, job.title, job.duration_seconds)),
         )
         return covers
     except Exception as exc:
         logger.exception("Cover variants failed")
-        await safe_edit(status, f"Не получилось сделать варианты обложки: {exc}")
+        await safe_edit(status, f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРґРµР»Р°С‚СЊ РІР°СЂРёР°РЅС‚С‹ РѕР±Р»РѕР¶РєРё: {exc}")
         return covers
     finally:
         heartbeat_task.cancel()
@@ -2086,31 +3445,31 @@ async def process_video_cover(
 ) -> Path | None:
     started_at = time.time()
     output_dir = settings.output_dir / str(user_id) / "covers" / uuid.uuid4().hex[:10]
-    state: dict[str, object] = {"started_at": started_at, "stage": "Обложка PNG: подготовка", "detail": source.name}
-    status = await message.answer(process_stage_text("Генерация обложки PNG", COVER_STEPS, 1, source.name))
+    state: dict[str, object] = {"started_at": started_at, "stage": "РћР±Р»РѕР¶РєР° PNG: РїРѕРґРіРѕС‚РѕРІРєР°", "detail": source.name}
+    status = await message.answer(process_stage_text("Р“РµРЅРµСЂР°С†РёСЏ РѕР±Р»РѕР¶РєРё PNG", COVER_STEPS, 1, source.name))
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     try:
         await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
         info = await asyncio.to_thread(inspect_video, source)
         duration = duration_seconds or info.duration_seconds or 0
         resolution = f"{info.width}x{info.height}" if info.width and info.height else "unknown"
-        state["stage"] = "Обложка PNG: выбираю кадр"
+        state["stage"] = "РћР±Р»РѕР¶РєР° PNG: РІС‹Р±РёСЂР°СЋ РєР°РґСЂ"
         state["detail"] = f"{title}\n{resolution}, {format_duration(duration)}"
         await safe_edit(
             status,
             process_stage_text(
-                "Генерация обложки PNG",
+                "Р“РµРЅРµСЂР°С†РёСЏ РѕР±Р»РѕР¶РєРё PNG",
                 COVER_STEPS,
                 2,
-                f"Видео: {resolution}, длительность: {format_duration(duration)}",
+                f"Р’РёРґРµРѕ: {resolution}, РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(duration)}",
             ),
         )
-        state["stage"] = "Обложка PNG: ищу тему и картинки"
+        state["stage"] = "РћР±Р»РѕР¶РєР° PNG: РёС‰Сѓ С‚РµРјСѓ Рё РєР°СЂС‚РёРЅРєРё"
         await safe_edit(
             status,
-            process_stage_text("Генерация обложки PNG", COVER_STEPS, 3, "Определяю тему по названию и ищу подходящие визуальные вставки"),
+            process_stage_text("Р“РµРЅРµСЂР°С†РёСЏ РѕР±Р»РѕР¶РєРё PNG", COVER_STEPS, 3, "РћРїСЂРµРґРµР»СЏСЋ С‚РµРјСѓ РїРѕ РЅР°Р·РІР°РЅРёСЋ Рё РёС‰Сѓ РїРѕРґС…РѕРґСЏС‰РёРµ РІРёР·СѓР°Р»СЊРЅС‹Рµ РІСЃС‚Р°РІРєРё"),
         )
-        state["stage"] = "Обложка PNG: собираю макет"
+        state["stage"] = "РћР±Р»РѕР¶РєР° PNG: СЃРѕР±РёСЂР°СЋ РјР°РєРµС‚"
         cover_path = await asyncio.to_thread(
             create_business_cover,
             source,
@@ -2120,11 +3479,11 @@ async def process_video_cover(
             settings.video_timeout_seconds,
             settings.face_detection_enabled,
         )
-        state["stage"] = "Обложка PNG: отправляю файл"
-        state["detail"] = f"Размер: {human_size(cover_path.stat().st_size)}"
+        state["stage"] = "РћР±Р»РѕР¶РєР° PNG: РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»"
+        state["detail"] = f"Р Р°Р·РјРµСЂ: {human_size(cover_path.stat().st_size)}"
         await safe_edit(
             status,
-            process_stage_text("Генерация обложки PNG", COVER_STEPS, 5, f"Размер: {human_size(cover_path.stat().st_size)}"),
+            process_stage_text("Р“РµРЅРµСЂР°С†РёСЏ РѕР±Р»РѕР¶РєРё PNG", COVER_STEPS, 5, f"Р Р°Р·РјРµСЂ: {human_size(cover_path.stat().st_size)}"),
         )
         await db.add_conversion(
             user_id,
@@ -2139,26 +3498,26 @@ async def process_video_cover(
         await message.answer_document(
             FSInputFile(cover_path),
             caption=(
-                "Готово: PNG-обложка для видео\n"
-                f"Формат: 1280x720 PNG\n"
-                f"Вес: {human_size(cover_path.stat().st_size)}\n"
-                f"Время обработки: {format_duration(time.time() - started_at)}"
-                + next_steps_text("скачай PNG", "нажми «Еще 3 варианта», если хочешь выбор", "можно собрать пакет публикации ZIP")
+                "Р“РѕС‚РѕРІРѕ: PNG-РѕР±Р»РѕР¶РєР° РґР»СЏ РІРёРґРµРѕ\n"
+                f"Р¤РѕСЂРјР°С‚: 1280x720 PNG\n"
+                f"Р’РµСЃ: {human_size(cover_path.stat().st_size)}\n"
+                f"Р’СЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё: {format_duration(time.time() - started_at)}"
+                + next_steps_text("СЃРєР°С‡Р°Р№ PNG", "РЅР°Р¶РјРё В«Р•С‰Рµ 3 РІР°СЂРёР°РЅС‚Р°В», РµСЃР»Рё С…РѕС‡РµС€СЊ РІС‹Р±РѕСЂ", "РјРѕР¶РЅРѕ СЃРѕР±СЂР°С‚СЊ РїР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё ZIP")
             ),
             reply_markup=cover_tools_keyboard(tools_job_id),
         )
         await safe_edit(
             status,
-            process_stage_text("Генерация обложки PNG", COVER_STEPS, 5, "Файл отправлен", done=True)
-            + next_steps_text("скачай PNG", "для другого кадра нажми кнопку обложки еще раз"),
+            process_stage_text("Р“РµРЅРµСЂР°С†РёСЏ РѕР±Р»РѕР¶РєРё PNG", COVER_STEPS, 5, "Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ", done=True)
+            + next_steps_text("СЃРєР°С‡Р°Р№ PNG", "РґР»СЏ РґСЂСѓРіРѕРіРѕ РєР°РґСЂР° РЅР°Р¶РјРё РєРЅРѕРїРєСѓ РѕР±Р»РѕР¶РєРё РµС‰Рµ СЂР°Р·"),
         )
         return cover_path
     except Exception as exc:
         logger.exception("Cover job failed")
         await safe_edit(
             status,
-            f"Не получилось сделать обложку: {exc}"
-            + next_steps_text("попробуй другое видео", "или отправь YouTube-ссылку и выбери обложку"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРґРµР»Р°С‚СЊ РѕР±Р»РѕР¶РєСѓ: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕРµ РІРёРґРµРѕ", "РёР»Рё РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ Рё РІС‹Р±РµСЂРё РѕР±Р»РѕР¶РєСѓ"),
         )
         return None
     finally:
@@ -2169,8 +3528,8 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
     started_at = time.time()
     output_dir = settings.output_dir / str(job.user_id) / "publication_package" / uuid.uuid4().hex[:10]
     output_dir.mkdir(parents=True, exist_ok=True)
-    status = await message.answer(process_stage_text("Пакет публикации", PUBLICATION_STEPS, 1, job.title))
-    state: dict[str, object] = {"started_at": started_at, "stage": "Пакет публикации: подготовка", "detail": job.title}
+    status = await message.answer(process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 1, job.title))
+    state: dict[str, object] = {"started_at": started_at, "stage": "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: РїРѕРґРіРѕС‚РѕРІРєР°", "detail": job.title}
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     package_files: list[Path] = []
     try:
@@ -2178,8 +3537,8 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
         info = await asyncio.to_thread(inspect_video, job.path)
         package_files.append(job.path)
 
-        state["stage"] = "Пакет публикации: обложка"
-        await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 2, "Генерирую PNG-обложку"))
+        state["stage"] = "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: РѕР±Р»РѕР¶РєР°"
+        await safe_edit(status, process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 2, "Р“РµРЅРµСЂРёСЂСѓСЋ PNG-РѕР±Р»РѕР¶РєСѓ"))
         cover_path = await asyncio.to_thread(
             create_business_cover,
             job.path,
@@ -2191,10 +3550,10 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
         )
         package_files.append(cover_path)
 
-        state["stage"] = "Пакет публикации: субтитры"
-        await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 3, "Пробую добавить Pop-субтитры"))
+        state["stage"] = "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: СЃСѓР±С‚РёС‚СЂС‹"
+        await safe_edit(status, process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 3, "РџСЂРѕР±СѓСЋ РґРѕР±Р°РІРёС‚СЊ Pop-СЃСѓР±С‚РёС‚СЂС‹"))
         subtitled_path: Path | None = None
-        subtitle_note = "Субтитры: речь не найдена или распознавание недоступно."
+        subtitle_note = "РЎСѓР±С‚РёС‚СЂС‹: СЂРµС‡СЊ РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё СЂР°СЃРїРѕР·РЅР°РІР°РЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ."
         transcript_text = ""
         try:
             cues = await asyncio.to_thread(
@@ -2216,12 +3575,12 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
                 result = await asyncio.to_thread(render_subtitle_assets, job.path, assets, settings.subtitle_timeout_seconds)
                 subtitled_path = result.path
                 package_files.append(subtitled_path)
-                subtitle_note = f"Субтитры: добавлены, фраз найдено: {len(cues)}."
+                subtitle_note = f"РЎСѓР±С‚РёС‚СЂС‹: РґРѕР±Р°РІР»РµРЅС‹, С„СЂР°Р· РЅР°Р№РґРµРЅРѕ: {len(cues)}."
         except Exception:
             logger.exception("Publication package subtitles failed")
 
-        state["stage"] = "Пакет публикации: описание"
-        await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 4, "Пишу описание и хештеги"))
+        state["stage"] = "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: РѕРїРёСЃР°РЅРёРµ"
+        await safe_edit(status, process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 4, "РџРёС€Сѓ РѕРїРёСЃР°РЅРёРµ Рё С…РµС€С‚РµРіРё"))
         description_path = output_dir / "description.txt"
         hashtags = publication_hashtags(job.title, transcript_text)
         description_path.write_text(
@@ -2253,8 +3612,8 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
         )
         package_files.append(manifest_path)
 
-        state["stage"] = "Пакет публикации: ZIP"
-        await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 5, "Упаковываю файлы"))
+        state["stage"] = "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: ZIP"
+        await safe_edit(status, process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 5, "РЈРїР°РєРѕРІС‹РІР°СЋ С„Р°Р№Р»С‹"))
         zip_path = output_dir / f"{clean_base_name(job.title, 'publication')}_package.zip"
         await asyncio.to_thread(zip_files, package_files, zip_path)
         await db.add_conversion(
@@ -2267,35 +3626,35 @@ async def process_publication_package(message: Message, bot: Bot, job: CoverJob)
             zip_path.stat().st_size,
         )
 
-        state["stage"] = "Пакет публикации: отправляю"
-        await safe_edit(status, process_stage_text("Пакет публикации", PUBLICATION_STEPS, 6, f"Размер ZIP: {human_size(zip_path.stat().st_size)}"))
+        state["stage"] = "РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: РѕС‚РїСЂР°РІР»СЏСЋ"
+        await safe_edit(status, process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 6, f"Р Р°Р·РјРµСЂ ZIP: {human_size(zip_path.stat().st_size)}"))
         caption = (
-            "Готово: пакет публикации ZIP\n"
-            "Внутри: видео, PNG-обложка, описание, хештеги"
-            + (", версия с субтитрами" if subtitled_path else "")
-            + f"\nВес: {human_size(zip_path.stat().st_size)}\n"
-            f"Время: {format_duration(time.time() - started_at)}"
+            "Р“РѕС‚РѕРІРѕ: РїР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё ZIP\n"
+            "Р’РЅСѓС‚СЂРё: РІРёРґРµРѕ, PNG-РѕР±Р»РѕР¶РєР°, РѕРїРёСЃР°РЅРёРµ, С…РµС€С‚РµРіРё"
+            + (", РІРµСЂСЃРёСЏ СЃ СЃСѓР±С‚РёС‚СЂР°РјРё" if subtitled_path else "")
+            + f"\nР’РµСЃ: {human_size(zip_path.stat().st_size)}\n"
+            f"Р’СЂРµРјСЏ: {format_duration(time.time() - started_at)}"
         )
         if zip_path.stat().st_size <= TELEGRAM_SAFE_UPLOAD_BYTES:
             await message.answer_document(FSInputFile(zip_path), caption=caption)
         else:
-            await message.answer(caption + "\nZIP большой для отправки одним файлом, отправляю ключевые файлы отдельно.")
-            await message.answer_document(FSInputFile(cover_path), caption="PNG-обложка из пакета")
-            await message.answer_document(FSInputFile(description_path), caption="Описание и хештеги")
+            await message.answer(caption + "\nZIP Р±РѕР»СЊС€РѕР№ РґР»СЏ РѕС‚РїСЂР°РІРєРё РѕРґРЅРёРј С„Р°Р№Р»РѕРј, РѕС‚РїСЂР°РІР»СЏСЋ РєР»СЋС‡РµРІС‹Рµ С„Р°Р№Р»С‹ РѕС‚РґРµР»СЊРЅРѕ.")
+            await message.answer_document(FSInputFile(cover_path), caption="PNG-РѕР±Р»РѕР¶РєР° РёР· РїР°РєРµС‚Р°")
+            await message.answer_document(FSInputFile(description_path), caption="РћРїРёСЃР°РЅРёРµ Рё С…РµС€С‚РµРіРё")
             if subtitled_path:
-                await message.answer_document(FSInputFile(subtitled_path), caption="Видео с субтитрами")
+                await message.answer_document(FSInputFile(subtitled_path), caption="Р’РёРґРµРѕ СЃ СЃСѓР±С‚РёС‚СЂР°РјРё")
         await safe_edit(
             status,
-            process_stage_text("Пакет публикации", PUBLICATION_STEPS, 6, "Пакет отправлен", done=True)
-            + next_steps_text("скачай ZIP", "выбери обложку или отправь новый файл"),
+            process_stage_text("РџР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё", PUBLICATION_STEPS, 6, "РџР°РєРµС‚ РѕС‚РїСЂР°РІР»РµРЅ", done=True)
+            + next_steps_text("СЃРєР°С‡Р°Р№ ZIP", "РІС‹Р±РµСЂРё РѕР±Р»РѕР¶РєСѓ РёР»Рё РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»"),
         )
         return zip_path
     except Exception as exc:
         logger.exception("Publication package failed")
         await safe_edit(
             status,
-            f"Не получилось собрать пакет публикации: {exc}"
-            + next_steps_text("попробуй короче видео", "или отдельно сделай обложку/субтитры"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ РїР°РєРµС‚ РїСѓР±Р»РёРєР°С†РёРё: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РєРѕСЂРѕС‡Рµ РІРёРґРµРѕ", "РёР»Рё РѕС‚РґРµР»СЊРЅРѕ СЃРґРµР»Р°Р№ РѕР±Р»РѕР¶РєСѓ/СЃСѓР±С‚РёС‚СЂС‹"),
         )
         return None
     finally:
@@ -2308,11 +3667,11 @@ async def process_video_download_link(message: Message, bot: Bot, url: str, lang
     job_id = uuid.uuid4().hex[:10]
     source_dir = settings.storage_dir / str(user_id) / "source_download" / job_id
     output_dir = settings.output_dir / str(user_id) / "source_download" / job_id
-    state: dict[str, object] = {"started_at": started_at, "stage": f"{source_label}: читаю видео", "detail": ""}
+    state: dict[str, object] = {"started_at": started_at, "stage": f"{source_label}: С‡РёС‚Р°СЋ РІРёРґРµРѕ", "detail": ""}
     status = await message.answer(
-        f"{source_label}-ссылка принята.\n\n"
-        "Режим: скачать MP4\n"
-        "Я скачаю доступный файл и при необходимости конвертирую его в MP4. Удаление watermark не выполняется."
+        f"{source_label}-СЃСЃС‹Р»РєР° РїСЂРёРЅСЏС‚Р°.\n\n"
+        "Р РµР¶РёРј: СЃРєР°С‡Р°С‚СЊ MP4\n"
+        "РЇ СЃРєР°С‡Р°СЋ РґРѕСЃС‚СѓРїРЅС‹Р№ С„Р°Р№Р» Рё РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё РєРѕРЅРІРµСЂС‚РёСЂСѓСЋ РµРіРѕ РІ MP4. РЈРґР°Р»РµРЅРёРµ watermark РЅРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ."
     )
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     try:
@@ -2322,28 +3681,28 @@ async def process_video_download_link(message: Message, bot: Bot, url: str, lang
         if metadata.duration_seconds > max_duration:
             await safe_edit(
                 status,
-                f"Видео слишком длинное: {format_duration(metadata.duration_seconds)}.\n"
-                f"Лимит сейчас: {settings.youtube_max_duration_minutes} минут.",
+                f"Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РґР»РёРЅРЅРѕРµ: {format_duration(metadata.duration_seconds)}.\n"
+                f"Р›РёРјРёС‚ СЃРµР№С‡Р°СЃ: {settings.youtube_max_duration_minutes} РјРёРЅСѓС‚.",
             )
             return
-        state["stage"] = f"{source_label}: скачиваю файл"
-        state["detail"] = f"{metadata.title}\nДлительность: {format_duration(metadata.duration_seconds)}"
+        state["stage"] = f"{source_label}: СЃРєР°С‡РёРІР°СЋ С„Р°Р№Р»"
+        state["detail"] = f"{metadata.title}\nР”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}"
         await safe_edit(
             status,
-            f"Скачиваю {source_label}-видео.\n"
-            f"Название: {metadata.title}\n"
-            f"Длительность: {format_duration(metadata.duration_seconds)}",
+            f"РЎРєР°С‡РёРІР°СЋ {source_label}-РІРёРґРµРѕ.\n"
+            f"РќР°Р·РІР°РЅРёРµ: {metadata.title}\n"
+            f"Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}",
         )
         download = await asyncio.to_thread(download_youtube_video, url, source_dir, settings.youtube_download_timeout_seconds)
         source_size = download.path.stat().st_size
         result_path = download.path
         result_info = inspect_video(result_path)
         if result_path.suffix.lower() != ".mp4":
-            state["stage"] = f"{source_label}: конвертирую в MP4"
+            state["stage"] = f"{source_label}: РєРѕРЅРІРµСЂС‚РёСЂСѓСЋ РІ MP4"
             await safe_edit(
                 status,
-                f"Источник скачался как {result_path.suffix.lstrip('.').upper() or 'видео'}.\n"
-                "Конвертирую в MP4, чтобы Telegram отправил именно видеофайл.",
+                f"РСЃС‚РѕС‡РЅРёРє СЃРєР°С‡Р°Р»СЃСЏ РєР°Рє {result_path.suffix.lstrip('.').upper() or 'РІРёРґРµРѕ'}.\n"
+                "РљРѕРЅРІРµСЂС‚РёСЂСѓСЋ РІ MP4, С‡С‚РѕР±С‹ Telegram РѕС‚РїСЂР°РІРёР» РёРјРµРЅРЅРѕ РІРёРґРµРѕС„Р°Р№Р».",
             )
             converted = await asyncio.to_thread(
                 convert_video,
@@ -2359,8 +3718,8 @@ async def process_video_download_link(message: Message, bot: Bot, url: str, lang
         if size > TELEGRAM_SAFE_UPLOAD_BYTES:
             await safe_edit(
                 status,
-                f"Файл скачан, но он слишком большой для отправки ботом: {human_size(size)}.\n"
-                "Можно выбрать Shorts или Preview, чтобы получить меньший ролик.",
+                f"Р¤Р°Р№Р» СЃРєР°С‡Р°РЅ, РЅРѕ РѕРЅ СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ РґР»СЏ РѕС‚РїСЂР°РІРєРё Р±РѕС‚РѕРј: {human_size(size)}.\n"
+                "РњРѕР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ Shorts РёР»Рё Preview, С‡С‚РѕР±С‹ РїРѕР»СѓС‡РёС‚СЊ РјРµРЅСЊС€РёР№ СЂРѕР»РёРє.",
             )
             return
         subtitle_id = remember_subtitle_job(user_id, result_path, download.title)
@@ -2377,21 +3736,21 @@ async def process_video_download_link(message: Message, bot: Bot, url: str, lang
         await message.answer_document(
             FSInputFile(result_path),
             caption=(
-                f"{source_label}: MP4 готов\n"
-                f"Файл: {download.title}\n"
-                f"Длительность: {format_duration(result_info.duration_seconds or download.duration_seconds)}\n"
-                f"Вес: {human_size(size)}\n\n"
-                "Удаление watermark не выполняется. Ниже можно добавить субтитры или сделать обложку."
+                f"{source_label}: MP4 РіРѕС‚РѕРІ\n"
+                f"Р¤Р°Р№Р»: {download.title}\n"
+                f"Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(result_info.duration_seconds or download.duration_seconds)}\n"
+                f"Р’РµСЃ: {human_size(size)}\n\n"
+                "РЈРґР°Р»РµРЅРёРµ watermark РЅРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. РќРёР¶Рµ РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ СЃСѓР±С‚РёС‚СЂС‹ РёР»Рё СЃРґРµР»Р°С‚СЊ РѕР±Р»РѕР¶РєСѓ."
             ),
             reply_markup=media_tools_keyboard(subtitle_id, cover_id),
         )
-        await safe_edit(status, f"Готово: {source_label}-MP4 отправлен.")
+        await safe_edit(status, f"Р“РѕС‚РѕРІРѕ: {source_label}-MP4 РѕС‚РїСЂР°РІР»РµРЅ.")
     except Exception as exc:
         logger.exception("%s source download failed", source_label)
         await safe_edit(
             status,
-            f"Не получилось скачать {source_label}-ссылку: {exc}\n"
-            "Если это приватное видео или источник ограничил скачивание, отправь видео файлом.",
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ {source_label}-СЃСЃС‹Р»РєСѓ: {exc}\n"
+            "Р•СЃР»Рё СЌС‚Рѕ РїСЂРёРІР°С‚РЅРѕРµ РІРёРґРµРѕ РёР»Рё РёСЃС‚РѕС‡РЅРёРє РѕРіСЂР°РЅРёС‡РёР» СЃРєР°С‡РёРІР°РЅРёРµ, РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ С„Р°Р№Р»РѕРј.",
         )
     finally:
         heartbeat_task.cancel()
@@ -2403,11 +3762,11 @@ async def process_youtube_cover_link(message: Message, bot: Bot, url: str, lang:
     job_id = uuid.uuid4().hex[:10]
     source_dir = settings.storage_dir / str(user_id) / "youtube_cover" / job_id
     output_dir = settings.output_dir / str(user_id) / "youtube_cover" / job_id
-    state: dict[str, object] = {"started_at": started_at, "stage": f"Обложка {source_label}: читаю видео", "detail": ""}
+    state: dict[str, object] = {"started_at": started_at, "stage": f"РћР±Р»РѕР¶РєР° {source_label}: С‡РёС‚Р°СЋ РІРёРґРµРѕ", "detail": ""}
     status = await message.answer(
-        f"Принял {source_label}-ссылку. Подготовлю PNG-обложку по видео.\n\n"
-        "Режим: обложка PNG\n"
-        "Этап 1/5: читаю данные видео."
+        f"РџСЂРёРЅСЏР» {source_label}-СЃСЃС‹Р»РєСѓ. РџРѕРґРіРѕС‚РѕРІР»СЋ PNG-РѕР±Р»РѕР¶РєСѓ РїРѕ РІРёРґРµРѕ.\n\n"
+        "Р РµР¶РёРј: РѕР±Р»РѕР¶РєР° PNG\n"
+        "Р­С‚Р°Рї 1/5: С‡РёС‚Р°СЋ РґР°РЅРЅС‹Рµ РІРёРґРµРѕ."
     )
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
     try:
@@ -2417,36 +3776,36 @@ async def process_youtube_cover_link(message: Message, bot: Bot, url: str, lang:
         if metadata.duration_seconds > max_duration:
             await safe_edit(
                 status,
-                f"Видео слишком длинное: {format_duration(metadata.duration_seconds)}.\n"
-                f"Лимит сейчас: {settings.youtube_max_duration_minutes} минут.",
+                f"Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РґР»РёРЅРЅРѕРµ: {format_duration(metadata.duration_seconds)}.\n"
+                f"Р›РёРјРёС‚ СЃРµР№С‡Р°СЃ: {settings.youtube_max_duration_minutes} РјРёРЅСѓС‚.",
             )
             return
-        size_text = human_size(metadata.estimated_size_bytes) if metadata.estimated_size_bytes else "не удалось оценить заранее"
-        state["stage"] = f"Обложка {source_label}: скачиваю видео"
-        state["detail"] = f"{metadata.title}\nДлительность: {format_duration(metadata.duration_seconds)}"
+        size_text = human_size(metadata.estimated_size_bytes) if metadata.estimated_size_bytes else "РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС†РµРЅРёС‚СЊ Р·Р°СЂР°РЅРµРµ"
+        state["stage"] = f"РћР±Р»РѕР¶РєР° {source_label}: СЃРєР°С‡РёРІР°СЋ РІРёРґРµРѕ"
+        state["detail"] = f"{metadata.title}\nР”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}"
         await safe_edit(
             status,
-            "Режим: обложка PNG\n"
-            "Этап 2/5: скачиваю видео.\n"
-            f"Название: {metadata.title}\n"
-            f"Длительность: {format_duration(metadata.duration_seconds)}\n"
-            f"Примерный размер: {size_text}",
+            "Р РµР¶РёРј: РѕР±Р»РѕР¶РєР° PNG\n"
+            "Р­С‚Р°Рї 2/5: СЃРєР°С‡РёРІР°СЋ РІРёРґРµРѕ.\n"
+            f"РќР°Р·РІР°РЅРёРµ: {metadata.title}\n"
+            f"Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}\n"
+            f"РџСЂРёРјРµСЂРЅС‹Р№ СЂР°Р·РјРµСЂ: {size_text}",
         )
         download = await asyncio.to_thread(download_youtube_video, url, source_dir, settings.youtube_download_timeout_seconds)
-        state["stage"] = "Обложка YouTube: выбираю кадр"
-        state["detail"] = f"Скачано: {human_size(download.path.stat().st_size)}"
+        state["stage"] = "РћР±Р»РѕР¶РєР° YouTube: РІС‹Р±РёСЂР°СЋ РєР°РґСЂ"
+        state["detail"] = f"РЎРєР°С‡Р°РЅРѕ: {human_size(download.path.stat().st_size)}"
         await safe_edit(
             status,
-            "Режим: обложка PNG\n"
-            "Этап 3/5: видео скачано, выбираю сильный кадр.\n"
-            f"Файл: {download.title}\n"
-            f"Скачано: {human_size(download.path.stat().st_size)}",
+            "Р РµР¶РёРј: РѕР±Р»РѕР¶РєР° PNG\n"
+            "Р­С‚Р°Рї 3/5: РІРёРґРµРѕ СЃРєР°С‡Р°РЅРѕ, РІС‹Р±РёСЂР°СЋ СЃРёР»СЊРЅС‹Р№ РєР°РґСЂ.\n"
+            f"Р¤Р°Р№Р»: {download.title}\n"
+            f"РЎРєР°С‡Р°РЅРѕ: {human_size(download.path.stat().st_size)}",
         )
-        state["stage"] = "Обложка YouTube: собираю PNG"
+        state["stage"] = "РћР±Р»РѕР¶РєР° YouTube: СЃРѕР±РёСЂР°СЋ PNG"
         await safe_edit(
             status,
-            "Режим: обложка PNG\n"
-            "Этап 4/5: определяю тему, ищу визуальные вставки и собираю яркую 1280x720 PNG-обложку.",
+            "Р РµР¶РёРј: РѕР±Р»РѕР¶РєР° PNG\n"
+            "Р­С‚Р°Рї 4/5: РѕРїСЂРµРґРµР»СЏСЋ С‚РµРјСѓ, РёС‰Сѓ РІРёР·СѓР°Р»СЊРЅС‹Рµ РІСЃС‚Р°РІРєРё Рё СЃРѕР±РёСЂР°СЋ СЏСЂРєСѓСЋ 1280x720 PNG-РѕР±Р»РѕР¶РєСѓ.",
         )
         cover_path = await asyncio.to_thread(
             create_business_cover,
@@ -2467,37 +3826,37 @@ async def process_youtube_cover_link(message: Message, bot: Bot, url: str, lang:
             cover_path.stat().st_size,
         )
         cover_job_id = remember_cover_job(user_id, download.path, download.title, download.duration_seconds)
-        state["stage"] = "Обложка YouTube: отправляю PNG"
-        state["detail"] = f"Размер: {human_size(cover_path.stat().st_size)}"
+        state["stage"] = "РћР±Р»РѕР¶РєР° YouTube: РѕС‚РїСЂР°РІР»СЏСЋ PNG"
+        state["detail"] = f"Р Р°Р·РјРµСЂ: {human_size(cover_path.stat().st_size)}"
         await safe_edit(
             status,
-            "Режим: обложка PNG\n"
-            "Этап 5/5: отправляю готовый PNG.\n"
-            f"Размер: {human_size(cover_path.stat().st_size)}",
+            "Р РµР¶РёРј: РѕР±Р»РѕР¶РєР° PNG\n"
+            "Р­С‚Р°Рї 5/5: РѕС‚РїСЂР°РІР»СЏСЋ РіРѕС‚РѕРІС‹Р№ PNG.\n"
+            f"Р Р°Р·РјРµСЂ: {human_size(cover_path.stat().st_size)}",
         )
         await message.answer_document(
             FSInputFile(cover_path),
             caption=(
-                "Готово: PNG-обложка по YouTube-ссылке\n"
-                f"Источник: {download.title}\n"
-                f"Формат: 1280x720 PNG\n"
-                f"Вес: {human_size(cover_path.stat().st_size)}\n"
-                f"Время обработки: {format_duration(time.time() - started_at)}"
-                + next_steps_text("скачай PNG", "можно снова отправить ссылку и выбрать монтаж или Shorts")
+                "Р“РѕС‚РѕРІРѕ: PNG-РѕР±Р»РѕР¶РєР° РїРѕ YouTube-СЃСЃС‹Р»РєРµ\n"
+                f"РСЃС‚РѕС‡РЅРёРє: {download.title}\n"
+                f"Р¤РѕСЂРјР°С‚: 1280x720 PNG\n"
+                f"Р’РµСЃ: {human_size(cover_path.stat().st_size)}\n"
+                f"Р’СЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё: {format_duration(time.time() - started_at)}"
+                + next_steps_text("СЃРєР°С‡Р°Р№ PNG", "РјРѕР¶РЅРѕ СЃРЅРѕРІР° РѕС‚РїСЂР°РІРёС‚СЊ СЃСЃС‹Р»РєСѓ Рё РІС‹Р±СЂР°С‚СЊ РјРѕРЅС‚Р°Р¶ РёР»Рё Shorts")
             ),
             reply_markup=cover_tools_keyboard(cover_job_id),
         )
         await safe_edit(
             status,
-            "Готово. PNG-обложка отправлена."
-            + next_steps_text("скачай PNG", "для монтажа отправь ссылку еще раз и выбери Shorts или Preview"),
+            "Р“РѕС‚РѕРІРѕ. PNG-РѕР±Р»РѕР¶РєР° РѕС‚РїСЂР°РІР»РµРЅР°."
+            + next_steps_text("СЃРєР°С‡Р°Р№ PNG", "РґР»СЏ РјРѕРЅС‚Р°Р¶Р° РѕС‚РїСЂР°РІСЊ СЃСЃС‹Р»РєСѓ РµС‰Рµ СЂР°Р· Рё РІС‹Р±РµСЂРё Shorts РёР»Рё Preview"),
         )
     except Exception as exc:
         logger.exception("YouTube cover job failed")
         await safe_edit(
             status,
-            f"Не получилось сделать обложку по YouTube-ссылке: {exc}"
-            + next_steps_text("попробуй другую ссылку", "или отправь видео файлом"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРґРµР»Р°С‚СЊ РѕР±Р»РѕР¶РєСѓ РїРѕ YouTube-СЃСЃС‹Р»РєРµ: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіСѓСЋ СЃСЃС‹Р»РєСѓ", "РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ С„Р°Р№Р»РѕРј"),
         )
     finally:
         heartbeat_task.cancel()
@@ -2512,12 +3871,12 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
     profile = youtube_render_profile(mode)
     mode = profile.mode
     mode_label = profile.label
-    state: dict[str, object] = {"started_at": started_at, "stage": "Этап 1/6: читаю данные видео", "detail": ""}
+    state: dict[str, object] = {"started_at": started_at, "stage": "Р­С‚Р°Рї 1/6: С‡РёС‚Р°СЋ РґР°РЅРЅС‹Рµ РІРёРґРµРѕ", "detail": ""}
     status = await message.answer(
-        f"Принял {source_label}-ссылку. Скачаю видео и обработаю выбранный режим.\n\n"
-        f"Режим: {mode_label}\n"
-        "Этап 1/6: читаю данные видео.\n"
-        "Что происходит: получаю название, длительность и примерный размер без скачивания."
+        f"РџСЂРёРЅСЏР» {source_label}-СЃСЃС‹Р»РєСѓ. РЎРєР°С‡Р°СЋ РІРёРґРµРѕ Рё РѕР±СЂР°Р±РѕС‚Р°СЋ РІС‹Р±СЂР°РЅРЅС‹Р№ СЂРµР¶РёРј.\n\n"
+        f"Р РµР¶РёРј: {mode_label}\n"
+        "Р­С‚Р°Рї 1/6: С‡РёС‚Р°СЋ РґР°РЅРЅС‹Рµ РІРёРґРµРѕ.\n"
+        "Р§С‚Рѕ РїСЂРѕРёСЃС…РѕРґРёС‚: РїРѕР»СѓС‡Р°СЋ РЅР°Р·РІР°РЅРёРµ, РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Рё РїСЂРёРјРµСЂРЅС‹Р№ СЂР°Р·РјРµСЂ Р±РµР· СЃРєР°С‡РёРІР°РЅРёСЏ."
     )
     heartbeat_task = asyncio.create_task(heartbeat(status, state))
 
@@ -2528,8 +3887,8 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
         if metadata.duration_seconds > max_duration:
             await safe_edit(
                 status,
-                f"Видео слишком длинное: {format_duration(metadata.duration_seconds)}.\n"
-                f"Лимит сейчас: {settings.youtube_max_duration_minutes} минут.",
+                f"Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РґР»РёРЅРЅРѕРµ: {format_duration(metadata.duration_seconds)}.\n"
+                f"Р›РёРјРёС‚ СЃРµР№С‡Р°СЃ: {settings.youtube_max_duration_minutes} РјРёРЅСѓС‚.",
             )
             return
 
@@ -2541,11 +3900,11 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
             )
             output_length = min(profile.backstage_output_seconds, max(1, int(metadata.duration_seconds)))
             if metadata.duration_seconds < max(6, profile.backstage_segment_seconds):
-                await safe_edit(status, "Видео слишком короткое для Preview-монтажа.")
+                await safe_edit(status, "Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРѕРµ РґР»СЏ Preview-РјРѕРЅС‚Р°Р¶Р°.")
                 return
             plan_text = (
-                f"План: один широкий ролик 16:9 до {output_length} сек., "
-                f"монтажных фрагментов: {planned_clips}, заставка: {profile.backstage_intro_seconds} сек."
+                f"РџР»Р°РЅ: РѕРґРёРЅ С€РёСЂРѕРєРёР№ СЂРѕР»РёРє 16:9 РґРѕ {output_length} СЃРµРє., "
+                f"РјРѕРЅС‚Р°Р¶РЅС‹С… С„СЂР°РіРјРµРЅС‚РѕРІ: {planned_clips}, Р·Р°СЃС‚Р°РІРєР°: {profile.backstage_intro_seconds} СЃРµРє."
             )
             cut_estimate = estimate_cut_time(
                 metadata.duration_seconds,
@@ -2560,9 +3919,9 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
                 profile.short_seconds,
             )
             if planned_clips == 0:
-                await safe_edit(status, "Видео слишком короткое для Shorts-нарезки.")
+                await safe_edit(status, "Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРѕРµ РґР»СЏ Shorts-РЅР°СЂРµР·РєРё.")
                 return
-            plan_text = f"План клипов: {planned_clips} x {profile.short_seconds} сек."
+            plan_text = f"РџР»Р°РЅ РєР»РёРїРѕРІ: {planned_clips} x {profile.short_seconds} СЃРµРє."
             cut_estimate = estimate_cut_time(
                 metadata.duration_seconds,
                 planned_clips,
@@ -2570,49 +3929,49 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
                 settings.face_detection_enabled,
             )
 
-        size_text = human_size(metadata.estimated_size_bytes) if metadata.estimated_size_bytes else "не удалось оценить заранее"
-        state["stage"] = "Этап 2/6: скачиваю видео"
-        state["detail"] = f"{metadata.title}\nДлительность: {format_duration(metadata.duration_seconds)}"
+        size_text = human_size(metadata.estimated_size_bytes) if metadata.estimated_size_bytes else "РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС†РµРЅРёС‚СЊ Р·Р°СЂР°РЅРµРµ"
+        state["stage"] = "Р­С‚Р°Рї 2/6: СЃРєР°С‡РёРІР°СЋ РІРёРґРµРѕ"
+        state["detail"] = f"{metadata.title}\nР”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}"
         await safe_edit(
             status,
-            f"Режим: {mode_label}\n"
-            "Этап 2/6: скачиваю видео.\n"
-            f"Название: {metadata.title}\n"
-            f"Длительность: {format_duration(metadata.duration_seconds)}\n"
-            f"Примерный размер загрузки: {size_text}\n"
-            f"Примерное время загрузки: {estimate_download_time(metadata.estimated_size_bytes)}\n"
+            f"Р РµР¶РёРј: {mode_label}\n"
+            "Р­С‚Р°Рї 2/6: СЃРєР°С‡РёРІР°СЋ РІРёРґРµРѕ.\n"
+            f"РќР°Р·РІР°РЅРёРµ: {metadata.title}\n"
+            f"Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(metadata.duration_seconds)}\n"
+            f"РџСЂРёРјРµСЂРЅС‹Р№ СЂР°Р·РјРµСЂ Р·Р°РіСЂСѓР·РєРё: {size_text}\n"
+            f"РџСЂРёРјРµСЂРЅРѕРµ РІСЂРµРјСЏ Р·Р°РіСЂСѓР·РєРё: {estimate_download_time(metadata.estimated_size_bytes)}\n"
             f"{plan_text}\n"
-            f"Оценка обработки после загрузки: {cut_estimate}\n\n"
-            "Почему может быть долго: YouTube отдает длинные видео кусками, скорость зависит от сети и самого YouTube.",
+            f"РћС†РµРЅРєР° РѕР±СЂР°Р±РѕС‚РєРё РїРѕСЃР»Рµ Р·Р°РіСЂСѓР·РєРё: {cut_estimate}\n\n"
+            "РџРѕС‡РµРјСѓ РјРѕР¶РµС‚ Р±С‹С‚СЊ РґРѕР»РіРѕ: YouTube РѕС‚РґР°РµС‚ РґР»РёРЅРЅС‹Рµ РІРёРґРµРѕ РєСѓСЃРєР°РјРё, СЃРєРѕСЂРѕСЃС‚СЊ Р·Р°РІРёСЃРёС‚ РѕС‚ СЃРµС‚Рё Рё СЃР°РјРѕРіРѕ YouTube.",
         )
 
         download = await asyncio.to_thread(download_youtube_video, url, source_dir, settings.youtube_download_timeout_seconds)
-        state["stage"] = "Этап 3/6: готовлю точки нарезки"
-        state["detail"] = f"Скачано: {human_size(download.path.stat().st_size)}"
+        state["stage"] = "Р­С‚Р°Рї 3/6: РіРѕС‚РѕРІР»СЋ С‚РѕС‡РєРё РЅР°СЂРµР·РєРё"
+        state["detail"] = f"РЎРєР°С‡Р°РЅРѕ: {human_size(download.path.stat().st_size)}"
         await safe_edit(
             status,
-            f"Режим: {mode_label}\n"
-            "Этап 3/6: видео скачано, готовлю точки нарезки.\n"
-            f"Файл: {download.title}\n"
-            f"Скачано: {human_size(download.path.stat().st_size)}\n"
-            f"Длительность: {format_duration(download.duration_seconds)}\n"
+            f"Р РµР¶РёРј: {mode_label}\n"
+            "Р­С‚Р°Рї 3/6: РІРёРґРµРѕ СЃРєР°С‡Р°РЅРѕ, РіРѕС‚РѕРІР»СЋ С‚РѕС‡РєРё РЅР°СЂРµР·РєРё.\n"
+            f"Р¤Р°Р№Р»: {download.title}\n"
+            f"РЎРєР°С‡Р°РЅРѕ: {human_size(download.path.stat().st_size)}\n"
+            f"Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(download.duration_seconds)}\n"
             + (
-                "Дальше соберу один широкий Preview-ролик со заставкой."
+                "Р”Р°Р»СЊС€Рµ СЃРѕР±РµСЂСѓ РѕРґРёРЅ С€РёСЂРѕРєРёР№ Preview-СЂРѕР»РёРє СЃРѕ Р·Р°СЃС‚Р°РІРєРѕР№."
                 if profile.is_backstage
-                else "Дальше каждый готовый клип отправлю сразу, не дожидаясь всей пачки."
+                else "Р”Р°Р»СЊС€Рµ РєР°Р¶РґС‹Р№ РіРѕС‚РѕРІС‹Р№ РєР»РёРї РѕС‚РїСЂР°РІР»СЋ СЃСЂР°Р·Сѓ, РЅРµ РґРѕР¶РёРґР°СЏСЃСЊ РІСЃРµР№ РїР°С‡РєРё."
             ),
         )
 
         if profile.is_backstage and settings.youtube_backstage_enabled:
-            state["stage"] = "Этап 4/6: собираю широкий Preview-монтаж"
-            state["detail"] = "Ищу моменты, делаю заставку и склеиваю 16:9"
+            state["stage"] = "Р­С‚Р°Рї 4/6: СЃРѕР±РёСЂР°СЋ С€РёСЂРѕРєРёР№ Preview-РјРѕРЅС‚Р°Р¶"
+            state["detail"] = "РС‰Сѓ РјРѕРјРµРЅС‚С‹, РґРµР»Р°СЋ Р·Р°СЃС‚Р°РІРєСѓ Рё СЃРєР»РµРёРІР°СЋ 16:9"
             await safe_edit(
                 status,
-                f"Режим: {mode_label}\n"
-                "Этап 4/6: собираю широкий Preview-монтаж.\n"
-                "Что происходит: анализирую движение, лица, смены кадра, паузы и интонационные всплески, делаю заставку и склейку.\n"
-                f"Формат: 16:9, до {profile.backstage_output_seconds} сек.\n"
-                "Это может занять несколько минут на длинном видео.",
+                f"Р РµР¶РёРј: {mode_label}\n"
+                "Р­С‚Р°Рї 4/6: СЃРѕР±РёСЂР°СЋ С€РёСЂРѕРєРёР№ Preview-РјРѕРЅС‚Р°Р¶.\n"
+                "Р§С‚Рѕ РїСЂРѕРёСЃС…РѕРґРёС‚: Р°РЅР°Р»РёР·РёСЂСѓСЋ РґРІРёР¶РµРЅРёРµ, Р»РёС†Р°, СЃРјРµРЅС‹ РєР°РґСЂР°, РїР°СѓР·С‹ Рё РёРЅС‚РѕРЅР°С†РёРѕРЅРЅС‹Рµ РІСЃРїР»РµСЃРєРё, РґРµР»Р°СЋ Р·Р°СЃС‚Р°РІРєСѓ Рё СЃРєР»РµР№РєСѓ.\n"
+                f"Р¤РѕСЂРјР°С‚: 16:9, РґРѕ {profile.backstage_output_seconds} СЃРµРє.\n"
+                "Р­С‚Рѕ РјРѕР¶РµС‚ Р·Р°РЅСЏС‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РјРёРЅСѓС‚ РЅР° РґР»РёРЅРЅРѕРј РІРёРґРµРѕ.",
             )
             montage = await asyncio.to_thread(
                 create_backstage_montage,
@@ -2637,13 +3996,13 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
                 download.path.stat().st_size,
                 montage.path.stat().st_size,
             )
-            state["stage"] = "Этап 5/6: отправляю Preview-ролик"
-            state["detail"] = f"Размер: {human_size(montage.path.stat().st_size)}"
+            state["stage"] = "Р­С‚Р°Рї 5/6: РѕС‚РїСЂР°РІР»СЏСЋ Preview-СЂРѕР»РёРє"
+            state["detail"] = f"Р Р°Р·РјРµСЂ: {human_size(montage.path.stat().st_size)}"
             await safe_edit(
                 status,
-                f"Режим: {mode_label}\n"
-                "Этап 5/6: ролик готов, отправляю файл.\n"
-                f"Размер: {human_size(montage.path.stat().st_size)}",
+                f"Р РµР¶РёРј: {mode_label}\n"
+                "Р­С‚Р°Рї 5/6: СЂРѕР»РёРє РіРѕС‚РѕРІ, РѕС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р».\n"
+                f"Р Р°Р·РјРµСЂ: {human_size(montage.path.stat().st_size)}",
             )
             replay_id = remember_youtube_job(user_id, url, lang)
             subtitle_id = remember_subtitle_job(user_id, montage.path, montage.path.stem)
@@ -2664,26 +4023,26 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
             await message.answer_document(
                 FSInputFile(montage.path),
                 caption=(
-                    "Готово: Preview-монтаж\n"
-                    f"Источник: {download.title}\n"
-                    "Формат: широкое видео 16:9, MP4\n"
-                    f"Длина: до {profile.backstage_output_seconds} сек.\n"
-                    f"Вес: {human_size(montage.path.stat().st_size)}\n"
-                    f"Общее время обработки: {format_duration(time.time() - started_at)}"
+                    "Р“РѕС‚РѕРІРѕ: Preview-РјРѕРЅС‚Р°Р¶\n"
+                    f"РСЃС‚РѕС‡РЅРёРє: {download.title}\n"
+                    "Р¤РѕСЂРјР°С‚: С€РёСЂРѕРєРѕРµ РІРёРґРµРѕ 16:9, MP4\n"
+                    f"Р”Р»РёРЅР°: РґРѕ {profile.backstage_output_seconds} СЃРµРє.\n"
+                    f"Р’РµСЃ: {human_size(montage.path.stat().st_size)}\n"
+                    f"РћР±С‰РµРµ РІСЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё: {format_duration(time.time() - started_at)}"
                     f"{AFTER_RESULT_HINT}"
                 ),
                 reply_markup=youtube_replay_keyboard(replay_id, mode, subtitle_id, cover_id),
             )
             if cover_path:
-                await message.answer_document(FSInputFile(cover_path), caption="PNG-обложка для этого монтажа.")
+                await message.answer_document(FSInputFile(cover_path), caption="PNG-РѕР±Р»РѕР¶РєР° РґР»СЏ СЌС‚РѕРіРѕ РјРѕРЅС‚Р°Р¶Р°.")
             await safe_edit(
                 status,
-                "Готово. Preview-ролик отправлен."
+                "Р“РѕС‚РѕРІРѕ. Preview-СЂРѕР»РёРє РѕС‚РїСЂР°РІР»РµРЅ."
                 + next_steps_text(
-                    "скачай MP4",
-                    "нажми Subtitles, если нужны субтитры",
-                    "нажми Redo, если хочешь другой темп монтажа",
-                    "отправь следующий файл или ссылку",
+                    "СЃРєР°С‡Р°Р№ MP4",
+                    "РЅР°Р¶РјРё Subtitles, РµСЃР»Рё РЅСѓР¶РЅС‹ СЃСѓР±С‚РёС‚СЂС‹",
+                    "РЅР°Р¶РјРё Redo, РµСЃР»Рё С…РѕС‡РµС€СЊ РґСЂСѓРіРѕР№ С‚РµРјРї РјРѕРЅС‚Р°Р¶Р°",
+                    "РѕС‚РїСЂР°РІСЊ СЃР»РµРґСѓСЋС‰РёР№ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ",
                 ),
             )
             return
@@ -2699,20 +4058,20 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
         )
         clips = []
         base_name = clean_base_name(download.title, "youtube_short")
-        state["stage"] = "Этап 4/6: читаю параметры видео"
-        state["detail"] = "Готовлю face-focus и вертикальный crop"
+        state["stage"] = "Р­С‚Р°Рї 4/6: С‡РёС‚Р°СЋ РїР°СЂР°РјРµС‚СЂС‹ РІРёРґРµРѕ"
+        state["detail"] = "Р“РѕС‚РѕРІР»СЋ face-focus Рё РІРµСЂС‚РёРєР°Р»СЊРЅС‹Р№ crop"
         source_info = await asyncio.to_thread(inspect_video, download.path)
 
         for index, start_second in enumerate(starts, start=1):
-            state["detail"] = f"Клип {index}/{len(starts)}, старт {format_duration(start_second)}"
+            state["detail"] = f"РљР»РёРї {index}/{len(starts)}, СЃС‚Р°СЂС‚ {format_duration(start_second)}"
             await safe_edit(
                 status,
-                f"Режим: {mode_label}\n"
-                "Этап 4/6: режу Shorts по одному.\n"
-                f"Сейчас: клип {index}/{len(starts)}\n"
-            f"Старт фрагмента: {format_duration(start_second)}\n"
-            "Что происходит: выбираю момент по лицам, движению, паузам и интонации, делаю вертикальный 1080x1920, кодирую MP4.\n"
-                "Как только клип готов, сразу отправляю его сюда.",
+                f"Р РµР¶РёРј: {mode_label}\n"
+                "Р­С‚Р°Рї 4/6: СЂРµР¶Сѓ Shorts РїРѕ РѕРґРЅРѕРјСѓ.\n"
+                f"РЎРµР№С‡Р°СЃ: РєР»РёРї {index}/{len(starts)}\n"
+            f"РЎС‚Р°СЂС‚ С„СЂР°РіРјРµРЅС‚Р°: {format_duration(start_second)}\n"
+            "Р§С‚Рѕ РїСЂРѕРёСЃС…РѕРґРёС‚: РІС‹Р±РёСЂР°СЋ РјРѕРјРµРЅС‚ РїРѕ Р»РёС†Р°Рј, РґРІРёР¶РµРЅРёСЋ, РїР°СѓР·Р°Рј Рё РёРЅС‚РѕРЅР°С†РёРё, РґРµР»Р°СЋ РІРµСЂС‚РёРєР°Р»СЊРЅС‹Р№ 1080x1920, РєРѕРґРёСЂСѓСЋ MP4.\n"
+                "РљР°Рє С‚РѕР»СЊРєРѕ РєР»РёРї РіРѕС‚РѕРІ, СЃСЂР°Р·Сѓ РѕС‚РїСЂР°РІР»СЏСЋ РµРіРѕ СЃСЋРґР°.",
             )
             clip = await asyncio.to_thread(
                 make_short_clip,
@@ -2736,27 +4095,27 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
                 FSInputFile(clip.path),
                 caption=(
                     f"Shorts {index}/{len(starts)}\n"
-                    f"Старт: {format_duration(clip.start_seconds)}\n"
-                    f"Длина: {format_duration(clip.duration_seconds)}\n"
-                    f"Вес: {human_size(clip.path.stat().st_size)}\n\n"
-                    f"Готово {index}/{len(starts)}. Осталось: {len(starts) - index}."
+                    f"РЎС‚Р°СЂС‚: {format_duration(clip.start_seconds)}\n"
+                    f"Р”Р»РёРЅР°: {format_duration(clip.duration_seconds)}\n"
+                    f"Р’РµСЃ: {human_size(clip.path.stat().st_size)}\n\n"
+                    f"Р“РѕС‚РѕРІРѕ {index}/{len(starts)}. РћСЃС‚Р°Р»РѕСЃСЊ: {len(starts) - index}."
                 ),
                 reply_markup=media_tools_keyboard(subtitle_id, cover_id),
             )
 
         if not clips:
-            await safe_edit(status, "Не получилось сделать клипы: видео слишком короткое.")
+            await safe_edit(status, "РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ СЃРґРµР»Р°С‚СЊ РєР»РёРїС‹: РІРёРґРµРѕ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРѕРµ.")
             return
 
-        state["stage"] = "Этап 5/6: упаковываю ZIP"
-        state["detail"] = f"Клипов: {len(clips)}"
+        state["stage"] = "Р­С‚Р°Рї 5/6: СѓРїР°РєРѕРІС‹РІР°СЋ ZIP"
+        state["detail"] = f"РљР»РёРїРѕРІ: {len(clips)}"
         await safe_edit(
             status,
-            f"Режим: {mode_label}\n"
-            "Этап 5/6: клипы уже отправлены, дополнительно упаковываю ZIP.\n"
-            f"Клипов: {len(clips)}\n"
-            f"Старты: {describe_clips(clips)}\n"
-            "ZIP нужен, чтобы все клипы можно было скачать одним файлом.",
+            f"Р РµР¶РёРј: {mode_label}\n"
+            "Р­С‚Р°Рї 5/6: РєР»РёРїС‹ СѓР¶Рµ РѕС‚РїСЂР°РІР»РµРЅС‹, РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ СѓРїР°РєРѕРІС‹РІР°СЋ ZIP.\n"
+            f"РљР»РёРїРѕРІ: {len(clips)}\n"
+            f"РЎС‚Р°СЂС‚С‹: {describe_clips(clips)}\n"
+            "ZIP РЅСѓР¶РµРЅ, С‡С‚РѕР±С‹ РІСЃРµ РєР»РёРїС‹ РјРѕР¶РЅРѕ Р±С‹Р»Рѕ СЃРєР°С‡Р°С‚СЊ РѕРґРЅРёРј С„Р°Р№Р»РѕРј.",
         )
         zip_path = await asyncio.to_thread(zip_clips, clips, output_dir / f"{base_name}_shorts.zip")
         await db.add_conversion(
@@ -2785,41 +4144,41 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
             logger.exception("Cover generation failed")
 
         caption = (
-            f"Готово: {len(clips)} Shorts\n"
-            f"Источник: {download.title}\n"
-            f"Старты клипов: {describe_clips(clips)}\n"
-            f"Вес архива: {human_size(zip_path.stat().st_size)}\n"
-            f"Общее время обработки: {format_duration(time.time() - started_at)}"
+            f"Р“РѕС‚РѕРІРѕ: {len(clips)} Shorts\n"
+            f"РСЃС‚РѕС‡РЅРёРє: {download.title}\n"
+            f"РЎС‚Р°СЂС‚С‹ РєР»РёРїРѕРІ: {describe_clips(clips)}\n"
+            f"Р’РµСЃ Р°СЂС…РёРІР°: {human_size(zip_path.stat().st_size)}\n"
+            f"РћР±С‰РµРµ РІСЂРµРјСЏ РѕР±СЂР°Р±РѕС‚РєРё: {format_duration(time.time() - started_at)}"
             f"{AFTER_RESULT_HINT}"
         )
-        state["stage"] = "Этап 6/6: отправляю ZIP"
-        state["detail"] = f"Размер ZIP: {human_size(zip_path.stat().st_size)}"
+        state["stage"] = "Р­С‚Р°Рї 6/6: РѕС‚РїСЂР°РІР»СЏСЋ ZIP"
+        state["detail"] = f"Р Р°Р·РјРµСЂ ZIP: {human_size(zip_path.stat().st_size)}"
         await safe_edit(
             status,
-            f"Режим: {mode_label}\n"
-            "Этап 6/6: отправляю общий ZIP-архив.\n"
-            f"Размер ZIP: {human_size(zip_path.stat().st_size)}",
+            f"Р РµР¶РёРј: {mode_label}\n"
+            "Р­С‚Р°Рї 6/6: РѕС‚РїСЂР°РІР»СЏСЋ РѕР±С‰РёР№ ZIP-Р°СЂС…РёРІ.\n"
+            f"Р Р°Р·РјРµСЂ ZIP: {human_size(zip_path.stat().st_size)}",
         )
 
         if zip_path.stat().st_size <= TELEGRAM_SAFE_UPLOAD_BYTES:
             await message.answer_document(FSInputFile(zip_path), caption=caption, reply_markup=youtube_replay_keyboard(replay_id, mode, cover_job_id=cover_id))
         else:
-            await message.answer(caption + "\nZIP большой, поэтому клипы уже отправлены отдельно выше.", reply_markup=youtube_replay_keyboard(replay_id, mode, cover_job_id=cover_id))
+            await message.answer(caption + "\nZIP Р±РѕР»СЊС€РѕР№, РїРѕСЌС‚РѕРјСѓ РєР»РёРїС‹ СѓР¶Рµ РѕС‚РїСЂР°РІР»РµРЅС‹ РѕС‚РґРµР»СЊРЅРѕ РІС‹С€Рµ.", reply_markup=youtube_replay_keyboard(replay_id, mode, cover_job_id=cover_id))
         if cover_path:
-            await message.answer_document(FSInputFile(cover_path), caption="PNG-обложка для Shorts-пачки.")
+            await message.answer_document(FSInputFile(cover_path), caption="PNG-РѕР±Р»РѕР¶РєР° РґР»СЏ Shorts-РїР°С‡РєРё.")
         await safe_edit(
             status,
-            "Готово. Все клипы отправлены."
+            "Р“РѕС‚РѕРІРѕ. Р’СЃРµ РєР»РёРїС‹ РѕС‚РїСЂР°РІР»РµРЅС‹."
             + next_steps_text(
-                "скачай отдельные клипы или общий ZIP",
-                "нажми Subtitles на нужном клипе",
-                "нажми Redo, если хочешь другую нарезку",
-                "отправь следующий файл или ссылку",
+                "СЃРєР°С‡Р°Р№ РѕС‚РґРµР»СЊРЅС‹Рµ РєР»РёРїС‹ РёР»Рё РѕР±С‰РёР№ ZIP",
+                "РЅР°Р¶РјРё Subtitles РЅР° РЅСѓР¶РЅРѕРј РєР»РёРїРµ",
+                "РЅР°Р¶РјРё Redo, РµСЃР»Рё С…РѕС‡РµС€СЊ РґСЂСѓРіСѓСЋ РЅР°СЂРµР·РєСѓ",
+                "РѕС‚РїСЂР°РІСЊ СЃР»РµРґСѓСЋС‰РёР№ С„Р°Р№Р» РёР»Рё СЃСЃС‹Р»РєСѓ",
             ),
         )
     except Exception as exc:
         logger.exception("YouTube shorts job failed")
-        await safe_edit(status, f"Не получилось обработать YouTube-ссылку: {exc}")
+        await safe_edit(status, f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ YouTube-СЃСЃС‹Р»РєСѓ: {exc}")
     finally:
         heartbeat_task.cancel()
 
@@ -2830,23 +4189,26 @@ async def receive_file(message: Message, bot: Bot) -> None:
     await ensure_user(message)
     if not message.from_user:
         return
+    if billing_bot_mode():
+        await message.answer(billing_only_text(user_lang(message)), reply_markup=main_menu(user_lang(message)))
+        return
 
     file_id, original_name, kind, file_size = extract_file_meta(message)
     if not file_id:
         return
-    if not await ensure_paid_access(message, message.from_user.id, "Конвертация видео" if kind == "video" else "Конвертация изображений"):
+    if not await ensure_paid_access(message, message.from_user.id, "РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ" if kind == "video" else "РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёР№"):
         return
 
     if file_size and file_size > max_size_bytes(kind):
         await message.answer(
-            f"Файл слишком большой. Лимит для {'видео' if kind == 'video' else 'изображений'}: "
+            f"Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№. Р›РёРјРёС‚ РґР»СЏ {'РІРёРґРµРѕ' if kind == 'video' else 'РёР·РѕР±СЂР°Р¶РµРЅРёР№'}: "
             f"{settings.max_video_mb if kind == 'video' else settings.max_image_mb} MB."
-            + next_steps_text("сожми файл или отправь более короткий фрагмент", "можно попробовать YouTube-ссылку вместо файла")
+            + next_steps_text("СЃРѕР¶РјРё С„Р°Р№Р» РёР»Рё РѕС‚РїСЂР°РІСЊ Р±РѕР»РµРµ РєРѕСЂРѕС‚РєРёР№ С„СЂР°РіРјРµРЅС‚", "РјРѕР¶РЅРѕ РїРѕРїСЂРѕР±РѕРІР°С‚СЊ YouTube-СЃСЃС‹Р»РєСѓ РІРјРµСЃС‚Рѕ С„Р°Р№Р»Р°")
         )
         return
 
     status = await message.answer(
-        process_stage_text("Подготовка файла", FILE_PREP_STEPS, 1, f"Файл: {original_name}")
+        process_stage_text("РџРѕРґРіРѕС‚РѕРІРєР° С„Р°Р№Р»Р°", FILE_PREP_STEPS, 1, f"Р¤Р°Р№Р»: {original_name}")
     )
     session_id = uuid.uuid4().hex[:12]
     source_dir = settings.storage_dir / str(message.from_user.id)
@@ -2859,15 +4221,15 @@ async def receive_file(message: Message, bot: Bot) -> None:
     await bot.download_file(tg_file.file_path, destination=source_path)
     await safe_edit(
         status,
-        process_stage_text("Подготовка файла", FILE_PREP_STEPS, 2, f"Загружено: {human_size(source_path.stat().st_size)}"),
+        process_stage_text("РџРѕРґРіРѕС‚РѕРІРєР° С„Р°Р№Р»Р°", FILE_PREP_STEPS, 2, f"Р—Р°РіСЂСѓР¶РµРЅРѕ: {human_size(source_path.stat().st_size)}"),
     )
 
     if source_path.stat().st_size > max_size_bytes(kind):
         source_path.unlink(missing_ok=True)
         await safe_edit(
             status,
-            "Файл оказался больше лимита после загрузки."
-            + next_steps_text("отправь файл меньше", "для видео можно прислать ссылку и выбрать режим монтажа"),
+            "Р¤Р°Р№Р» РѕРєР°Р·Р°Р»СЃСЏ Р±РѕР»СЊС€Рµ Р»РёРјРёС‚Р° РїРѕСЃР»Рµ Р·Р°РіСЂСѓР·РєРё."
+            + next_steps_text("РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» РјРµРЅСЊС€Рµ", "РґР»СЏ РІРёРґРµРѕ РјРѕР¶РЅРѕ РїСЂРёСЃР»Р°С‚СЊ СЃСЃС‹Р»РєСѓ Рё РІС‹Р±СЂР°С‚СЊ СЂРµР¶РёРј РјРѕРЅС‚Р°Р¶Р°"),
         )
         return
 
@@ -2881,7 +4243,7 @@ async def receive_file(message: Message, bot: Bot) -> None:
         cover_title=normalize_cover_prompt_text(message.caption) if kind == "video" else None,
     )
     user_latest_session[message.from_user.id] = session_id
-    await safe_edit(status, process_stage_text("Подготовка файла", FILE_PREP_STEPS, 3, "Читаю параметры файла"))
+    await safe_edit(status, process_stage_text("РџРѕРґРіРѕС‚РѕРІРєР° С„Р°Р№Р»Р°", FILE_PREP_STEPS, 3, "Р§РёС‚Р°СЋ РїР°СЂР°РјРµС‚СЂС‹ С„Р°Р№Р»Р°"))
 
     if kind == "video":
         await prepare_video_message(message, session_id, source_path, status)
@@ -2911,11 +4273,11 @@ async def prepare_image_message(message: Message, session_id: str, source_path: 
         if status:
             await safe_edit(
                 status,
-                "Не смог открыть файл как изображение."
-                + next_steps_text("отправь PNG, JPG, WEBP, GIF, TIFF или BMP", "или отправь видео/YouTube-ссылку"),
+                "РќРµ СЃРјРѕРі РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р» РєР°Рє РёР·РѕР±СЂР°Р¶РµРЅРёРµ."
+                + next_steps_text("РѕС‚РїСЂР°РІСЊ PNG, JPG, WEBP, GIF, TIFF РёР»Рё BMP", "РёР»Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ/YouTube-СЃСЃС‹Р»РєСѓ"),
             )
         else:
-            await message.answer("Не смог открыть файл как изображение." + next_steps_text("отправь другой файл"))
+            await message.answer("РќРµ СЃРјРѕРі РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р» РєР°Рє РёР·РѕР±СЂР°Р¶РµРЅРёРµ." + next_steps_text("РѕС‚РїСЂР°РІСЊ РґСЂСѓРіРѕР№ С„Р°Р№Р»"))
         source_path.unlink(missing_ok=True)
         sessions.pop(session_id, None)
         return
@@ -2923,18 +4285,18 @@ async def prepare_image_message(message: Message, session_id: str, source_path: 
         await safe_edit(
             status,
             process_stage_text(
-                "Подготовка файла",
+                "РџРѕРґРіРѕС‚РѕРІРєР° С„Р°Р№Р»Р°",
                 FILE_PREP_STEPS,
                 4,
-                f"Формат: {info.format}, размер: {info.width}x{info.height}, вес: {human_size(info.size_bytes)}",
+                f"Р¤РѕСЂРјР°С‚: {info.format}, СЂР°Р·РјРµСЂ: {info.width}x{info.height}, РІРµСЃ: {human_size(info.size_bytes)}",
                 done=True,
             ),
         )
 
     await message.answer(
-        "Изображение принято.\n"
-        f"Формат: {info.format}, размер: {info.width}x{info.height}, кадров: {info.frames}, вес: {human_size(info.size_bytes)}.\n"
-        "Выбери формат, потом режим сжатия:"
+        "РР·РѕР±СЂР°Р¶РµРЅРёРµ РїСЂРёРЅСЏС‚Рѕ.\n"
+        f"Р¤РѕСЂРјР°С‚: {info.format}, СЂР°Р·РјРµСЂ: {info.width}x{info.height}, РєР°РґСЂРѕРІ: {info.frames}, РІРµСЃ: {human_size(info.size_bytes)}.\n"
+        "Р’С‹Р±РµСЂРё С„РѕСЂРјР°С‚, РїРѕС‚РѕРј СЂРµР¶РёРј СЃР¶Р°С‚РёСЏ:"
         f"{NEXT_STEP_HINT}",
         reply_markup=formats_keyboard(session_id, available_image_formats(source_path), "image"),
     )
@@ -2942,7 +4304,7 @@ async def prepare_image_message(message: Message, session_id: str, source_path: 
 
 async def prepare_video_message(message: Message, session_id: str, source_path: Path, status: Message | None = None) -> None:
     if not ffmpeg_available():
-        text = "Видео принято, но обработчик видео недоступен." + next_steps_text("обнови зависимости", "перезапусти бота и отправь файл заново")
+        text = "Р’РёРґРµРѕ РїСЂРёРЅСЏС‚Рѕ, РЅРѕ РѕР±СЂР°Р±РѕС‚С‡РёРє РІРёРґРµРѕ РЅРµРґРѕСЃС‚СѓРїРµРЅ." + next_steps_text("РѕР±РЅРѕРІРё Р·Р°РІРёСЃРёРјРѕСЃС‚Рё", "РїРµСЂРµР·Р°РїСѓСЃС‚Рё Р±РѕС‚Р° Рё РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» Р·Р°РЅРѕРІРѕ")
         if status:
             await safe_edit(status, text)
         else:
@@ -2951,24 +4313,24 @@ async def prepare_video_message(message: Message, session_id: str, source_path: 
     try:
         info = await asyncio.to_thread(inspect_video, source_path)
         resolution = f"{info.width}x{info.height}" if info.width and info.height else "unknown"
-        details = f"Разрешение: {resolution}, длительность: {format_duration(info.duration_seconds)}, вес: {human_size(info.size_bytes)}.\n"
+        details = f"Р Р°Р·СЂРµС€РµРЅРёРµ: {resolution}, РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(info.duration_seconds)}, РІРµСЃ: {human_size(info.size_bytes)}.\n"
     except Exception:
-        details = "Не удалось прочитать метаданные, но можно попробовать конвертацию.\n"
+        details = "РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РјРµС‚Р°РґР°РЅРЅС‹Рµ, РЅРѕ РјРѕР¶РЅРѕ РїРѕРїСЂРѕР±РѕРІР°С‚СЊ РєРѕРЅРІРµСЂС‚Р°С†РёСЋ.\n"
 
     if status:
         await safe_edit(
             status,
-            process_stage_text("Подготовка файла", FILE_PREP_STEPS, 4, details.strip(), done=True),
+            process_stage_text("РџРѕРґРіРѕС‚РѕРІРєР° С„Р°Р№Р»Р°", FILE_PREP_STEPS, 4, details.strip(), done=True),
         )
 
     session = sessions.get(session_id)
     if session and session.cover_title:
-        cover_hint = "\nТекст для обложки уже взял из подписи к видео.\n"
+        cover_hint = "\nРўРµРєСЃС‚ РґР»СЏ РѕР±Р»РѕР¶РєРё СѓР¶Рµ РІР·СЏР» РёР· РїРѕРґРїРёСЃРё Рє РІРёРґРµРѕ.\n"
     else:
-        cover_hint = "\nДля обложки можно следующим сообщением прислать название и описание: первая строка — заголовок, вторая — крючок.\n"
+        cover_hint = "\nР”Р»СЏ РѕР±Р»РѕР¶РєРё РјРѕР¶РЅРѕ СЃР»РµРґСѓСЋС‰РёРј СЃРѕРѕР±С‰РµРЅРёРµРј РїСЂРёСЃР»Р°С‚СЊ РЅР°Р·РІР°РЅРёРµ Рё РѕРїРёСЃР°РЅРёРµ: РїРµСЂРІР°СЏ СЃС‚СЂРѕРєР° вЂ” Р·Р°РіРѕР»РѕРІРѕРє, РІС‚РѕСЂР°СЏ вЂ” РєСЂСЋС‡РѕРє.\n"
 
     await message.answer(
-        "Видео принято.\n" + details + cover_hint + "Выбери формат:" + NEXT_STEP_HINT,
+        "Р’РёРґРµРѕ РїСЂРёРЅСЏС‚Рѕ.\n" + details + cover_hint + "Р’С‹Р±РµСЂРё С„РѕСЂРјР°С‚:" + NEXT_STEP_HINT,
         reply_markup=formats_keyboard(session_id, VIDEO_FORMATS, "video"),
     )
 
@@ -2980,27 +4342,27 @@ async def rename_start(callback: CallbackQuery, state: FSMContext) -> None:
     session = get_owned_session(session_id, callback.from_user.id if callback.from_user else 0)
     if not session:
         if callback.message:
-            await callback.message.answer("Этот файл уже недоступен. Отправь его заново.")
+            await callback.message.answer("Р­С‚РѕС‚ С„Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РїСЂР°РІСЊ РµРіРѕ Р·Р°РЅРѕРІРѕ.")
         return
     await state.set_state(RenameState.waiting_name)
     await state.update_data(session_id=session_id)
     if callback.message:
         await callback.message.answer(
-            "Переименование: жду новое имя файла без расширения."
-            + next_steps_text("напиши новое имя одним сообщением", "для отмены напиши /cancel")
+            "РџРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ: Р¶РґСѓ РЅРѕРІРѕРµ РёРјСЏ С„Р°Р№Р»Р° Р±РµР· СЂР°СЃС€РёСЂРµРЅРёСЏ."
+            + next_steps_text("РЅР°РїРёС€Рё РЅРѕРІРѕРµ РёРјСЏ РѕРґРЅРёРј СЃРѕРѕР±С‰РµРЅРёРµРј", "РґР»СЏ РѕС‚РјРµРЅС‹ РЅР°РїРёС€Рё /cancel")
         )
 
 
 @router.message(RenameState.waiting_name)
 async def rename_finish(message: Message, state: FSMContext) -> None:
     if not message.text:
-        await message.answer("Напиши новое имя текстом." + next_steps_text("или отправь /cancel для отмены"))
+        await message.answer("РќР°РїРёС€Рё РЅРѕРІРѕРµ РёРјСЏ С‚РµРєСЃС‚РѕРј." + next_steps_text("РёР»Рё РѕС‚РїСЂР°РІСЊ /cancel РґР»СЏ РѕС‚РјРµРЅС‹"))
         return
-    if message.text.strip().lower() in {"/cancel", "cancel", "отмена", "скасувати"}:
+    if message.text.strip().lower() in {"/cancel", "cancel", "РѕС‚РјРµРЅР°", "СЃРєР°СЃСѓРІР°С‚Рё"}:
         await state.clear()
         await message.answer(
-            "Ок, переименование отменено."
-            + next_steps_text("выбери формат кнопкой", "или отправь новый файл")
+            "РћРє, РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ РѕС‚РјРµРЅРµРЅРѕ."
+            + next_steps_text("РІС‹Р±РµСЂРё С„РѕСЂРјР°С‚ РєРЅРѕРїРєРѕР№", "РёР»Рё РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»")
         )
         return
 
@@ -3009,32 +4371,32 @@ async def rename_finish(message: Message, state: FSMContext) -> None:
     session = get_owned_session(session_id, message.from_user.id if message.from_user else 0)
     await state.clear()
     if not session:
-        await message.answer("Этот файл уже недоступен. Отправь его заново.")
+        await message.answer("Р­С‚РѕС‚ С„Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РїСЂР°РІСЊ РµРіРѕ Р·Р°РЅРѕРІРѕ.")
         return
     session.base_name = clean_base_name(message.text or session.base_name)
     formats = VIDEO_FORMATS if session.kind == "video" else available_image_formats(session.path)
     await message.answer(
-        f"Имя обновлено: {session.base_name}."
-        + next_steps_text("выбери формат кнопкой ниже", "или отправь новый файл"),
+        f"РРјСЏ РѕР±РЅРѕРІР»РµРЅРѕ: {session.base_name}."
+        + next_steps_text("РІС‹Р±РµСЂРё С„РѕСЂРјР°С‚ РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ", "РёР»Рё РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»"),
         reply_markup=formats_keyboard(session_id, formats, session.kind),
     )
 
 
 @router.callback_query(F.data.startswith("convert:"))
 async def convert_callback(callback: CallbackQuery, bot: Bot) -> None:
-    await callback.answer("Конвертирую...")
+    await callback.answer("РљРѕРЅРІРµСЂС‚РёСЂСѓСЋ...")
     if not callback.from_user or not callback.message:
         return
     parsed = parse_convert_callback_data(callback.data)
     if not parsed:
-        await callback.message.answer("Не понял параметры конвертации. Выбери формат еще раз.")
+        await callback.message.answer("РќРµ РїРѕРЅСЏР» РїР°СЂР°РјРµС‚СЂС‹ РєРѕРЅРІРµСЂС‚Р°С†РёРё. Р’С‹Р±РµСЂРё С„РѕСЂРјР°С‚ РµС‰Рµ СЂР°Р·.")
         return
     session_id = parsed.session_id
     target_format = parsed.target_format
     image_mode = normalize_image_mode(parsed.image_mode)
     session = get_owned_session(session_id, callback.from_user.id)
     if not session:
-        await callback.message.answer("Этот файл уже недоступен. Отправь его заново.")
+        await callback.message.answer("Р­С‚РѕС‚ С„Р°Р№Р» СѓР¶Рµ РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РїСЂР°РІСЊ РµРіРѕ Р·Р°РЅРѕРІРѕ.")
         return
     await bot.send_chat_action(callback.message.chat.id, ChatAction.UPLOAD_DOCUMENT)
     if session.kind == "video":
@@ -3044,7 +4406,7 @@ async def convert_callback(callback: CallbackQuery, bot: Bot) -> None:
     else:
         if parsed.image_mode is None:
             await callback.message.answer(
-                f"Формат: {target_format.upper()}.\nВыбери режим сжатия:",
+                f"Р¤РѕСЂРјР°С‚: {target_format.upper()}.\nР’С‹Р±РµСЂРё СЂРµР¶РёРј СЃР¶Р°С‚РёСЏ:",
                 reply_markup=image_mode_keyboard(session_id, target_format),
             )
             return
@@ -3073,12 +4435,12 @@ async def convert_image_callback(
     assert callback.message and callback.from_user
     mode_label = IMAGE_MODE_LABELS[image_mode]
     status = await callback.message.answer(
-        process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 1, f"Формат: {target_format.upper()}, режим: {mode_label}")
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 1, f"Р¤РѕСЂРјР°С‚: {target_format.upper()}, СЂРµР¶РёРј: {mode_label}")
     )
     try:
-        await safe_edit(status, process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 1, "Проверяю исходный файл"))
+        await safe_edit(status, process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 1, "РџСЂРѕРІРµСЂСЏСЋ РёСЃС…РѕРґРЅС‹Р№ С„Р°Р№Р»"))
         source_info = await asyncio.to_thread(inspect_image, session.path)
-        await safe_edit(status, process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 2, "Меняю формат и сохраняю качество"))
+        await safe_edit(status, process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 2, "РњРµРЅСЏСЋ С„РѕСЂРјР°С‚ Рё СЃРѕС…СЂР°РЅСЏСЋ РєР°С‡РµСЃС‚РІРѕ"))
         output_path, output_info = await asyncio.to_thread(
             convert_image,
             session.path,
@@ -3102,25 +4464,25 @@ async def convert_image_callback(
         logger.exception("Image conversion failed")
         await safe_edit(
             status,
-            f"Не получилось конвертировать изображение: {exc}"
-            + next_steps_text("попробуй другой формат", "если файл поврежден, отправь его заново"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ РєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ С„РѕСЂРјР°С‚", "РµСЃР»Рё С„Р°Р№Р» РїРѕРІСЂРµР¶РґРµРЅ, РѕС‚РїСЂР°РІСЊ РµРіРѕ Р·Р°РЅРѕРІРѕ"),
         )
         return
 
     await safe_edit(
         status,
-        process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 3, f"Результат: {output_path.name}"),
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 3, f"Р РµР·СѓР»СЊС‚Р°С‚: {output_path.name}"),
     )
     await db.add_conversion(callback.from_user.id, "image", session.original_name, output_path.name, target_format, source_info.size_bytes, output_info.size_bytes)
-    await safe_edit(status, process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 4, "Отправляю готовый файл"))
+    await safe_edit(status, process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 4, "РћС‚РїСЂР°РІР»СЏСЋ РіРѕС‚РѕРІС‹Р№ С„Р°Р№Р»"))
     await callback.message.answer_document(
         FSInputFile(output_path),
         caption=(
             f"{output_path.name}\n"
             f"{source_info.format} -> {output_info.format}\n"
-            f"{output_info.width}x{output_info.height}, кадров: {output_info.frames}\n"
-            f"Режим: {mode_label}\n"
-            f"Вес: {human_size(source_info.size_bytes)} -> {human_size(output_info.size_bytes)}"
+            f"{output_info.width}x{output_info.height}, РєР°РґСЂРѕРІ: {output_info.frames}\n"
+            f"Р РµР¶РёРј: {mode_label}\n"
+            f"Р’РµСЃ: {human_size(source_info.size_bytes)} -> {human_size(output_info.size_bytes)}"
             f"{image_weight_note(source_info.size_bytes, output_info.size_bytes)}"
             f"{AFTER_RESULT_HINT}"
         ),
@@ -3132,15 +4494,15 @@ async def convert_image_callback(
         await callback.message.answer_document(
             FSInputFile(safe_path),
             caption=(
-                "Защита веса: выбранный формат получился тяжелее исходника, поэтому дополнительно сделал легкую WEBP-версию.\n"
-                f"Вес: {human_size(source_info.size_bytes)} -> {human_size(safe_info.size_bytes)}"
+                "Р—Р°С‰РёС‚Р° РІРµСЃР°: РІС‹Р±СЂР°РЅРЅС‹Р№ С„РѕСЂРјР°С‚ РїРѕР»СѓС‡РёР»СЃСЏ С‚СЏР¶РµР»РµРµ РёСЃС…РѕРґРЅРёРєР°, РїРѕСЌС‚РѕРјСѓ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ СЃРґРµР»Р°Р» Р»РµРіРєСѓСЋ WEBP-РІРµСЂСЃРёСЋ.\n"
+                f"Р’РµСЃ: {human_size(source_info.size_bytes)} -> {human_size(safe_info.size_bytes)}"
             ),
             disable_content_type_detection=True,
         )
     await safe_edit(
         status,
-        process_stage_text("Конвертация изображения", IMAGE_CONVERT_STEPS, 4, "Файл отправлен", done=True)
-        + next_steps_text("скачай результат", "выбери другой формат или отправь новый файл"),
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ", IMAGE_CONVERT_STEPS, 4, "Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ", done=True)
+        + next_steps_text("СЃРєР°С‡Р°Р№ СЂРµР·СѓР»СЊС‚Р°С‚", "РІС‹Р±РµСЂРё РґСЂСѓРіРѕР№ С„РѕСЂРјР°С‚ РёР»Рё РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р»"),
     )
 
 
@@ -3148,15 +4510,15 @@ async def convert_video_callback(callback: CallbackQuery, session_id: str, sessi
     assert callback.message and callback.from_user
     if not ffmpeg_available():
         await callback.message.answer(
-            "Обработчик видео недоступен."
-            + next_steps_text("обнови зависимости", "перезапусти бота и отправь видео заново")
+            "РћР±СЂР°Р±РѕС‚С‡РёРє РІРёРґРµРѕ РЅРµРґРѕСЃС‚СѓРїРµРЅ."
+            + next_steps_text("РѕР±РЅРѕРІРё Р·Р°РІРёСЃРёРјРѕСЃС‚Рё", "РїРµСЂРµР·Р°РїСѓСЃС‚Рё Р±РѕС‚Р° Рё РѕС‚РїСЂР°РІСЊ РІРёРґРµРѕ Р·Р°РЅРѕРІРѕ")
         )
         return
     status = await callback.message.answer(
-        process_stage_text("Конвертация видео", VIDEO_CONVERT_STEPS, 1, f"Формат: {target_format.upper()}")
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ", VIDEO_CONVERT_STEPS, 1, f"Р¤РѕСЂРјР°С‚: {target_format.upper()}")
     )
     try:
-        await safe_edit(status, process_stage_text("Конвертация видео", VIDEO_CONVERT_STEPS, 2, "Кодирую видео и звук"))
+        await safe_edit(status, process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ", VIDEO_CONVERT_STEPS, 2, "РљРѕРґРёСЂСѓСЋ РІРёРґРµРѕ Рё Р·РІСѓРє"))
         result = await asyncio.to_thread(
             convert_video,
             session.path,
@@ -3168,46 +4530,46 @@ async def convert_video_callback(callback: CallbackQuery, session_id: str, sessi
     except subprocess.TimeoutExpired:
         await safe_edit(
             status,
-            "Видео слишком долго конвертируется."
-            + next_steps_text("попробуй файл короче или легче", "для длинных роликов отправь YouTube-ссылку и выбери монтаж"),
+            "Р’РёРґРµРѕ СЃР»РёС€РєРѕРј РґРѕР»РіРѕ РєРѕРЅРІРµСЂС‚РёСЂСѓРµС‚СЃСЏ."
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ С„Р°Р№Р» РєРѕСЂРѕС‡Рµ РёР»Рё Р»РµРіС‡Рµ", "РґР»СЏ РґР»РёРЅРЅС‹С… СЂРѕР»РёРєРѕРІ РѕС‚РїСЂР°РІСЊ YouTube-СЃСЃС‹Р»РєСѓ Рё РІС‹Р±РµСЂРё РјРѕРЅС‚Р°Р¶"),
         )
         return
     except Exception as exc:
         logger.exception("Video conversion failed")
         await safe_edit(
             status,
-            f"Не получилось конвертировать видео: {exc}"
-            + next_steps_text("попробуй другой формат", "если видео повреждено, отправь файл заново"),
+            f"РќРµ РїРѕР»СѓС‡РёР»РѕСЃСЊ РєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РІРёРґРµРѕ: {exc}"
+            + next_steps_text("РїРѕРїСЂРѕР±СѓР№ РґСЂСѓРіРѕР№ С„РѕСЂРјР°С‚", "РµСЃР»Рё РІРёРґРµРѕ РїРѕРІСЂРµР¶РґРµРЅРѕ, РѕС‚РїСЂР°РІСЊ С„Р°Р№Р» Р·Р°РЅРѕРІРѕ"),
         )
         return
 
     await safe_edit(
         status,
-        process_stage_text("Конвертация видео", VIDEO_CONVERT_STEPS, 3, f"Результат: {result.path.name}"),
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ", VIDEO_CONVERT_STEPS, 3, f"Р РµР·СѓР»СЊС‚Р°С‚: {result.path.name}"),
     )
     await db.add_conversion(callback.from_user.id, "video", session.original_name, result.path.name, target_format, result.source.size_bytes, result.output.size_bytes)
     resolution = f"{result.output.width}x{result.output.height}" if result.output.width and result.output.height else "unknown"
     subtitle_id = remember_subtitle_job(callback.from_user.id, result.path, result.path.stem) if target_format == "mp4" else None
     cover_id = remember_cover_job(callback.from_user.id, result.path, result.path.stem, result.output.duration_seconds)
-    await safe_edit(status, process_stage_text("Конвертация видео", VIDEO_CONVERT_STEPS, 4, "Отправляю готовый файл"))
+    await safe_edit(status, process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ", VIDEO_CONVERT_STEPS, 4, "РћС‚РїСЂР°РІР»СЏСЋ РіРѕС‚РѕРІС‹Р№ С„Р°Р№Р»"))
     await callback.message.answer_document(
         FSInputFile(result.path),
         caption=(
             f"{result.path.name}\n"
-            f"Видео -> {target_format.upper()}\n"
-            f"Разрешение: {resolution}, длительность: {format_duration(result.output.duration_seconds)}\n"
-            f"Вес: {human_size(result.source.size_bytes)} -> {human_size(result.output.size_bytes)}"
+            f"Р’РёРґРµРѕ -> {target_format.upper()}\n"
+            f"Р Р°Р·СЂРµС€РµРЅРёРµ: {resolution}, РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ: {format_duration(result.output.duration_seconds)}\n"
+            f"Р’РµСЃ: {human_size(result.source.size_bytes)} -> {human_size(result.output.size_bytes)}"
             f"{AFTER_RESULT_HINT}"
         ),
         reply_markup=share_keyboard(session_id, result.path.name, subtitle_id, cover_id),
     )
     await safe_edit(
         status,
-        process_stage_text("Конвертация видео", VIDEO_CONVERT_STEPS, 4, "Файл отправлен", done=True)
+        process_stage_text("РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІРёРґРµРѕ", VIDEO_CONVERT_STEPS, 4, "Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ", done=True)
         + next_steps_text(
-            "скачай результат",
-            "для MP4 нажми Subtitles, если нужны субтитры",
-            "отправь новый файл или YouTube-ссылку",
+            "СЃРєР°С‡Р°Р№ СЂРµР·СѓР»СЊС‚Р°С‚",
+            "РґР»СЏ MP4 РЅР°Р¶РјРё Subtitles, РµСЃР»Рё РЅСѓР¶РЅС‹ СЃСѓР±С‚РёС‚СЂС‹",
+            "РѕС‚РїСЂР°РІСЊ РЅРѕРІС‹Р№ С„Р°Р№Р» РёР»Рё YouTube-СЃСЃС‹Р»РєСѓ",
         ),
     )
 
@@ -3216,6 +4578,28 @@ async def cleanup_loop() -> None:
     while True:
         prune_sessions()
         await asyncio.sleep(settings.cleanup_interval_seconds)
+
+
+async def heartbeat_loop() -> None:
+    path = Path("data") / "bot_heartbeat.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            path.write_text(
+                json.dumps(
+                    {
+                        "service": "telegram_bot",
+                        "status": "ok",
+                        "time": time.time(),
+                        "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.exception("Failed to write bot heartbeat")
+        await asyncio.sleep(30)
 
 
 def normalize_resume_text(value: str | None) -> str:
@@ -3250,20 +4634,20 @@ def register_resume_fonts() -> tuple[str, str]:
 
 
 RESUME_TEMPLATES: dict[str, dict[str, str]] = {
-    "1": {"name": "Classic", "label": "чистый ATS", "accent": "#2563eb", "dark": "#111827", "muted": "#4b5563", "soft": "#eff6ff", "layout": "single"},
-    "2": {"name": "Executive", "label": "строгий премиум", "accent": "#0f766e", "dark": "#10201f", "muted": "#475569", "soft": "#ecfdf5", "layout": "band"},
-    "3": {"name": "Creative", "label": "яркий профиль", "accent": "#c026d3", "dark": "#2f1234", "muted": "#5b5061", "soft": "#fdf4ff", "layout": "two"},
-    "4": {"name": "Modern", "label": "современный блок", "accent": "#ea580c", "dark": "#1f2937", "muted": "#57534e", "soft": "#fff7ed", "layout": "cards"},
-    "5": {"name": "Tech", "label": "IT и digital", "accent": "#0891b2", "dark": "#0f172a", "muted": "#475569", "soft": "#ecfeff", "layout": "two"},
-    "6": {"name": "Minimal", "label": "европейский стиль", "accent": "#52525b", "dark": "#18181b", "muted": "#52525b", "soft": "#f4f4f5", "layout": "single"},
-    "7": {"name": "Premium", "label": "сильная колонка", "accent": "#b45309", "dark": "#1c1917", "muted": "#57534e", "soft": "#fffbeb", "layout": "two"},
-    "8": {"name": "Focus", "label": "акцент на опыт", "accent": "#7c3aed", "dark": "#2e1065", "muted": "#5b5566", "soft": "#f5f3ff", "layout": "rail"},
-    "9": {"name": "Nordic", "label": "спокойный HR", "accent": "#0369a1", "dark": "#0c2538", "muted": "#475569", "soft": "#f0f9ff", "layout": "two"},
-    "10": {"name": "Legal", "label": "консервативный", "accent": "#374151", "dark": "#111827", "muted": "#4b5563", "soft": "#f9fafb", "layout": "single"},
-    "11": {"name": "Startup", "label": "энергичный", "accent": "#16a34a", "dark": "#052e16", "muted": "#4b5563", "soft": "#f0fdf4", "layout": "cards"},
-    "12": {"name": "Finance", "label": "деловой", "accent": "#1d4ed8", "dark": "#172554", "muted": "#475569", "soft": "#eef2ff", "layout": "band"},
-    "13": {"name": "Academic", "label": "образование", "accent": "#7f1d1d", "dark": "#1f1717", "muted": "#57534e", "soft": "#fef2f2", "layout": "photo_left"},
-    "14": {"name": "Compact", "label": "плотно и ясно", "accent": "#0d9488", "dark": "#134e4a", "muted": "#475569", "soft": "#f0fdfa", "layout": "split"},
+    "1": {"name": "Classic", "label": "С‡РёСЃС‚С‹Р№ ATS", "accent": "#2563eb", "dark": "#111827", "muted": "#4b5563", "soft": "#eff6ff", "layout": "single"},
+    "2": {"name": "Executive", "label": "СЃС‚СЂРѕРіРёР№ РїСЂРµРјРёСѓРј", "accent": "#0f766e", "dark": "#10201f", "muted": "#475569", "soft": "#ecfdf5", "layout": "band"},
+    "3": {"name": "Creative", "label": "СЏСЂРєРёР№ РїСЂРѕС„РёР»СЊ", "accent": "#c026d3", "dark": "#2f1234", "muted": "#5b5061", "soft": "#fdf4ff", "layout": "two"},
+    "4": {"name": "Modern", "label": "СЃРѕРІСЂРµРјРµРЅРЅС‹Р№ Р±Р»РѕРє", "accent": "#ea580c", "dark": "#1f2937", "muted": "#57534e", "soft": "#fff7ed", "layout": "cards"},
+    "5": {"name": "Tech", "label": "IT Рё digital", "accent": "#0891b2", "dark": "#0f172a", "muted": "#475569", "soft": "#ecfeff", "layout": "two"},
+    "6": {"name": "Minimal", "label": "РµРІСЂРѕРїРµР№СЃРєРёР№ СЃС‚РёР»СЊ", "accent": "#52525b", "dark": "#18181b", "muted": "#52525b", "soft": "#f4f4f5", "layout": "single"},
+    "7": {"name": "Premium", "label": "СЃРёР»СЊРЅР°СЏ РєРѕР»РѕРЅРєР°", "accent": "#b45309", "dark": "#1c1917", "muted": "#57534e", "soft": "#fffbeb", "layout": "two"},
+    "8": {"name": "Focus", "label": "Р°РєС†РµРЅС‚ РЅР° РѕРїС‹С‚", "accent": "#7c3aed", "dark": "#2e1065", "muted": "#5b5566", "soft": "#f5f3ff", "layout": "rail"},
+    "9": {"name": "Nordic", "label": "СЃРїРѕРєРѕР№РЅС‹Р№ HR", "accent": "#0369a1", "dark": "#0c2538", "muted": "#475569", "soft": "#f0f9ff", "layout": "two"},
+    "10": {"name": "Legal", "label": "РєРѕРЅСЃРµСЂРІР°С‚РёРІРЅС‹Р№", "accent": "#374151", "dark": "#111827", "muted": "#4b5563", "soft": "#f9fafb", "layout": "single"},
+    "11": {"name": "Startup", "label": "СЌРЅРµСЂРіРёС‡РЅС‹Р№", "accent": "#16a34a", "dark": "#052e16", "muted": "#4b5563", "soft": "#f0fdf4", "layout": "cards"},
+    "12": {"name": "Finance", "label": "РґРµР»РѕРІРѕР№", "accent": "#1d4ed8", "dark": "#172554", "muted": "#475569", "soft": "#eef2ff", "layout": "band"},
+    "13": {"name": "Academic", "label": "РѕР±СЂР°Р·РѕРІР°РЅРёРµ", "accent": "#7f1d1d", "dark": "#1f1717", "muted": "#57534e", "soft": "#fef2f2", "layout": "photo_left"},
+    "14": {"name": "Compact", "label": "РїР»РѕС‚РЅРѕ Рё СЏСЃРЅРѕ", "accent": "#0d9488", "dark": "#134e4a", "muted": "#475569", "soft": "#f0fdfa", "layout": "split"},
 }
 
 
@@ -3398,7 +4782,7 @@ def create_resume_template_preview_sheet(output_dir: Path) -> Path:
         "tiny": resume_preview_font(12),
     }
     draw.text((margin, 28), "Resume templates preview", fill="#111827", font=fonts["title"])
-    draw.text((margin, 67), "Мини-пример расположения блоков, фото, карточек и колонок перед выбором PDF", fill="#4b5563", font=fonts["subtitle"])
+    draw.text((margin, 67), "РњРёРЅРё-РїСЂРёРјРµСЂ СЂР°СЃРїРѕР»РѕР¶РµРЅРёСЏ Р±Р»РѕРєРѕРІ, С„РѕС‚Рѕ, РєР°СЂС‚РѕС‡РµРє Рё РєРѕР»РѕРЅРѕРє РїРµСЂРµРґ РІС‹Р±РѕСЂРѕРј PDF", fill="#4b5563", font=fonts["subtitle"])
     for index, (key, template) in enumerate(RESUME_TEMPLATES.items()):
         row = index // cols
         col = index % cols
@@ -3432,7 +4816,7 @@ def create_subtitle_style_preview_sheet(output_dir: Path) -> Path:
         "small": resume_preview_font(13),
     }
     draw.text((margin, 24), "Subtitle style preview", fill="white", font=fonts["title"])
-    draw.text((margin, 62), "Выберите стиль кнопкой ниже. Это пример шрифта, цвета и подачи.", fill="#cbd5e1", font=fonts["small"])
+    draw.text((margin, 62), "Р’С‹Р±РµСЂРёС‚Рµ СЃС‚РёР»СЊ РєРЅРѕРїРєРѕР№ РЅРёР¶Рµ. Р­С‚Рѕ РїСЂРёРјРµСЂ С€СЂРёС„С‚Р°, С†РІРµС‚Р° Рё РїРѕРґР°С‡Рё.", fill="#cbd5e1", font=fonts["small"])
     palettes = {
         "pop": ("#ffcc33", "#ffffff", "#111827"),
         "neon": ("#ff38d4", "#00f5ff", "#170026"),
@@ -3458,9 +4842,9 @@ def create_subtitle_style_preview_sheet(output_dir: Path) -> Path:
         draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=18, fill=bg, outline="#334155", width=2)
         draw.text((x + 16, y + 14), label, fill=accent, font=fonts["label"])
         sample_font = fonts["mono"] if style in {"mono", "typewriter"} else fonts["body"]
-        sample = "BIG RESULT" if style in {"pop", "headline", "kinetic"} else "Чистый текст"
+        sample = "BIG RESULT" if style in {"pop", "headline", "kinetic"} else "Р§РёСЃС‚С‹Р№ С‚РµРєСЃС‚"
         draw.text((x + 18, y + 58), sample, fill=primary, font=sample_font, stroke_width=2 if style in {"pop", "comic", "headline"} else 1, stroke_fill="#000000")
-        draw.text((x + 18, y + 100), "пример строки субтитров", fill=accent, font=fonts["small"])
+        draw.text((x + 18, y + 100), "РїСЂРёРјРµСЂ СЃС‚СЂРѕРєРё СЃСѓР±С‚РёС‚СЂРѕРІ", fill=accent, font=fonts["small"])
         if style in {"neon", "candy", "bounce"}:
             draw.arc((x + card_w - 74, y + 28, x + card_w - 18, y + 84), 15, 325, fill=accent, width=4)
         if style in {"clean", "minimal", "editorial"}:
@@ -3475,7 +4859,7 @@ def add_resume_section(story: list, title: str, content: str, styles: dict, head
     block = [Paragraph(title, styles[heading_style]), Spacer(1, 4)]
     paragraphs = [line.strip() for line in content.splitlines() if line.strip()]
     for line in paragraphs or [content]:
-        prefix = "• " if line.startswith(("-", "•", "*")) else ""
+        prefix = "вЂў " if line.startswith(("-", "вЂў", "*")) else ""
         clean = line[1:].strip() if prefix else line
         block.append(Paragraph(f"{prefix}{resume_safe_text(clean)}", styles["ResumeBody"]))
         block.append(Spacer(1, 3))
@@ -3632,7 +5016,7 @@ def draw_resume_page(canvas, doc, template: dict[str, str]) -> None:
     canvas.line(doc.leftMargin, 13 * mm, width - doc.rightMargin, 13 * mm)
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(colors.HexColor("#9ca3af"))
-    canvas.drawRightString(width - doc.rightMargin, 8 * mm, f"Resume • {template['name']}")
+    canvas.drawRightString(width - doc.rightMargin, 8 * mm, f"Resume вЂў {template['name']}")
     canvas.restoreState()
 
 
@@ -3774,7 +5158,7 @@ def resume_contact_kind(value: str) -> tuple[str, str]:
     if "t.me/" in lower or "telegram.me/" in lower or lower.startswith("tg:") or re.fullmatch(r"@[A-Za-z0-9_]{4,}", value):
         return "telegram", "TG"
     digits = re.sub(r"\D+", "", value)
-    if len(digits) >= 7 and (value.lstrip().startswith("+") or re.search(r"\b(phone|tel|тел|номер|моб)", lower)):
+    if len(digits) >= 7 and (value.lstrip().startswith("+") or re.search(r"\b(phone|tel|С‚РµР»|РЅРѕРјРµСЂ|РјРѕР±)", lower)):
         return "phone", "TEL"
     if "behance.net" in lower:
         return "behance", "BE"
@@ -3787,16 +5171,16 @@ def resume_pdf_labels(language: str) -> dict[str, str]:
     code = (language or "ru").lower()
     if code.startswith("uk"):
         return {
-            "experience": "Досвід роботи",
-            "experience_short": "Досвід",
-            "education": "Освіта",
-            "skills": "Навички",
-            "achievements": "Досягнення та проєкти",
-            "projects": "Проєкти",
-            "contacts": "Контакти та посилання",
-            "contacts_short": "Контакти",
-            "additional": "Додатково",
-            "more": "Ще",
+            "experience": "Р”РѕСЃРІС–Рґ СЂРѕР±РѕС‚Рё",
+            "experience_short": "Р”РѕСЃРІС–Рґ",
+            "education": "РћСЃРІС–С‚Р°",
+            "skills": "РќР°РІРёС‡РєРё",
+            "achievements": "Р”РѕСЃСЏРіРЅРµРЅРЅСЏ С‚Р° РїСЂРѕС”РєС‚Рё",
+            "projects": "РџСЂРѕС”РєС‚Рё",
+            "contacts": "РљРѕРЅС‚Р°РєС‚Рё С‚Р° РїРѕСЃРёР»Р°РЅРЅСЏ",
+            "contacts_short": "РљРѕРЅС‚Р°РєС‚Рё",
+            "additional": "Р”РѕРґР°С‚РєРѕРІРѕ",
+            "more": "Р©Рµ",
         }
     if code.startswith("en"):
         return {
@@ -3812,16 +5196,16 @@ def resume_pdf_labels(language: str) -> dict[str, str]:
             "more": "More",
         }
     return {
-        "experience": "Опыт работы",
-        "experience_short": "Опыт",
-        "education": "Образование",
-        "skills": "Навыки",
-        "achievements": "Достижения и проекты",
-        "projects": "Проекты",
-        "contacts": "Контакты и ссылки",
-        "contacts_short": "Контакты",
-        "additional": "Дополнительно",
-        "more": "Еще",
+        "experience": "РћРїС‹С‚ СЂР°Р±РѕС‚С‹",
+        "experience_short": "РћРїС‹С‚",
+        "education": "РћР±СЂР°Р·РѕРІР°РЅРёРµ",
+        "skills": "РќР°РІС‹РєРё",
+        "achievements": "Р”РѕСЃС‚РёР¶РµРЅРёСЏ Рё РїСЂРѕРµРєС‚С‹",
+        "projects": "РџСЂРѕРµРєС‚С‹",
+        "contacts": "РљРѕРЅС‚Р°РєС‚С‹ Рё СЃСЃС‹Р»РєРё",
+        "contacts_short": "РљРѕРЅС‚Р°РєС‚С‹",
+        "additional": "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ",
+        "more": "Р•С‰Рµ",
     }
 
 
@@ -3896,7 +5280,7 @@ def build_resume_header(
     show_contact: bool = True,
 ) -> Table:
     header_items: list = [
-        Paragraph(resume_safe_text(data["name"] or "Резюме"), styles["ResumeName"]),
+        Paragraph(resume_safe_text(data["name"] or "Р РµР·СЋРјРµ"), styles["ResumeName"]),
     ]
     if data["position"]:
         header_items.append(Paragraph(resume_safe_text(data["position"]), styles["ResumeRole"]))
@@ -3931,12 +5315,12 @@ def build_resume_main_flow(data: dict[str, str], styles: dict, template: dict[st
     if data["summary"]:
         story.append(Paragraph(resume_safe_text(data["summary"]), styles["ResumeSummary"]))
     story.extend(build_resume_highlight_strip(data, styles, template, content_width))
-    add_resume_section(story, "Опыт работы", data["experience"], styles)
-    add_resume_section(story, "Образование", data["education"], styles)
-    add_resume_section(story, "Навыки", data["skills"], styles)
-    add_resume_contact_section(story, "Контакты и ссылки", data, styles, template, content_width)
-    add_resume_section(story, "Достижения и проекты", data["achievements"], styles)
-    add_resume_section(story, "Дополнительно", data["additional"], styles)
+    add_resume_section(story, "РћРїС‹С‚ СЂР°Р±РѕС‚С‹", data["experience"], styles)
+    add_resume_section(story, "РћР±СЂР°Р·РѕРІР°РЅРёРµ", data["education"], styles)
+    add_resume_section(story, "РќР°РІС‹РєРё", data["skills"], styles)
+    add_resume_contact_section(story, "РљРѕРЅС‚Р°РєС‚С‹ Рё СЃСЃС‹Р»РєРё", data, styles, template, content_width)
+    add_resume_section(story, "Р”РѕСЃС‚РёР¶РµРЅРёСЏ Рё РїСЂРѕРµРєС‚С‹", data["achievements"], styles)
+    add_resume_section(story, "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ", data["additional"], styles)
     story.extend(build_resume_fill_panel(data, styles, template, content_width))
     return story
 
@@ -3958,7 +5342,7 @@ def resume_skill_tags(value: str, limit: int = 12) -> list[str]:
 def resume_link_lines(value: str) -> str:
     links = []
     for raw in normalize_resume_text(value).replace(",", "\n").splitlines():
-        item = raw.strip(" •-*")
+        item = raw.strip(" вЂў-*")
         if item:
             links.append(item)
     return "\n".join(links)
@@ -3970,9 +5354,9 @@ def resume_content_score(data: dict[str, str]) -> int:
 
 def build_resume_highlight_strip(data: dict[str, str], styles: dict, template: dict[str, str], content_width: float) -> list:
     items = [
-        ("Фокус", data.get("position") or "Целевая роль"),
-        ("Профиль", data.get("summary") or data.get("experience") or "Краткий профессиональный профиль"),
-        ("Навыки", ", ".join(resume_skill_tags(data.get("skills", ""), 4)) or "Ключевые компетенции"),
+        ("Р¤РѕРєСѓСЃ", data.get("position") or "Р¦РµР»РµРІР°СЏ СЂРѕР»СЊ"),
+        ("РџСЂРѕС„РёР»СЊ", data.get("summary") or data.get("experience") or "РљСЂР°С‚РєРёР№ РїСЂРѕС„РµСЃСЃРёРѕРЅР°Р»СЊРЅС‹Р№ РїСЂРѕС„РёР»СЊ"),
+        ("РќР°РІС‹РєРё", ", ".join(resume_skill_tags(data.get("skills", ""), 4)) or "РљР»СЋС‡РµРІС‹Рµ РєРѕРјРїРµС‚РµРЅС†РёРё"),
     ]
     card_width = content_width / 3
     row = []
@@ -4029,20 +5413,20 @@ def build_resume_skill_cloud(data: dict[str, str], styles: dict, template: dict[
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    return [Paragraph("Ключевые навыки", styles["ResumeSection"]), table, Spacer(1, 8)]
+    return [Paragraph("РљР»СЋС‡РµРІС‹Рµ РЅР°РІС‹РєРё", styles["ResumeSection"]), table, Spacer(1, 8)]
 
 
 def build_resume_fill_panel(data: dict[str, str], styles: dict, template: dict[str, str], content_width: float) -> list:
     if resume_content_score(data) > 780:
         return []
-    focus = data.get("position") or "целевой роли"
-    skills = ", ".join(resume_skill_tags(data.get("skills", ""), 5)) or "ключевых задач"
+    focus = data.get("position") or "С†РµР»РµРІРѕР№ СЂРѕР»Рё"
+    skills = ", ".join(resume_skill_tags(data.get("skills", ""), 5)) or "РєР»СЋС‡РµРІС‹С… Р·Р°РґР°С‡"
     text = (
-        f"Готов(а) закрывать задачи на позиции {focus}: работать с приоритетами, "
-        f"быстро погружаться в контекст и применять {skills} для измеримого результата."
+        f"Р“РѕС‚РѕРІ(Р°) Р·Р°РєСЂС‹РІР°С‚СЊ Р·Р°РґР°С‡Рё РЅР° РїРѕР·РёС†РёРё {focus}: СЂР°Р±РѕС‚Р°С‚СЊ СЃ РїСЂРёРѕСЂРёС‚РµС‚Р°РјРё, "
+        f"Р±С‹СЃС‚СЂРѕ РїРѕРіСЂСѓР¶Р°С‚СЊСЃСЏ РІ РєРѕРЅС‚РµРєСЃС‚ Рё РїСЂРёРјРµРЅСЏС‚СЊ {skills} РґР»СЏ РёР·РјРµСЂРёРјРѕРіРѕ СЂРµР·СѓР»СЊС‚Р°С‚Р°."
     )
     table = Table(
-        [[Paragraph("Профессиональный фокус", styles["ResumeCardTitle"]), Paragraph(resume_safe_text(text), styles["ResumeCardBody"])]],
+        [[Paragraph("РџСЂРѕС„РµСЃСЃРёРѕРЅР°Р»СЊРЅС‹Р№ С„РѕРєСѓСЃ", styles["ResumeCardTitle"]), Paragraph(resume_safe_text(text), styles["ResumeCardBody"])]],
         colWidths=[40 * mm, content_width - 40 * mm],
         hAlign="LEFT",
     )
@@ -4062,7 +5446,7 @@ def build_resume_fill_panel(data: dict[str, str], styles: dict, template: dict[s
 def paragraph_lines(content: str, styles: dict, style_name: str = "ResumeBody") -> list:
     lines: list = []
     for line in [item.strip() for item in content.splitlines() if item.strip()]:
-        prefix = "• " if line.startswith(("-", "•", "*")) else ""
+        prefix = "вЂў " if line.startswith(("-", "вЂў", "*")) else ""
         clean = line[1:].strip() if prefix else line
         lines.append(Paragraph(f"{prefix}{resume_safe_text(clean)}", styles[style_name]))
         lines.append(Spacer(1, 3))
@@ -4088,7 +5472,7 @@ def resume_card(title: str, content: str, styles: dict, width: float, template: 
 
 def build_resume_band_header(data: dict[str, str], styles: dict, avatar_path: Path | None, template: dict[str, str], content_width: float) -> Table:
     left = [
-        Paragraph(resume_safe_text(data["name"] or "Резюме"), styles["ResumeWhiteName"]),
+        Paragraph(resume_safe_text(data["name"] or "Р РµР·СЋРјРµ"), styles["ResumeWhiteName"]),
     ]
     if data["position"]:
         left.append(Paragraph(resume_safe_text(data["position"]), styles["ResumeWhiteRole"]))
@@ -4119,11 +5503,11 @@ def build_resume_card_grid(data: dict[str, str], styles: dict, template: dict[st
     card_width = (content_width - card_gap) / 2
     card_rows: list = []
     cards = [
-        resume_card("Навыки", data["skills"], styles, card_width, template),
-        resume_card("Образование", data["education"], styles, card_width, template),
-        resume_card("Достижения", data["achievements"], styles, card_width, template),
-        resume_card("Ссылки", resume_link_lines(data.get("links", "")), styles, card_width, template),
-        resume_card("Дополнительно", data["additional"], styles, card_width, template),
+        resume_card("РќР°РІС‹РєРё", data["skills"], styles, card_width, template),
+        resume_card("РћР±СЂР°Р·РѕРІР°РЅРёРµ", data["education"], styles, card_width, template),
+        resume_card("Р”РѕСЃС‚РёР¶РµРЅРёСЏ", data["achievements"], styles, card_width, template),
+        resume_card("РЎСЃС‹Р»РєРё", resume_link_lines(data.get("links", "")), styles, card_width, template),
+        resume_card("Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ", data["additional"], styles, card_width, template),
     ]
     cards = [card for card in cards if card is not None]
     for index in range(0, len(cards), 2):
@@ -4141,7 +5525,7 @@ def build_resume_card_grid(data: dict[str, str], styles: dict, template: dict[st
         ]))
         story.append(grid)
         story.append(Spacer(1, 5))
-    add_resume_section(story, "Опыт работы", data["experience"], styles)
+    add_resume_section(story, "РћРїС‹С‚ СЂР°Р±РѕС‚С‹", data["experience"], styles)
     story.extend(build_resume_fill_panel(data, styles, template, content_width))
     return story
 
@@ -4156,7 +5540,7 @@ def build_resume_photo_left_intro(data: dict[str, str], styles: dict, avatar_pat
     if contacts:
         photo_block.extend([Spacer(1, 6), *contacts])
     text_block = [
-        Paragraph(resume_safe_text(data["name"] or "Резюме"), styles["ResumeName"]),
+        Paragraph(resume_safe_text(data["name"] or "Р РµР·СЋРјРµ"), styles["ResumeName"]),
     ]
     if data["position"]:
         text_block.append(Paragraph(resume_safe_text(data["position"]), styles["ResumeRole"]))
@@ -4187,24 +5571,24 @@ def build_resume_split_intro(data: dict[str, str], styles: dict, avatar_path: Pa
     if avatar_path:
         left.append(RLImage(str(avatar_path), width=34 * mm, height=34 * mm))
         left.append(Spacer(1, 8))
-    left.append(Paragraph(resume_safe_text(data["name"] or "Резюме"), styles["ResumeWhiteName"]))
+    left.append(Paragraph(resume_safe_text(data["name"] or "Р РµР·СЋРјРµ"), styles["ResumeWhiteName"]))
     if data["position"]:
         left.append(Paragraph(resume_safe_text(data["position"]), styles["ResumeWhiteRole"]))
     contact_block = resume_contact_flow(data, styles, template, left_width - 20, light=True, max_columns=1)
     if contact_block:
-        left.append(Paragraph("Контакты", styles["ResumeSideTitle"]))
+        left.append(Paragraph("РљРѕРЅС‚Р°РєС‚С‹", styles["ResumeSideTitle"]))
         left.extend(contact_block)
-    for title, content in (("Навыки", data["skills"]), ("Дополнительно", data["additional"])):
+    for title, content in (("РќР°РІС‹РєРё", data["skills"]), ("Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ", data["additional"])):
         if content:
             left.append(Paragraph(title, styles["ResumeSideTitle"]))
-            if title == "Навыки":
+            if title == "РќР°РІС‹РєРё":
                 content = "\n".join(item.strip() for item in content.split(",") if item.strip())
             left.append(Paragraph(resume_safe_text(content), styles["ResumeSideBody"]))
     right: list = []
     if data["summary"]:
         right.append(Paragraph(resume_safe_text(data["summary"]), styles["ResumeSummary"]))
-    right.append(Paragraph("Основной профиль", styles["ResumeSection"]))
-    right.append(Paragraph("Опыт, образование и проекты вынесены ниже в широкие секции, чтобы PDF аккуратно переносился между страницами.", styles["ResumeBody"]))
+    right.append(Paragraph("РћСЃРЅРѕРІРЅРѕР№ РїСЂРѕС„РёР»СЊ", styles["ResumeSection"]))
+    right.append(Paragraph("РћРїС‹С‚, РѕР±СЂР°Р·РѕРІР°РЅРёРµ Рё РїСЂРѕРµРєС‚С‹ РІС‹РЅРµСЃРµРЅС‹ РЅРёР¶Рµ РІ С€РёСЂРѕРєРёРµ СЃРµРєС†РёРё, С‡С‚РѕР±С‹ PDF Р°РєРєСѓСЂР°С‚РЅРѕ РїРµСЂРµРЅРѕСЃРёР»СЃСЏ РјРµР¶РґСѓ СЃС‚СЂР°РЅРёС†Р°РјРё.", styles["ResumeBody"]))
     table = Table([[left, "", right]], colWidths=[left_width, 7 * mm, right_width], hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 0), colors.HexColor(template["dark"])),
@@ -4257,20 +5641,20 @@ def build_resume_sidebar(data: dict[str, str], styles: dict, avatar_path: Path |
         side.append(Spacer(1, 8))
     contact_block = resume_contact_flow(data, styles, template, 50 * mm - 18, light=True, max_columns=1)
     if contact_block:
-        side.append(Paragraph("Контакты", styles["ResumeSideTitle"]))
+        side.append(Paragraph("РљРѕРЅС‚Р°РєС‚С‹", styles["ResumeSideTitle"]))
         side.extend(contact_block)
     if data["skills"]:
-        side.append(Paragraph("Ключевые навыки", styles["ResumeSideTitle"]))
+        side.append(Paragraph("РљР»СЋС‡РµРІС‹Рµ РЅР°РІС‹РєРё", styles["ResumeSideTitle"]))
         skills = "<br/>".join(escape(item.strip(), quote=False) for item in data["skills"].split(",") if item.strip())
         side.append(Paragraph(skills, styles["ResumeSideBody"]))
     if data["additional"]:
-        side.append(Paragraph("Дополнительно", styles["ResumeSideTitle"]))
+        side.append(Paragraph("Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ", styles["ResumeSideTitle"]))
         side.append(Paragraph(resume_safe_text(data["additional"]), styles["ResumeSideBody"]))
     return side
 
 
 async def generate_resume_pdf(data: dict, template: str) -> Path:
-    """Генерирует PDF резюме на основе данных и шаблона."""
+    """Р“РµРЅРµСЂРёСЂСѓРµС‚ PDF СЂРµР·СЋРјРµ РЅР° РѕСЃРЅРѕРІРµ РґР°РЅРЅС‹С… Рё С€Р°Р±Р»РѕРЅР°."""
     filename = f"resume_{uuid.uuid4().hex}.pdf"
     filepath = settings.output_dir / filename
     settings.output_dir.mkdir(parents=True, exist_ok=True)
@@ -4414,16 +5798,16 @@ async def main() -> None:
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await bot.set_my_commands(
         [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="subscribe", description="Подписка за Stars"),
-            BotCommand(command="pro", description="Что дает Pro"),
-            BotCommand(command="status", description="Статус доступа"),
-            BotCommand(command="history", description="История обработок"),
-            BotCommand(command="resume", description="Создать PDF-резюме"),
-            BotCommand(command="language", description="Сменить язык"),
-            BotCommand(command="id", description="Мой Telegram ID"),
-            BotCommand(command="cancel", description="Отменить текущее действие"),
-            BotCommand(command="help", description="Как пользоваться"),
+            BotCommand(command="start", description="Р“Р»Р°РІРЅРѕРµ РјРµРЅСЋ"),
+            BotCommand(command="subscribe", description="РџРѕРґРїРёСЃРєР° Р·Р° Stars"),
+            BotCommand(command="pro", description="Р§С‚Рѕ РґР°РµС‚ Pro"),
+            BotCommand(command="status", description="РЎС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїР°"),
+            BotCommand(command="history", description="РСЃС‚РѕСЂРёСЏ РѕР±СЂР°Р±РѕС‚РѕРє"),
+            BotCommand(command="resume", description="РЎРѕР·РґР°С‚СЊ PDF-СЂРµР·СЋРјРµ"),
+            BotCommand(command="language", description="РЎРјРµРЅРёС‚СЊ СЏР·С‹Рє"),
+            BotCommand(command="id", description="РњРѕР№ Telegram ID"),
+            BotCommand(command="cancel", description="РћС‚РјРµРЅРёС‚СЊ С‚РµРєСѓС‰РµРµ РґРµР№СЃС‚РІРёРµ"),
+            BotCommand(command="help", description="РљР°Рє РїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ"),
         ]
     )
     await bot.set_my_commands(
@@ -4432,6 +5816,9 @@ async def main() -> None:
             BotCommand(command="subscribe", description="Stars subscription"),
             BotCommand(command="pro", description="What Pro includes"),
             BotCommand(command="status", description="Access status"),
+            BotCommand(command="wallet", description="CherryX balance"),
+            BotCommand(command="link", description="Link CherryX account"),
+            BotCommand(command="paysupport", description="Payment support"),
             BotCommand(command="history", description="Conversion history"),
             BotCommand(command="resume", description="Create PDF resume"),
             BotCommand(command="language", description="Change language"),
@@ -4443,28 +5830,51 @@ async def main() -> None:
     )
     await bot.set_my_commands(
         [
-            BotCommand(command="start", description="Головне меню"),
-            BotCommand(command="subscribe", description="Підписка за Stars"),
-            BotCommand(command="pro", description="Що дає Pro"),
-            BotCommand(command="status", description="Статус доступу"),
-            BotCommand(command="history", description="Історія обробок"),
-            BotCommand(command="resume", description="Створити PDF-резюме"),
-            BotCommand(command="language", description="Змінити мову"),
-            BotCommand(command="id", description="Мій Telegram ID"),
-            BotCommand(command="cancel", description="Скасувати дію"),
-            BotCommand(command="help", description="Як користуватися"),
+            BotCommand(command="start", description="Р“РѕР»РѕРІРЅРµ РјРµРЅСЋ"),
+            BotCommand(command="subscribe", description="РџС–РґРїРёСЃРєР° Р·Р° Stars"),
+            BotCommand(command="pro", description="Р©Рѕ РґР°С” Pro"),
+            BotCommand(command="status", description="РЎС‚Р°С‚СѓСЃ РґРѕСЃС‚СѓРїСѓ"),
+            BotCommand(command="history", description="Р†СЃС‚РѕСЂС–СЏ РѕР±СЂРѕР±РѕРє"),
+            BotCommand(command="resume", description="РЎС‚РІРѕСЂРёС‚Рё PDF-СЂРµР·СЋРјРµ"),
+            BotCommand(command="language", description="Р—РјС–РЅРёС‚Рё РјРѕРІСѓ"),
+            BotCommand(command="id", description="РњС–Р№ Telegram ID"),
+            BotCommand(command="cancel", description="РЎРєР°СЃСѓРІР°С‚Рё РґС–СЋ"),
+            BotCommand(command="help", description="РЇРє РєРѕСЂРёСЃС‚СѓРІР°С‚РёСЃСЏ"),
         ],
         language_code="uk",
     )
+    if billing_bot_mode():
+        billing_commands = [
+            BotCommand(command="start", description="Payment menu"),
+            BotCommand(command="subscribe", description="Pay with Stars"),
+            BotCommand(command="status", description="Access status"),
+            BotCommand(command="wallet", description="CherryX wallet"),
+            BotCommand(command="link", description="Link CherryX account"),
+            BotCommand(command="paysupport", description="Payment support"),
+            BotCommand(command="history", description="Payment history"),
+            BotCommand(command="id", description="Telegram ID"),
+            BotCommand(command="help", description="Help"),
+        ]
+        if admin_user_ids():
+            billing_commands.extend([
+                BotCommand(command="admin_stats", description="Admin stats"),
+                BotCommand(command="broadcast", description="Admin broadcast"),
+            ])
+        await bot.set_my_commands(billing_commands)
+        await bot.set_my_commands(billing_commands, language_code="en")
+
     if settings.mini_app_url:
         await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Mini App", web_app=WebAppInfo(url=settings.mini_app_url)))
 
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)
     asyncio.create_task(cleanup_loop())
+    asyncio.create_task(heartbeat_loop())
     logger.info("Bot started. Free users: %s. FFmpeg: %s", sorted(settings.free_user_ids), ffmpeg_available())
     await dispatcher.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+

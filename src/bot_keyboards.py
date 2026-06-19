@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from aiogram.types import (
     InlineKeyboardButton,
@@ -16,8 +16,8 @@ def main_menu(lang: str, subscription_stars: int, mini_app_url: str = "") -> Inl
     builder = InlineKeyboardBuilder()
     builder.button(text=tr(lang, "pay", stars=subscription_stars), callback_data="pay")
     builder.button(text=tr(lang, "status"), callback_data="status")
-    builder.button(text=tr(lang, "help_button"), callback_data="help:menu")
-    builder.button(text=tr(lang, "resume_button"), callback_data="help:resume")
+    builder.button(text=tr(lang, "wallet"), callback_data="wallet")
+    builder.button(text=tr(lang, "support"), callback_data="help:pay")
     builder.button(text=tr(lang, "language"), callback_data="language")
     if mini_app_url:
         builder.button(text=tr(lang, "open_app"), web_app=WebAppInfo(url=mini_app_url))
@@ -41,6 +41,28 @@ def help_navigation_keyboard(lang: str, subscription_stars: int) -> InlineKeyboa
         ],
         [InlineKeyboardButton(text=tr(lang, "pay", stars=subscription_stars), callback_data="pay")],
     ])
+
+
+def persistent_menu_labels(lang: str = "ru") -> dict[str, str]:
+    return {
+        "pay": "Pay Stars",
+        "status": "Status",
+        "wallet": "Wallet",
+        "help": "Support",
+        "language": "Language",
+    }
+
+
+def persistent_menu_keyboard(lang: str, mini_app_url: str = "") -> ReplyKeyboardMarkup:
+    labels = persistent_menu_labels(lang)
+    rows = [
+        [KeyboardButton(text=labels["pay"]), KeyboardButton(text=labels["status"])],
+        [KeyboardButton(text=labels["wallet"]), KeyboardButton(text=labels["help"])],
+        [KeyboardButton(text=labels["language"])],
+    ]
+    if mini_app_url:
+        rows.append([KeyboardButton(text="Mini App", web_app=WebAppInfo(url=mini_app_url))])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 def persistent_menu_labels(lang: str = "ru") -> dict[str, str]:
@@ -257,10 +279,19 @@ def language_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Русский", callback_data="lang:ru"),
                 InlineKeyboardButton(text="Українська", callback_data="lang:uk"),
                 InlineKeyboardButton(text="English", callback_data="lang:en"),
-            ]
+            ],
+            [
+                InlineKeyboardButton(text="Français", callback_data="lang:fr"),
+                InlineKeyboardButton(text="Deutsch", callback_data="lang:de"),
+                InlineKeyboardButton(text="Español", callback_data="lang:es"),
+            ],
+            [
+                InlineKeyboardButton(text="ქართული", callback_data="lang:ka"),
+                InlineKeyboardButton(text="Հայերեն", callback_data="lang:hy"),
+                InlineKeyboardButton(text="Italiano", callback_data="lang:it"),
+            ],
         ]
     )
-
 
 def single_callback_keyboard(text: str, callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -339,3 +370,4 @@ def resume_after_pdf_keyboard() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="Завершить", callback_data="resume_finish")],
     ])
+

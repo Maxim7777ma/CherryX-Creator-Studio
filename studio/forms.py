@@ -5,6 +5,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 
 from .localization import LANGUAGE_OPTIONS, clean_language, translate
+from .models import CommunityWork
 
 
 ACCENT_CHOICES = (
@@ -170,3 +171,36 @@ class AccountSettingsForm(forms.Form):
             self.user.save(update_fields=["password"])
             return True
         return False
+
+
+class CommunityWorkForm(forms.ModelForm):
+    class Meta:
+        model = CommunityWork
+        fields = ("kind", "title", "excerpt", "body", "media_file", "cover_image", "access", "price_cherryx")
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 8}),
+            "excerpt": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def clean(self) -> dict:
+        cleaned = super().clean()
+        access = cleaned.get("access")
+        price = int(cleaned.get("price_cherryx") or 0)
+        kind = cleaned.get("kind")
+        media_file = cleaned.get("media_file")
+        body = (cleaned.get("body") or "").strip()
+        source_has_media = bool(getattr(self, "source_has_media", False))
+        if access == CommunityWork.ACCESS_PAID and price <= 0:
+            self.add_error("price_cherryx", "Set a CherryX price for paid works.")
+        if kind in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE} and not media_file and not source_has_media:
+            self.add_error("media_file", "Upload a media file for this work type.")
+        if kind == CommunityWork.KIND_TEXT and not body:
+            self.add_error("body", "Add text content for text works.")
+        return cleaned
+
+    def __init__(self, *args, source_has_media: bool = False, **kwargs):
+        self.source_has_media = source_has_media
+        super().__init__(*args, **kwargs)
+        if source_has_media:
+            self.fields["media_file"].required = False
+            self.fields["cover_image"].required = False

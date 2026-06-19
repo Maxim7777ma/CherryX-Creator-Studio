@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "design_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-design-filter-custom">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-design-preview-focus">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page design-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -68,7 +68,7 @@
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
-            <a class="video-project-thumb design-project-thumb{% if project.preview_url %} has-preview{% else %} is-empty-preview{% endif %}" href="{{ designer_url }}?project={{ project.id }}" style="--preview-x: {{ project.preview_focus.x|default:50 }}%; --preview-y: {{ project.preview_focus.y|default:50 }}%;">
+            <a class="video-project-thumb design-project-thumb{% if project.preview_url %} has-preview{% else %} is-empty-preview{% endif %}" href="{{ designer_url }}?project={{ project.id }}" style="--preview-x: {{ project.preview_focus.x|default:50 }}%; --preview-y: {{ project.preview_focus.y|default:50 }}%; --preview-scale: {{ project.preview_focus.scale|default:'1.18' }}; --preview-hover-scale: {{ project.preview_focus.hover_scale|default:'1.34' }};">
               <span class="design-project-preview-frame" aria-hidden="true">
                 {% if project.preview_url %}
                   <span class="design-project-preview-image" style="background-image: url('{{ project.preview_url }}');"></span>
@@ -80,8 +80,8 @@
                   </span>
                 {% endif %}
               </span>
-              <span class="design-project-thumb-badge">{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.frame_count }} {% ui "frames" %}{% endif %}</span>
-              <b>{{ project.object_count }} layers &middot; {{ project.storage_text }}</b>
+              <span class="design-project-thumb-badge">{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% elif project.frame_count %}{{ project.frame_count }} {% ui "frames" %}{% else %}{{ project.layer_count }} layers{% endif %}</span>
+              <b>{{ project.layer_count }} layers &middot; {{ project.storage_text }}</b>
             </a>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
@@ -90,6 +90,7 @@
             <div class="video-project-actions">
               <a href="{{ designer_url }}?project={{ project.id }}">{% ui "open" %}</a>
               {% if project.is_owner %}
+                <a href="{{ project.publish_url }}">Publish</a>
                 <button type="button" data-duplicate-project="{{ project.id }}">{% ui "duplicate" %}</button>
                 <button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>
               {% endif %}
@@ -132,7 +133,8 @@
         </footer>
       </section>
     </div>
-    <script defer src="{% static 'studio/project_lists.js' %}?v=20260617-design-filter-custom"></script>
+    {% include "studio/_mobile_workspace_dock.html" with active_mobile_nav="design" %}
+    <script defer src="{% static 'studio/project_lists.js' %}?v=20260618-design-preview-focus"></script>
   </body>
 </html>
 

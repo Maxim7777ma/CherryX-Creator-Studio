@@ -1,0 +1,52 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-foundation">
+  </head>
+  <body class="community-page community-{{ kind }}">
+    <header class="community-nav">
+      <a href="{% url 'studio:landing' %}">CherryX</a>
+      <nav>
+        <a href="{% url 'studio:index' %}">Live workspace</a>
+        <a href="{% url 'studio:learn_index' %}">Articles</a>
+        <a href="{% url 'studio:community_videos' %}">Videos</a>
+        <a href="{% url 'studio:community_images' %}">Images</a>
+        <a href="{% url 'studio:community_texts' %}">Texts</a>
+        <a href="{% url 'studio:community_publish' %}">Publish</a>
+      </nav>
+    </header>
+    <main class="community-shell">
+      <section class="community-hero">
+        <p>{{ meta.eyebrow }}</p>
+        <h1>{{ meta.title }}</h1>
+        <span>{{ meta.description }}</span>
+        <a class="community-hero-action" href="{% url 'studio:community_publish' %}">Share your work</a>
+      </section>
+      <section class="community-masonry" aria-label="{{ meta.title }}">
+        {% for work in works %}
+          <a class="community-card" href="{% url 'studio:community_work_detail' work.slug %}">
+            {% if work.cover_image or work.kind == "image" and work.media_file %}
+              <img src="{% url 'studio:community_work_preview' work.slug %}" alt="">
+            {% else %}
+              <span class="community-card-fallback" data-kind="{{ work.kind }}">{{ work.get_kind_display }}</span>
+            {% endif %}
+            <strong>{{ work.title }}</strong>
+            {% if work.excerpt %}<p>{{ work.excerpt }}</p>{% endif %}
+            <small>{% if work.is_paid %}{{ work.price_cherryx }} CherryX{% else %}Free{% endif %}</small>
+          </a>
+        {% empty %}
+          <article class="community-empty">
+            <strong>No public works yet</strong>
+            <p>Publish works from admin now; the account share flow can use the same model next.</p>
+          </article>
+        {% endfor %}
+      </section>
+    </main>
+  </body>
+</html>

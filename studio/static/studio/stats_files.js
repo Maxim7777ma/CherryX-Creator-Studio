@@ -46,6 +46,21 @@
     }
   }
 
+  function updateAccountStats(stats) {
+    if (!stats || typeof stats !== "object") return;
+    document.querySelectorAll("[data-account-stat]").forEach((node) => {
+      const key = node.dataset.accountStat;
+      if (!key || !(key in stats)) return;
+      node.textContent = stats[key];
+    });
+    document.querySelectorAll("[data-account-stat-bar]").forEach((node) => {
+      const key = node.dataset.accountStatBar;
+      if (!key || !(key in stats)) return;
+      const value = Math.max(0, Math.min(100, Number(stats[key] || 0)));
+      node.style.width = `${value}%`;
+    });
+  }
+
   function currentFormState(form) {
     const formData = new FormData(form);
     return {
@@ -165,6 +180,91 @@
     return match ? decodeURIComponent(match[1]) : "";
   }
 
+  function openDeleteModal(row) {
+    const modal = document.querySelector("[data-stats-delete-modal]");
+    if (!modal) return Promise.resolve(window.confirm("Delete this task?"));
+    const name = row?.dataset.jobTitle || row?.querySelector("b")?.textContent?.trim() || "";
+    const nameNode = modal.querySelector("[data-stats-delete-name]");
+    const confirmButton = modal.querySelector("[data-stats-delete-confirm]");
+    if (nameNode) nameNode.textContent = name;
+    modal.hidden = false;
+    document.body.classList.add("stats-delete-open");
+    window.requestAnimationFrame(() => modal.classList.add("is-open"));
+    confirmButton?.focus();
+
+    return new Promise((resolve) => {
+      const finish = (value) => {
+        modal.classList.remove("is-open");
+        modal.hidden = true;
+        document.body.classList.remove("stats-delete-open");
+        modal.removeEventListener("click", onClick);
+        document.removeEventListener("keydown", onKeydown);
+        resolve(value);
+      };
+      const onClick = (event) => {
+        if (event.target.closest("[data-stats-delete-confirm]")) finish(true);
+        if (event.target.closest("[data-stats-delete-cancel]")) finish(false);
+      };
+      const onKeydown = (event) => {
+        if (event.key === "Escape") finish(false);
+      };
+      modal.addEventListener("click", onClick);
+      document.addEventListener("keydown", onKeydown);
+    });
+  }
+
+  async function deleteStatsJob(form) {
+    if (form.dataset.loading === "1") return;
+    const row = form.closest("[data-stats-job-row]");
+    const confirmed = await openDeleteModal(row);
+    if (!confirmed) return;
+
+    const button = form.querySelector("button[type='submit']");
+    const originalText = button?.textContent || "";
+    form.dataset.loading = "1";
+    row?.classList.add("is-deleting");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "...";
+    }
+
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: {
+          "X-CSRFToken": csrfToken(),
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "application/json",
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "Could not delete task");
+      updateAccountStats(data.account_stats);
+      await loadPanel(window.location.href, false);
+    } catch (error) {
+      row?.classList.remove("is-deleting");
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      alert(error.message || "Could not delete task");
+    } finally {
+      form.dataset.loading = "0";
+    }
+  }
+
+  function setupDeleteForms(panel) {
+    panel.querySelectorAll("[data-stats-delete-form]").forEach((form) => {
+      if (form.dataset.deleteReady === "1") return;
+      form.dataset.deleteReady = "1";
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        deleteStatsJob(form);
+      });
+    });
+  }
+
   function setupDesignButtons(panel) {
     panel.querySelectorAll("[data-edit-design-url]").forEach((button) => {
       if (button.dataset.designReady === "1") return;
@@ -221,6 +321,7 @@
 
     setupShare(panel);
     setupDesignButtons(panel);
+    setupDeleteForms(panel);
   }
 
   function initLanguageSwitchers() {

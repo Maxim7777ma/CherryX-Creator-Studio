@@ -378,9 +378,233 @@ LEGAL_DOCUMENTS["contacts"].update(
 )
 
 
+ACTIVE_LEGAL_DOCUMENTS: dict[str, dict[str, dict[str, object]]] = {
+    "terms": {
+        "en": {
+            "meta_service_type": "Remote digital services",
+            "sections": [
+                {"title": "1. Service", "paragraphs": ["CherryX Creator Studio provides remote digital services: creative tools, AI-assisted processing, file exports, publication assets, account plans and CherryX balance."], "items": ["No physical goods are sold or shipped.", "Access is delivered online through the website account, workspace and Telegram payment flow.", "The customer is responsible for providing correct email, account and Telegram information."]},
+                {"title": "2. Prices and CherryX", "paragraphs": ["The website shows prices in CherryX and may show an approximate USD equivalent for clarity. The operational payment amount is tied to Telegram Stars and the current internal Stars-to-CherryX rate."], "items": ["The final Telegram invoice is displayed in Telegram Stars before payment confirmation.", "Approximate USD values are informational and may change with the Stars rate or platform conditions.", "A paid plan or top-up is activated only after successful payment confirmation."]},
+                {"title": "3. Telegram Stars payment", "paragraphs": ["Payments are made through the official Telegram bot invoice using Telegram Stars and currency XTR."], "items": ["From the website, the customer clicks the payment button and is redirected to the Telegram bot.", "The bot shows what is being purchased and sends a Telegram Stars invoice.", "After a successful payment, the service records the payment and applies the plan or CherryX balance to the linked website account.", "If no website account is linked, the bot asks for an email and helps create or connect an account."]},
+                {"title": "4. Account access", "items": ["The customer must keep login credentials secure.", "If the payment was made from Telegram before account creation, the bot can generate website login details after the customer confirms an available email.", "If the email already exists, support may require website login or manual linking before applying the payment."]},
+                {"title": "5. Digital delivery and limitations", "items": ["Paid digital access starts immediately after successful payment and activation.", "Generated files, previews, exports, queues and account balance are digital service results.", "Service quality can depend on source files, browser, device, internet connection and third-party platform limits."]},
+                {"title": "6. Support and changes", "paragraphs": ["For payment, account or access questions, contact support using the email or phone listed on this page. These terms may be updated when payment flow, service logic or legal requirements change."]},
+            ],
+        },
+        "ru": {
+            "meta_service_type": "Дистанционные цифровые услуги",
+            "sections": [
+                {"title": "1. Услуга", "paragraphs": ["CherryX Creator Studio предоставляет дистанционные цифровые услуги: креативные инструменты, AI-обработку, экспорт файлов, материалы для публикаций, тарифные планы и баланс CherryX."], "items": ["Физические товары не продаются и не доставляются.", "Доступ предоставляется онлайн через аккаунт сайта, рабочее пространство и платежный сценарий в Telegram.", "Клиент отвечает за корректный email, аккаунт и данные Telegram."]},
+                {"title": "2. Цены и CherryX", "paragraphs": ["На сайте цены показываются в CherryX и могут дополнительно отображаться в примерном долларовом эквиваленте. Фактическая логика оплаты привязана к Telegram Stars и текущему внутреннему курсу Stars к CherryX."], "items": ["Итоговый Telegram-инвойс показывается в Telegram Stars до подтверждения оплаты.", "Долларовый эквивалент носит информационный характер и может меняться вместе с курсом Stars или условиями платформы.", "Пакет или пополнение активируется только после успешного подтверждения оплаты."]},
+                {"title": "3. Оплата Telegram Stars", "paragraphs": ["Оплата выполняется через официальный инвойс Telegram-бота в Telegram Stars, валюта XTR."], "items": ["На сайте клиент нажимает кнопку оплаты и переходит в Telegram-бот.", "Бот показывает, что покупается, и отправляет инвойс Telegram Stars.", "После успешной оплаты сервис фиксирует платеж и применяет пакет или баланс CherryX к привязанному аккаунту сайта.", "Если аккаунт сайта еще не привязан, бот спрашивает email и помогает создать или подключить аккаунт."]},
+                {"title": "4. Доступ к аккаунту", "items": ["Клиент должен хранить логин и пароль безопасно.", "Если оплата сделана из Telegram до создания аккаунта, бот может выдать данные для входа после подтверждения свободного email.", "Если email уже занят, поддержка может попросить войти на сайте или выполнить ручную привязку перед применением оплаты."]},
+                {"title": "5. Цифровая доставка и ограничения", "items": ["Платный цифровой доступ начинается сразу после успешной оплаты и активации.", "Сгенерированные файлы, превью, экспорты, очереди обработки и баланс аккаунта являются результатами цифровой услуги.", "Качество работы может зависеть от исходных файлов, браузера, устройства, интернета и ограничений сторонних платформ."]},
+                {"title": "6. Поддержка и изменения", "paragraphs": ["По вопросам оплаты, аккаунта или доступа обращайтесь в поддержку по email или телефону на этой странице. Условия могут обновляться при изменении платежного сценария, логики сервиса или требований закона."]},
+            ],
+        },
+        "uk": {
+            "meta_service_type": "Дистанційні цифрові послуги",
+            "sections": [
+                {"title": "1. Послуга", "paragraphs": ["CherryX Creator Studio надає дистанційні цифрові послуги: креативні інструменти, AI-обробку, експорт файлів, матеріали для публікацій, тарифні плани та баланс CherryX."], "items": ["Фізичні товари не продаються і не доставляються.", "Доступ надається онлайн через акаунт сайту, робочий простір і платіжний сценарій у Telegram.", "Клієнт відповідає за коректний email, акаунт і дані Telegram."]},
+                {"title": "2. Ціни та CherryX", "paragraphs": ["На сайті ціни показуються в CherryX і можуть додатково відображатися у приблизному доларовому еквіваленті. Фактична логіка оплати прив'язана до Telegram Stars і поточного внутрішнього курсу Stars до CherryX."], "items": ["Підсумковий Telegram-інвойс показується в Telegram Stars до підтвердження оплати.", "Доларовий еквівалент має інформаційний характер і може змінюватися разом із курсом Stars або умовами платформи.", "Пакет або поповнення активується лише після успішного підтвердження оплати."]},
+                {"title": "3. Оплата Telegram Stars", "paragraphs": ["Оплата виконується через офіційний інвойс Telegram-бота в Telegram Stars, валюта XTR."], "items": ["На сайті клієнт натискає кнопку оплати і переходить у Telegram-бот.", "Бот показує, що купується, і надсилає інвойс Telegram Stars.", "Після успішної оплати сервіс фіксує платіж і застосовує пакет або баланс CherryX до прив'язаного акаунта сайту.", "Якщо акаунт сайту ще не прив'язаний, бот запитує email і допомагає створити або підключити акаунт."]},
+                {"title": "4. Доступ до акаунта", "items": ["Клієнт має безпечно зберігати логін і пароль.", "Якщо оплату зроблено з Telegram до створення акаунта, бот може видати дані для входу після підтвердження вільного email.", "Якщо email уже зайнятий, підтримка може попросити увійти на сайті або виконати ручну прив'язку перед застосуванням оплати."]},
+                {"title": "5. Цифрова доставка та обмеження", "items": ["Платний цифровий доступ починається одразу після успішної оплати та активації.", "Згенеровані файли, прев'ю, експорти, черги обробки та баланс акаунта є результатами цифрової послуги.", "Якість роботи може залежати від вихідних файлів, браузера, пристрою, інтернету та обмежень сторонніх платформ."]},
+                {"title": "6. Підтримка та зміни", "paragraphs": ["З питань оплати, акаунта або доступу звертайтеся в підтримку за email або телефоном на цій сторінці. Умови можуть оновлюватися при зміні платіжного сценарію, логіки сервісу або вимог закону."]},
+            ],
+        },
+    },
+    "refund": {
+        "en": {
+            "meta_service_type": "Remote digital services",
+            "sections": [
+                {"title": "1. Digital service rule", "paragraphs": ["This policy applies to Telegram Stars payments for CherryX Creator Studio digital services."], "items": ["The service provides instant digital access after successful payment.", "Because access, balance or processing capacity is delivered digitally, refunds are generally not available after activation.", "No physical goods are returned or exchanged."]},
+                {"title": "2. Cases support can review", "items": ["duplicate Telegram Stars payment for the same order;", "successful payment that did not activate the plan or balance because of a technical error;", "wrong account linking where the payment was not applied to the customer who paid;", "other technical incident where paid digital access was not delivered."]},
+                {"title": "3. Cases that are not refundable", "items": ["the customer changed their mind after payment;", "the customer did not use the active plan or credited balance;", "the customer entered the wrong email or Telegram account and did not complete linking;", "source files were low quality, incomplete or unsuitable;", "access was restricted because of abuse, prohibited content or terms violation."]},
+                {"title": "4. How to request review", "paragraphs": ["Contact support and include Telegram username or ID, website email if available, payment date and time, package or top-up amount in Stars, and screenshots of the Telegram invoice or successful payment if available."]},
+                {"title": "5. Telegram Stars specifics", "paragraphs": ["Telegram Stars are processed by Telegram. CherryX records the successful bot payment and applies CherryX access or balance. Any platform-level reversal or Stars handling may depend on Telegram rules and technical possibilities."]},
+            ],
+        },
+        "ru": {
+            "meta_service_type": "Дистанционные цифровые услуги",
+            "sections": [
+                {"title": "1. Правило цифровой услуги", "paragraphs": ["Эта политика применяется к оплатам Telegram Stars за цифровые услуги CherryX Creator Studio."], "items": ["Сервис предоставляет моментальный цифровой доступ после успешной оплаты.", "Поскольку доступ, баланс или мощность обработки доставляются цифровым способом, возврат обычно недоступен после активации.", "Физические товары не возвращаются и не обмениваются."]},
+                {"title": "2. Что поддержка может рассмотреть", "items": ["дублирующая оплата Telegram Stars по одному заказу;", "успешная оплата, после которой пакет или баланс не активировался из-за технической ошибки;", "ошибка привязки аккаунта, когда платеж не применился к клиенту, который оплатил;", "другой технический инцидент, при котором оплаченный цифровой доступ не был доставлен."]},
+                {"title": "3. Что не возвращается", "items": ["клиент передумал после оплаты;", "клиент не использовал активный пакет или начисленный баланс;", "клиент указал неверный email или Telegram-аккаунт и не завершил привязку;", "исходные файлы были низкого качества, неполными или неподходящими;", "доступ ограничен из-за злоупотребления, запрещенного контента или нарушения условий."]},
+                {"title": "4. Как запросить проверку", "paragraphs": ["Напишите в поддержку и укажите Telegram username или ID, email сайта при наличии, дату и время оплаты, пакет или сумму пополнения в Stars, а также скриншоты Telegram-инвойса или успешной оплаты, если они есть."]},
+                {"title": "5. Особенности Telegram Stars", "paragraphs": ["Telegram Stars обрабатываются Telegram. CherryX фиксирует успешную оплату через бота и применяет доступ или баланс CherryX. Любой возврат на уровне платформы или обработка Stars может зависеть от правил Telegram и технической возможности."]},
+            ],
+        },
+        "uk": {
+            "meta_service_type": "Дистанційні цифрові послуги",
+            "sections": [
+                {"title": "1. Правило цифрової послуги", "paragraphs": ["Ця політика застосовується до оплат Telegram Stars за цифрові послуги CherryX Creator Studio."], "items": ["Сервіс надає миттєвий цифровий доступ після успішної оплати.", "Оскільки доступ, баланс або потужність обробки доставляються цифровим способом, повернення зазвичай недоступне після активації.", "Фізичні товари не повертаються і не обмінюються."]},
+                {"title": "2. Що підтримка може розглянути", "items": ["дублююча оплата Telegram Stars за одним замовленням;", "успішна оплата, після якої пакет або баланс не активувався через технічну помилку;", "помилка прив'язки акаунта, коли платіж не застосувався до клієнта, який оплатив;", "інший технічний інцидент, коли оплачений цифровий доступ не був доставлений."]},
+                {"title": "3. Що не повертається", "items": ["клієнт передумав після оплати;", "клієнт не використав активний пакет або нарахований баланс;", "клієнт вказав неправильний email або Telegram-акаунт і не завершив прив'язку;", "вихідні файли були низької якості, неповними або непридатними;", "доступ обмежено через зловживання, заборонений контент або порушення умов."]},
+                {"title": "4. Як запросити перевірку", "paragraphs": ["Напишіть у підтримку і вкажіть Telegram username або ID, email сайту за наявності, дату і час оплати, пакет або суму поповнення в Stars, а також скриншоти Telegram-інвойса чи успішної оплати, якщо вони є."]},
+                {"title": "5. Особливості Telegram Stars", "paragraphs": ["Telegram Stars обробляються Telegram. CherryX фіксує успішну оплату через бота і застосовує доступ або баланс CherryX. Будь-яке повернення на рівні платформи або обробка Stars може залежати від правил Telegram і технічної можливості."]},
+            ],
+        },
+    },
+    "contacts": {
+        "en": {
+            "meta_service_type": "Remote digital services",
+            "sections": [
+                {"title": "Contacts", "items": ["Email: cherryxdigital@gmail.com.", "Phone: +380 (96) 363-59-05.", "Support is provided remotely for account, Telegram Stars payment and access questions."]},
+                {"title": "How Telegram Stars payment works", "items": ["Choose a package or top-up on the website or in the Telegram bot.", "Confirm the official Telegram Stars invoice in Telegram.", "After successful payment, CherryX activates the package or credits balance to the linked website account.", "If there is no website account yet, the bot asks for email and helps create access."]},
+                {"title": "What to send support", "paragraphs": ["For faster help, include Telegram username or ID, website email, payment time, package or Stars amount and a screenshot of the invoice or successful payment."]},
+            ],
+        },
+        "ru": {
+            "meta_service_type": "Дистанционные цифровые услуги",
+            "sections": [
+                {"title": "Контакты", "items": ["Email: cherryxdigital@gmail.com.", "Телефон: +380 (96) 363-59-05.", "Поддержка работает дистанционно по вопросам аккаунта, оплаты Telegram Stars и доступа."]},
+                {"title": "Как работает оплата Telegram Stars", "items": ["Выберите пакет или пополнение на сайте либо в Telegram-боте.", "Подтвердите официальный инвойс Telegram Stars в Telegram.", "После успешной оплаты CherryX активирует пакет или начисляет баланс на привязанный аккаунт сайта.", "Если аккаунта сайта еще нет, бот спросит email и поможет создать доступ."]},
+                {"title": "Что отправить в поддержку", "paragraphs": ["Для быстрой помощи укажите Telegram username или ID, email сайта, время оплаты, пакет или сумму Stars и скриншот инвойса или успешной оплаты."]},
+            ],
+        },
+        "uk": {
+            "meta_service_type": "Дистанційні цифрові послуги",
+            "sections": [
+                {"title": "Контакти", "items": ["Email: cherryxdigital@gmail.com.", "Телефон: +380 (96) 363-59-05.", "Підтримка працює дистанційно з питань акаунта, оплати Telegram Stars і доступу."]},
+                {"title": "Як працює оплата Telegram Stars", "items": ["Оберіть пакет або поповнення на сайті чи в Telegram-боті.", "Підтвердьте офіційний інвойс Telegram Stars у Telegram.", "Після успішної оплати CherryX активує пакет або нараховує баланс на прив'язаний акаунт сайту.", "Якщо акаунта сайту ще немає, бот запитає email і допоможе створити доступ."]},
+                {"title": "Що надіслати в підтримку", "paragraphs": ["Для швидкої допомоги вкажіть Telegram username або ID, email сайту, час оплати, пакет або суму Stars і скриншот інвойса чи успішної оплати."]},
+            ],
+        },
+    },
+}
+
+_GENERIC_TRANSLATIONS = {
+    "fr": {
+        "meta": "Services numériques à distance",
+        "terms": [
+            ("1. Service", ["CherryX Creator Studio fournit des services numériques à distance: outils créatifs, traitement assisté par IA, exports de fichiers, plans de compte et solde CherryX."], ["Aucun bien physique n'est vendu ni livré.", "L'accès est fourni en ligne via le compte du site et le paiement Telegram.", "Le client doit fournir un email, un compte et des données Telegram corrects."]),
+            ("2. Prix et CherryX", ["Le site affiche les prix en CherryX et peut montrer un équivalent USD approximatif. Le paiement réel est lié aux Telegram Stars et au taux interne Stars vers CherryX."], ["La facture finale est affichée en Telegram Stars avant confirmation.", "Les montants USD sont indicatifs.", "Le plan ou le rechargement est activé après confirmation du paiement."]),
+            ("3. Paiement Telegram Stars", ["Le paiement se fait via la facture officielle du bot Telegram en Telegram Stars, devise XTR."], ["Depuis le site, le client ouvre le bot Telegram.", "Le bot affiche l'achat et envoie la facture Stars.", "Après paiement, CherryX applique le plan ou le solde au compte lié.", "Sans compte lié, le bot demande un email et aide à créer ou connecter l'accès."]),
+            ("4. Accès et support", ["L'accès numérique commence immédiatement après paiement réussi. Pour toute question de paiement ou d'accès, contactez le support par email ou téléphone."], []),
+        ],
+        "refund": [
+            ("1. Service numérique", ["Cette politique s'applique aux paiements Telegram Stars pour les services numériques CherryX."], ["Après activation, le remboursement n'est généralement pas disponible.", "Aucun bien physique n'est retourné."]),
+            ("2. Vérification possible", [], ["paiement Stars dupliqué;", "paiement réussi sans activation à cause d'une erreur technique;", "erreur de liaison de compte;", "autre incident où l'accès payé n'a pas été livré."]),
+            ("3. Demande", ["Contactez le support avec Telegram username ou ID, email du site, date, montant en Stars et capture de la facture ou du paiement réussi."], []),
+            ("4. Telegram Stars", ["Les Stars sont traitées par Telegram. CherryX enregistre le paiement du bot et crédite l'accès ou le solde CherryX."], []),
+        ],
+        "contacts": [
+            ("Contacts", [], ["Email: cherryxdigital@gmail.com.", "Téléphone: +380 (96) 363-59-05.", "Support à distance pour compte, paiement Telegram Stars et accès."]),
+            ("Paiement Telegram Stars", [], ["Choisissez un plan ou un rechargement.", "Confirmez la facture officielle dans Telegram.", "CherryX active le plan ou crédite le solde du compte lié.", "Sans compte, le bot demande un email et aide à créer l'accès."]),
+        ],
+    },
+    "de": {
+        "meta": "Remote digitale Dienstleistungen",
+        "terms": [
+            ("1. Dienst", ["CherryX Creator Studio bietet digitale Remote-Dienste: Kreativwerkzeuge, KI-gestützte Verarbeitung, Datei-Exporte, Kontopläne und CherryX-Guthaben."], ["Es werden keine physischen Waren verkauft oder geliefert.", "Der Zugriff erfolgt online über Website-Konto und Telegram-Zahlung.", "Der Kunde muss korrekte E-Mail-, Konto- und Telegram-Daten angeben."]),
+            ("2. Preise und CherryX", ["Die Website zeigt Preise in CherryX und kann einen ungefähren USD-Wert anzeigen. Die Zahlung ist an Telegram Stars und den internen Stars-zu-CherryX-Kurs gebunden."], ["Die endgültige Rechnung wird vor Bestätigung in Telegram Stars angezeigt.", "USD-Werte dienen nur zur Orientierung.", "Plan oder Guthaben werden nach erfolgreicher Zahlung aktiviert."]),
+            ("3. Telegram Stars Zahlung", ["Die Zahlung erfolgt über die offizielle Telegram-Bot-Rechnung in Telegram Stars, Währung XTR."], ["Der Kunde öffnet den Telegram-Bot.", "Der Bot zeigt den Kauf und sendet die Stars-Rechnung.", "Nach Zahlung aktiviert CherryX den Plan oder schreibt Guthaben gut.", "Ohne verknüpftes Konto fragt der Bot nach einer E-Mail."]),
+            ("4. Zugriff und Support", ["Digitaler Zugriff beginnt sofort nach erfolgreicher Aktivierung. Bei Zahlungs- oder Zugriffsfragen kontaktieren Sie den Support per E-Mail oder Telefon."], []),
+        ],
+        "refund": [
+            ("1. Digitale Dienstleistung", ["Diese Richtlinie gilt für Telegram Stars-Zahlungen für CherryX-Dienste."], ["Nach Aktivierung ist eine Rückerstattung in der Regel nicht möglich.", "Es gibt keine physischen Waren zur Rückgabe."]),
+            ("2. Prüffälle", [], ["doppelte Stars-Zahlung;", "Zahlung ohne Aktivierung wegen technischem Fehler;", "fehlerhafte Kontoverknüpfung;", "anderer technischer Vorfall ohne gelieferten Zugriff."]),
+            ("3. Anfrage", ["Kontaktieren Sie den Support mit Telegram-Username oder ID, Website-E-Mail, Datum, Stars-Betrag und Screenshot der Rechnung oder Zahlung."], []),
+            ("4. Telegram Stars", ["Stars werden von Telegram verarbeitet. CherryX speichert die Bot-Zahlung und schreibt Zugriff oder Guthaben gut."], []),
+        ],
+        "contacts": [
+            ("Kontakte", [], ["E-Mail: cherryxdigital@gmail.com.", "Telefon: +380 (96) 363-59-05.", "Remote-Support für Konto, Telegram Stars-Zahlung und Zugriff."]),
+            ("Telegram Stars Zahlung", [], ["Plan oder Aufladung wählen.", "Offizielle Rechnung in Telegram bestätigen.", "CherryX aktiviert den Plan oder schreibt Guthaben gut.", "Ohne Konto fragt der Bot nach einer E-Mail."]),
+        ],
+    },
+    "es": {
+        "meta": "Servicios digitales remotos",
+        "terms": [
+            ("1. Servicio", ["CherryX Creator Studio presta servicios digitales remotos: herramientas creativas, procesamiento asistido por IA, exportación de archivos, planes de cuenta y saldo CherryX."], ["No se venden ni entregan bienes físicos.", "El acceso se entrega en línea mediante la cuenta del sitio y el pago en Telegram.", "El cliente debe indicar email, cuenta y datos de Telegram correctos."]),
+            ("2. Precios y CherryX", ["El sitio muestra precios en CherryX y puede mostrar un equivalente aproximado en USD. El pago está vinculado a Telegram Stars y al tipo interno Stars a CherryX."], ["La factura final se muestra en Telegram Stars antes de confirmar.", "Los importes en USD son informativos.", "El plan o recarga se activa tras el pago correcto."]),
+            ("3. Pago con Telegram Stars", ["El pago se realiza mediante la factura oficial del bot de Telegram en Telegram Stars, moneda XTR."], ["El cliente abre el bot de Telegram.", "El bot muestra la compra y envía la factura Stars.", "Tras el pago, CherryX aplica el plan o saldo a la cuenta vinculada.", "Sin cuenta vinculada, el bot pide email y ayuda a crear acceso."]),
+            ("4. Acceso y soporte", ["El acceso digital empieza inmediatamente tras la activación. Para preguntas de pago o acceso, contacte soporte por email o teléfono."], []),
+        ],
+        "refund": [
+            ("1. Servicio digital", ["Esta política aplica a pagos con Telegram Stars por servicios digitales de CherryX."], ["Tras la activación, normalmente no hay reembolso.", "No hay bienes físicos que devolver."]),
+            ("2. Casos revisables", [], ["pago Stars duplicado;", "pago correcto sin activación por error técnico;", "error de vinculación de cuenta;", "otro incidente técnico sin entrega del acceso pagado."]),
+            ("3. Solicitud", ["Contacte soporte con username o ID de Telegram, email del sitio, fecha, importe en Stars y captura de la factura o pago correcto."], []),
+            ("4. Telegram Stars", ["Telegram procesa las Stars. CherryX registra el pago del bot y acredita acceso o saldo CherryX."], []),
+        ],
+        "contacts": [
+            ("Contactos", [], ["Email: cherryxdigital@gmail.com.", "Teléfono: +380 (96) 363-59-05.", "Soporte remoto para cuenta, pago Telegram Stars y acceso."]),
+            ("Pago Telegram Stars", [], ["Elija un plan o recarga.", "Confirme la factura oficial en Telegram.", "CherryX activa el plan o acredita saldo.", "Sin cuenta, el bot pide email y ayuda a crear acceso."]),
+        ],
+    },
+    "it": {
+        "meta": "Servizi digitali da remoto",
+        "terms": [
+            ("1. Servizio", ["CherryX Creator Studio fornisce servizi digitali da remoto: strumenti creativi, elaborazione assistita da IA, esportazioni, piani account e saldo CherryX."], ["Non vengono venduti o spediti beni fisici.", "L'accesso è fornito online tramite account del sito e pagamento Telegram.", "Il cliente deve indicare email, account e dati Telegram corretti."]),
+            ("2. Prezzi e CherryX", ["Il sito mostra prezzi in CherryX e può mostrare un equivalente USD approssimativo. Il pagamento è legato a Telegram Stars e al tasso interno Stars-CherryX."], ["La fattura finale è mostrata in Telegram Stars prima della conferma.", "I valori USD sono informativi.", "Piano o ricarica si attivano dopo il pagamento riuscito."]),
+            ("3. Pagamento Telegram Stars", ["Il pagamento avviene tramite fattura ufficiale del bot Telegram in Telegram Stars, valuta XTR."], ["Il cliente apre il bot Telegram.", "Il bot mostra l'acquisto e invia la fattura Stars.", "Dopo il pagamento CherryX applica piano o saldo all'account collegato.", "Senza account collegato, il bot chiede email e aiuta a creare accesso."]),
+            ("4. Accesso e supporto", ["L'accesso digitale inizia subito dopo l'attivazione. Per domande su pagamento o accesso, contattare il supporto via email o telefono."], []),
+        ],
+        "refund": [
+            ("1. Servizio digitale", ["Questa politica si applica ai pagamenti Telegram Stars per i servizi digitali CherryX."], ["Dopo l'attivazione, il rimborso generalmente non è disponibile.", "Non ci sono beni fisici da restituire."]),
+            ("2. Casi verificabili", [], ["pagamento Stars duplicato;", "pagamento riuscito senza attivazione per errore tecnico;", "errore di collegamento account;", "altro incidente tecnico senza consegna dell'accesso pagato."]),
+            ("3. Richiesta", ["Contattare il supporto con username o ID Telegram, email del sito, data, importo Stars e screenshot della fattura o del pagamento riuscito."], []),
+            ("4. Telegram Stars", ["Le Stars sono elaborate da Telegram. CherryX registra il pagamento del bot e accredita accesso o saldo CherryX."], []),
+        ],
+        "contacts": [
+            ("Contatti", [], ["Email: cherryxdigital@gmail.com.", "Telefono: +380 (96) 363-59-05.", "Supporto remoto per account, pagamento Telegram Stars e accesso."]),
+            ("Pagamento Telegram Stars", [], ["Scegliere un piano o una ricarica.", "Confermare la fattura ufficiale in Telegram.", "CherryX attiva il piano o accredita saldo.", "Senza account, il bot chiede email e aiuta a creare accesso."]),
+        ],
+    },
+    "ka": {
+        "meta": "დისტანციური ციფრული სერვისები",
+        "terms": [
+            ("1. სერვისი", ["CherryX Creator Studio გთავაზობთ დისტანციურ ციფრულ სერვისებს: კრეატიულ ინსტრუმენტებს, AI-დამუშავებას, ფაილების ექსპორტს, ანგარიშის გეგმებს და CherryX ბალანსს."], ["ფიზიკური საქონელი არ იყიდება და არ იგზავნება.", "წვდომა გაიცემა ონლაინ, საიტის ანგარიშისა და Telegram გადახდის მეშვეობით.", "კლიენტი პასუხისმგებელია სწორი email-ის, ანგარიშისა და Telegram მონაცემების მითითებაზე."]),
+            ("2. ფასები და CherryX", ["საიტზე ფასები ნაჩვენებია CherryX-ში და შეიძლება გამოჩნდეს მიახლოებითი USD ეკვივალენტი. გადახდა მიბმულია Telegram Stars-ზე და შიდა Stars-to-CherryX კურსზე."], ["საბოლოო ინვოისი Telegram Stars-ში ჩანს დადასტურებამდე.", "USD მნიშვნელობები ინფორმაციულია.", "გეგმა ან შევსება აქტიურდება წარმატებული გადახდის შემდეგ."]),
+            ("3. Telegram Stars გადახდა", ["გადახდა ხდება Telegram ბოტის ოფიციალური ინვოისით Telegram Stars-ში, ვალუტა XTR."], ["კლიენტი ხსნის Telegram ბოტს.", "ბოტი აჩვენებს შესყიდვას და აგზავნის Stars ინვოისს.", "გადახდის შემდეგ CherryX ააქტიურებს გეგმას ან ბალანსს დაკავშირებულ ანგარიშზე.", "თუ ანგარიში არ არის დაკავშირებული, ბოტი ითხოვს email-ს."]),
+            ("4. წვდომა და მხარდაჭერა", ["ციფრული წვდომა იწყება წარმატებული აქტივაციისთანავე. გადახდის ან წვდომის კითხვებისთვის დაუკავშირდით მხარდაჭერას email-ით ან ტელეფონით."], []),
+        ],
+        "refund": [
+            ("1. ციფრული სერვისი", ["ეს პოლიტიკა ეხება Telegram Stars გადახდებს CherryX-ის ციფრული სერვისებისთვის."], ["აქტივაციის შემდეგ დაბრუნება ჩვეულებრივ არ არის ხელმისაწვდომი.", "ფიზიკური საქონელი დასაბრუნებელი არ არის."]),
+            ("2. განხილვადი შემთხვევები", [], ["დუბლირებული Stars გადახდა;", "წარმატებული გადახდა აქტივაციის გარეშე ტექნიკური შეცდომის გამო;", "ანგარიშის დაკავშირების შეცდომა;", "სხვა ტექნიკური შემთხვევა, როცა ფასიანი წვდომა არ მიეწოდა."]),
+            ("3. მოთხოვნა", ["მხარდაჭერას გაუგზავნეთ Telegram username ან ID, საიტის email, თარიღი, Stars თანხა და ინვოისის ან წარმატებული გადახდის სქრინი."], []),
+            ("4. Telegram Stars", ["Stars მუშავდება Telegram-ის მიერ. CherryX ინახავს ბოტის გადახდას და არიცხავს წვდომას ან CherryX ბალანსს."], []),
+        ],
+        "contacts": [
+            ("კონტაქტები", [], ["Email: cherryxdigital@gmail.com.", "ტელეფონი: +380 (96) 363-59-05.", "დისტანციური მხარდაჭერა ანგარიშის, Telegram Stars გადახდისა და წვდომისთვის."]),
+            ("Telegram Stars გადახდა", [], ["აირჩიეთ გეგმა ან შევსება.", "დაადასტურეთ ოფიციალური ინვოისი Telegram-ში.", "CherryX ააქტიურებს გეგმას ან არიცხავს ბალანსს.", "ანგარიშის გარეშე ბოტი ითხოვს email-ს."]),
+        ],
+    },
+    "hy": {
+        "meta": "Հեռավար թվային ծառայություններ",
+        "terms": [
+            ("1. Ծառայություն", ["CherryX Creator Studio-ն տրամադրում է հեռավար թվային ծառայություններ՝ ստեղծագործական գործիքներ, AI-մշակում, ֆայլերի արտահանում, հաշվի պլաններ և CherryX մնացորդ։"], ["Ֆիզիկական ապրանքներ չեն վաճառվում կամ առաքվում։", "Մուտքը տրվում է առցանց՝ կայքի հաշվի և Telegram վճարման միջոցով։", "Հաճախորդը պատասխանատու է ճիշտ email, հաշիվ և Telegram տվյալներ նշելու համար։"]),
+            ("2. Գներ և CherryX", ["Կայքում գները ցուցադրվում են CherryX-ով և կարող են ունենալ մոտավոր USD համարժեք։ Վճարումը կապված է Telegram Stars-ի և ներքին Stars-to-CherryX փոխարժեքի հետ։"], ["Վերջնական հաշիվը Telegram Stars-ով ցուցադրվում է հաստատումից առաջ։", "USD արժեքները տեղեկատվական են։", "Պլանը կամ լիցքավորումը ակտիվանում է հաջող վճարումից հետո։"]),
+            ("3. Telegram Stars վճարում", ["Վճարումը կատարվում է Telegram բոտի պաշտոնական հաշվով Telegram Stars-ով, արժույթը՝ XTR։"], ["Հաճախորդը բացում է Telegram բոտը։", "Բոտը ցույց է տալիս գնումը և ուղարկում Stars հաշիվը։", "Վճարումից հետո CherryX-ը ակտիվացնում է պլանը կամ մնացորդը կապակցված հաշվին։", "Եթե հաշիվը կապակցված չէ, բոտը խնդրում է email։"]),
+            ("4. Մուտք և աջակցություն", ["Թվային մուտքը սկսվում է հաջող ակտիվացումից անմիջապես հետո։ Վճարման կամ մուտքի հարցերով կապվեք աջակցության հետ email-ով կամ հեռախոսով։"], []),
+        ],
+        "refund": [
+            ("1. Թվային ծառայություն", ["Այս քաղաքականությունը վերաբերում է CherryX թվային ծառայությունների Telegram Stars վճարումներին։"], ["Ակտիվացումից հետո վերադարձը սովորաբար հասանելի չէ։", "Ֆիզիկական ապրանք վերադարձնելու համար չկա։"]),
+            ("2. Քննվող դեպքեր", [], ["կրկնակի Stars վճարում;", "հաջող վճարում առանց ակտիվացման տեխնիկական սխալի պատճառով;", "հաշվի կապակցման սխալ;", "այլ տեխնիկական դեպք, երբ վճարված մուտքը չի տրամադրվել։"]),
+            ("3. Հարցում", ["Աջակցությանը ուղարկեք Telegram username կամ ID, կայքի email, ամսաթիվ, Stars գումար և հաշվի կամ հաջող վճարման screenshot։"], []),
+            ("4. Telegram Stars", ["Stars-ը մշակվում է Telegram-ի կողմից։ CherryX-ը գրանցում է բոտի վճարումը և ավելացնում մուտք կամ CherryX մնացորդ։"], []),
+        ],
+        "contacts": [
+            ("Կոնտակտներ", [], ["Email: cherryxdigital@gmail.com.", "Հեռախոս: +380 (96) 363-59-05.", "Հեռավար աջակցություն հաշվի, Telegram Stars վճարման և մուտքի հարցերով։"]),
+            ("Telegram Stars վճարում", [], ["Ընտրեք պլան կամ լիցքավորում։", "Հաստատեք պաշտոնական հաշիվը Telegram-ում։", "CherryX-ը ակտիվացնում է պլանը կամ ավելացնում մնացորդ։", "Առանց հաշվի բոտը խնդրում է email։"]),
+        ],
+    },
+}
+
+for _language, _content in _GENERIC_TRANSLATIONS.items():
+    for _doc_type in ("terms", "refund", "contacts"):
+        ACTIVE_LEGAL_DOCUMENTS.setdefault(_doc_type, {})[_language] = {
+            "meta_service_type": _content["meta"],
+            "sections": [
+                {"title": title, "paragraphs": paragraphs, "items": items}
+                for title, paragraphs, items in _content[_doc_type]
+            ],
+        }
+
+
 def legal_document_content(document_type: str, language: str | None) -> dict[str, object]:
     language = clean_language(language)
-    documents = LEGAL_DOCUMENTS.get(document_type) or LEGAL_DOCUMENTS["terms"]
+    documents = ACTIVE_LEGAL_DOCUMENTS.get(document_type) or ACTIVE_LEGAL_DOCUMENTS["terms"]
     document = documents.get(language) or documents.get("en") or {"sections": [], "meta_service_type": "Digital services"}
     return {
         "meta_service_type": document.get("meta_service_type", "Digital services"),

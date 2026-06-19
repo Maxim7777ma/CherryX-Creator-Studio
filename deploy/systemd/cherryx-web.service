@@ -1,0 +1,22 @@
+[Unit]
+Description=CherryX web app (Gunicorn)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cherryx
+Group=cherryx
+WorkingDirectory=/srv/cherryx
+EnvironmentFile=/srv/cherryx/.env
+ExecStart=/srv/cherryx/.venv/bin/gunicorn studio_site.wsgi:application --bind 127.0.0.1:8000 --workers 3 --timeout 120 --access-logfile - --error-logfile -
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=20
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

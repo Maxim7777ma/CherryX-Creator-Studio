@@ -199,7 +199,6 @@
     const media = window.matchMedia("(max-width: 760px)");
     const head = root.querySelector(".music-projects-head");
     let filterToggle = root.querySelector("[data-mobile-project-filters]");
-    let backdrop = document.querySelector("[data-video-projects-mobile-backdrop]");
 
     if (head && !filterToggle) {
       filterToggle = document.createElement("button");
@@ -211,15 +210,6 @@
       const createButton = head.querySelector("[data-create-project]");
       if (createButton) createButton.before(filterToggle);
       else head.appendChild(filterToggle);
-    }
-
-    if (!backdrop) {
-      backdrop = document.createElement("button");
-      backdrop.type = "button";
-      backdrop.className = "video-project-mobile-backdrop";
-      backdrop.dataset.videoProjectsMobileBackdrop = "";
-      backdrop.setAttribute("aria-label", t("close", "Close"));
-      document.body.appendChild(backdrop);
     }
 
     const closeFilters = () => {
@@ -242,7 +232,6 @@
       if (open) window.setTimeout(() => filters.querySelector("input, [data-mobile-sort-trigger], button")?.focus({preventScroll: true}), 80);
     });
 
-    backdrop.addEventListener("click", closeFilters);
     filters.addEventListener("submit", closeFilters);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeFilters();

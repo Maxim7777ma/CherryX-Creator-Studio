@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ current_music_project.title|default:"Music Studio" }} - CherryX Creator Studio</title>
   <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260615-checkout-plans">
-  <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260617-music-editor-mobile-v4">
+  <link rel="stylesheet" href="{% static 'studio/music_editor.css' %}?v=20260618-import-drop-fix">
 </head>
 
 <body class="theme-{{ theme_mode }} music-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -50,6 +50,7 @@
         <span class="cx-zoom-level" data-zoom-level>100%</span>
         <button type="button" class="cx-btn ghost cx-zoom-btn" data-zoom="in" title="Zoom In (Ctrl++)">+</button>
       </div>
+      <button type="button" class="cx-btn ghost cx-lyrics-toggle" data-action="toggle-lyrics" title="Lyrics notebook" aria-label="Lyrics notebook"></button>
       <button type="button" class="cx-btn ghost" data-action="new-pattern" title="{% ui "pattern" %}" aria-label="{% ui "pattern" %}">{% ui "pattern" %}</button>
       <button type="button" class="cx-btn ghost" data-action="drum-fill" title="{% ui "drum_loop" %}" aria-label="{% ui "drum_loop" %}">{% ui "drum_loop" %}</button>
       <button type="button" class="cx-btn ghost" data-action="clear-pattern" title="{% ui "clear" %}" aria-label="{% ui "clear" %}">{% ui "clear" %}</button>
@@ -105,7 +106,13 @@
       <div class="cx-browser-section cx-browser-assets">
         <h3>{% ui "audio_files_title" %}</h3>
         <input class="cx-asset-search" type="search" data-asset-search placeholder="Search audio">
-        <input type="file" hidden accept="audio/*" data-audio-input>
+        <input type="file" hidden multiple accept="audio/*,.zip,.flp,.mid,.midi" data-audio-input>
+        <div class="cx-import-hub">
+          <button type="button" data-action="upload-audio"><b>Import</b><span>Audio, FL ZIP, MIDI</span></button>
+          <button type="button" data-action="scan-devices"><b>Devices</b><span>MIDI / mic</span></button>
+          <button type="button" data-action="record-audio"><b>Record</b><span data-record-label>Mic</span></button>
+        </div>
+        <p class="cx-device-status" data-device-status>FL Studio: export ZIP with split mixer or playlist tracks.</p>
         <div class="cx-assets" data-asset-list>
           <p>{% ui "no_audio_uploaded" %}</p>
         </div>
@@ -243,12 +250,96 @@
   <footer class="cx-bottom-rack">
     <div class="cx-channel-list" data-channel-list></div>
   </footer>
+
+  <section class="cx-lyrics-pad is-hidden" data-lyrics-pad aria-label="Lyrics notebook">
+    <header class="cx-lyrics-head" data-lyrics-drag>
+      <div>
+        <b>Lyrics</b>
+        <span data-lyrics-count>0 words</span>
+      </div>
+      <div class="cx-lyrics-window-actions">
+        <button type="button" data-lyrics-window="minimize" title="Minimize" aria-label="Minimize"></button>
+        <button type="button" data-lyrics-window="close" title="Close" aria-label="Close"></button>
+      </div>
+    </header>
+    <div class="cx-lyrics-body">
+      <div class="cx-lyrics-tools" role="toolbar" aria-label="Text tools">
+        <button type="button" data-lyrics-command="bold" title="Bold" aria-label="Bold"><b>B</b></button>
+        <button type="button" data-lyrics-command="italic" title="Italic" aria-label="Italic"><i>I</i></button>
+        <button type="button" data-lyrics-command="insertUnorderedList" title="List" aria-label="List"></button>
+        <button type="button" data-lyrics-command="formatBlock" data-command-value="h3" title="Section" aria-label="Section">H</button>
+        <button type="button" data-lyrics-command="removeFormat" title="Clear format" aria-label="Clear format"></button>
+      </div>
+      <div class="cx-lyrics-editor" data-lyrics-editor contenteditable="true" spellcheck="true" aria-label="Lyrics text"></div>
+    </div>
+  </section>
+
+  <section class="cx-device-modal is-hidden" data-device-modal aria-label="Studio devices">
+    <div class="cx-device-shell">
+      <header class="cx-device-head">
+        <div>
+          <b>Devices</b>
+          <span data-device-summary>Mic / MIDI routing</span>
+        </div>
+        <button type="button" data-device-close title="Close" aria-label="Close"></button>
+      </header>
+
+      <div class="cx-device-grid">
+        <article class="cx-device-card">
+          <div class="cx-device-card-head">
+            <div>
+              <b>Audio input</b>
+              <span>Vocal, guitar, line-in, interface</span>
+            </div>
+            <button type="button" data-device-refresh title="Refresh" aria-label="Refresh"></button>
+          </div>
+          <div class="cx-device-list" data-audio-input-list>
+            <p>Press refresh to scan inputs.</p>
+          </div>
+          <div class="cx-device-modes" aria-label="Input type">
+            <button type="button" data-input-role="vocal">Vocal</button>
+            <button type="button" data-input-role="guitar">Guitar</button>
+            <button type="button" data-input-role="line">Line</button>
+            <button type="button" data-input-role="instrument">Instr.</button>
+          </div>
+          <div class="cx-input-meter" aria-hidden="true">
+            <span data-input-meter></span>
+          </div>
+          <div class="cx-device-switches">
+            <label><input type="checkbox" data-device-monitor> <i></i><span>Monitor</span></label>
+            <label><input type="checkbox" data-device-noise> <i></i><span>Clean input</span></label>
+          </div>
+          <div class="cx-device-actions">
+            <button type="button" data-device-test>Test</button>
+            <button type="button" data-device-record>Record</button>
+          </div>
+        </article>
+
+        <article class="cx-device-card">
+          <div class="cx-device-card-head">
+            <div>
+              <b>MIDI controllers</b>
+              <span>Keys, pads, drums, controllers</span>
+            </div>
+          </div>
+          <div class="cx-device-list" data-midi-input-list>
+            <p>No MIDI scan yet.</p>
+          </div>
+          <div class="cx-midi-readout" data-midi-readout>Play keys or pads after selecting a MIDI input.</div>
+          <div class="cx-device-actions">
+            <button type="button" data-midi-test>Live sound</button>
+            <button type="button" data-midi-record disabled>Record MIDI</button>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
 </main>
 
 <script>
   window.CX_MUSIC_INITIAL_STATE = {{ current_music_project_json|default:"{}"|safe }};
   window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
 </script>
-<script defer src="{% static 'studio/music_editor.js' %}?v=20260617-music-editor-mobile-v4"></script>
+<script defer src="{% static 'studio/music_editor.js' %}?v=20260618-import-drop-fix"></script>
 </body>
 </html>

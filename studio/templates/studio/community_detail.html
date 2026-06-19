@@ -1,0 +1,77 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_work_detail' work.slug %}">
+    {% if preview_url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ preview_url }}">{% endif %}
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-foundation">
+  </head>
+  <body class="community-page community-detail-page community-{{ work.kind }}">
+    <header class="community-nav">
+      <a href="{% if work.kind == "video" %}{% url 'studio:community_videos' %}{% elif work.kind == "image" %}{% url 'studio:community_images' %}{% else %}{% url 'studio:community_texts' %}{% endif %}">Community</a>
+      <nav>
+        <a href="{% url 'studio:index' %}">Live workspace</a>
+        <a href="{% url 'studio:learn_index' %}">Articles</a>
+        <a href="{% url 'studio:community_publish' %}">Publish</a>
+      </nav>
+    </header>
+    <main class="community-detail-shell">
+      <article class="community-work">
+        <section class="community-work-media">
+          {% if work.kind == "video" and work.media_file and can_access %}
+            <video controls poster="{% if preview_url %}{{ preview_url }}{% endif %}" src="{{ download_url }}"></video>
+          {% elif work.kind == "video" and preview_url %}
+            <img src="{{ preview_url }}" alt="">
+          {% elif work.kind == "video" %}
+            <span class="community-locked-preview" data-kind="{{ work.kind }}">Video locked</span>
+          {% elif work.kind == "image" %}
+            {% if can_access and work.media_file %}
+              <img src="{{ download_url }}" alt="">
+            {% elif preview_url %}
+              <img src="{{ preview_url }}" alt="">
+            {% else %}
+              <span class="community-locked-preview" data-kind="{{ work.kind }}">Image locked</span>
+            {% endif %}
+          {% elif preview_url %}
+            <img src="{{ preview_url }}" alt="">
+          {% endif %}
+        </section>
+        <section class="community-work-copy">
+          <p>{{ work.get_kind_display }}{% if work.owner %} by {{ work.owner.email|default:work.owner.username }}{% endif %}</p>
+          <h1>{{ work.title }}</h1>
+          {% if work.excerpt %}<span>{{ work.excerpt }}</span>{% endif %}
+          {% if work.body %}<div class="community-work-body">{{ work.body|linebreaks }}</div>{% endif %}
+          <div class="community-access-box">
+            {% if work.is_paid %}
+              <strong>{{ work.price_cherryx }} CherryX</strong>
+              {% if can_access %}
+                <span>Access unlocked.</span>
+                {% if download_url %}<a href="{{ download_url }}">Download file</a>{% endif %}
+              {% elif request.user.is_authenticated %}
+                {% if request.GET.payment == "insufficient" %}
+                  <span class="is-error">Not enough CherryX. Top up balance first.</span>
+                {% elif request.GET.payment == "required" %}
+                  <span class="is-error">Buy this work to download the file.</span>
+                {% endif %}
+                <form method="post" action="{% url 'studio:community_purchase' work.slug %}">
+                  {% csrf_token %}
+                  <button type="submit">Buy with CherryX</button>
+                </form>
+              {% else %}
+                <a href="{% url 'studio:login' %}?next={{ request.path }}">Log in to buy</a>
+              {% endif %}
+            {% else %}
+              <strong>Free</strong>
+              <span>Shared publicly by the creator.</span>
+              {% if download_url %}<a href="{{ download_url }}">Download file</a>{% endif %}
+            {% endif %}
+          </div>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

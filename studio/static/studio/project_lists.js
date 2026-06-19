@@ -284,6 +284,75 @@
       cards().forEach((card) => {
         if (card.dataset.projectLiveBound) return;
         card.dataset.projectLiveBound = "1";
+        const previewThumb = card.querySelector(".video-project-thumb[data-preview-sources]");
+        const previewVideo = previewThumb?.querySelector(".video-project-hover-preview");
+        if (previewThumb && previewVideo) {
+          const sources = String(previewThumb.dataset.previewSources || "").split("|").filter(Boolean);
+          let previewTimer = 0;
+          let previewToken = 0;
+          const loadPreview = (source, autoplay = false) => {
+            const token = previewToken;
+            let waitingForSeek = false;
+            previewVideo.muted = true;
+            previewVideo.loop = true;
+            previewVideo.playsInline = true;
+            previewVideo.preload = "metadata";
+            previewVideo.onloadedmetadata = () => {
+              if (token !== previewToken) return;
+              const duration = Number(previewVideo.duration || 0);
+              if (duration > 8) {
+                waitingForSeek = true;
+                previewVideo.currentTime = Math.max(0, Math.random() * (duration - 4));
+              }
+            };
+            previewVideo.onseeked = () => {
+              if (token !== previewToken) return;
+              waitingForSeek = false;
+              previewThumb.classList.add("has-preview-still");
+              if (!autoplay) return;
+              previewThumb.classList.add("is-previewing");
+              previewVideo.play().catch(() => previewThumb.classList.remove("is-previewing"));
+            };
+            previewVideo.oncanplay = () => {
+              if (token !== previewToken || waitingForSeek || previewThumb.classList.contains("has-preview-still")) return;
+              previewThumb.classList.add("has-preview-still");
+              if (!autoplay) return;
+              previewThumb.classList.add("is-previewing");
+              previewVideo.play().catch(() => previewThumb.classList.remove("is-previewing"));
+            };
+            if (previewVideo.getAttribute("src") !== source) {
+              previewVideo.src = source;
+              previewVideo.load();
+            } else if (autoplay) {
+              previewThumb.classList.add("is-previewing");
+              previewVideo.play().catch(() => previewThumb.classList.remove("is-previewing"));
+            }
+          };
+          const stopPreview = () => {
+            previewToken += 1;
+            window.clearTimeout(previewTimer);
+            previewThumb.classList.remove("is-previewing");
+            previewVideo.pause();
+          };
+          const startPreview = () => {
+            if (!sources.length || window.matchMedia("(max-width: 760px)").matches) return;
+            previewToken += 1;
+            const source = sources[Math.floor(Math.random() * sources.length)];
+            previewTimer = window.setTimeout(() => {
+              loadPreview(source, true);
+            }, 180);
+          };
+          if (sources.length && !window.matchMedia("(max-width: 760px)").matches) {
+            window.setTimeout(() => {
+              if (!previewThumb.isConnected || previewVideo.getAttribute("src")) return;
+              loadPreview(sources[Math.floor(Math.random() * sources.length)], false);
+            }, 250 + Math.random() * 450);
+          }
+          previewThumb.addEventListener("mouseenter", startPreview);
+          previewThumb.addEventListener("focus", startPreview);
+          previewThumb.addEventListener("mouseleave", stopPreview);
+          previewThumb.addEventListener("blur", stopPreview);
+        }
         card.querySelector("[data-project-select]")?.addEventListener("change", updateBulk);
         card.querySelector("[data-delete-project]")?.addEventListener("click", () => openDeleteModal([projectInfo(card)]));
         card.querySelector("[data-duplicate-project]")?.addEventListener("click", async (event) => {
@@ -344,7 +413,6 @@
       const head = root.querySelector(".video-projects-head");
       const sortSelect = filters.querySelector('.project-filter-sort select[name="sort"]');
       let filterToggle = root.querySelector("[data-mobile-project-filters]");
-      let backdrop = document.querySelector("[data-design-projects-mobile-backdrop]");
       let sortDropdown = filters.querySelector("[data-mobile-sort-dropdown]");
 
       if (head && !filterToggle) {
@@ -356,15 +424,6 @@
         filterToggle.setAttribute("aria-label", t("filters", "Filters"));
         filterToggle.innerHTML = "";
         head.appendChild(filterToggle);
-      }
-
-      if (!backdrop) {
-        backdrop = document.createElement("button");
-        backdrop.type = "button";
-        backdrop.className = "design-project-mobile-backdrop";
-        backdrop.dataset.designProjectsMobileBackdrop = "";
-        backdrop.setAttribute("aria-label", t("close", "Close"));
-        document.body.appendChild(backdrop);
       }
 
       if (sortSelect && !sortDropdown) {
@@ -453,7 +512,6 @@
         }
       });
 
-      backdrop.addEventListener("click", closeFilters);
       filters.addEventListener("submit", closeFilters);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") closeFilters();
@@ -488,7 +546,6 @@
       const media = window.matchMedia("(max-width: 760px)");
       const head = root.querySelector(".video-projects-head");
       let filterToggle = root.querySelector("[data-mobile-project-filters]");
-      let backdrop = document.querySelector("[data-video-projects-mobile-backdrop]");
 
       if (head && !filterToggle) {
         filterToggle = document.createElement("button");
@@ -498,15 +555,6 @@
         filterToggle.setAttribute("aria-expanded", "false");
         filterToggle.setAttribute("aria-label", t("filters", "Filters"));
         head.appendChild(filterToggle);
-      }
-
-      if (!backdrop) {
-        backdrop = document.createElement("button");
-        backdrop.type = "button";
-        backdrop.className = "video-project-mobile-backdrop";
-        backdrop.dataset.videoProjectsMobileBackdrop = "";
-        backdrop.setAttribute("aria-label", t("close", "Close"));
-        document.body.appendChild(backdrop);
       }
 
       const closeFilters = () => {
@@ -529,7 +577,6 @@
         if (open) window.setTimeout(() => filters.querySelector("input, select, button")?.focus({ preventScroll: true }), 80);
       });
 
-      backdrop.addEventListener("click", closeFilters);
       filters.addEventListener("submit", closeFilters);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") closeFilters();

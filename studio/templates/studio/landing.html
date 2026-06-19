@@ -5,7 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-legal-page">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-dock-stable">
+    <link rel="stylesheet" href="{% static 'studio/landing_public.css' %}?v=20260619-community-links">
   </head>
   <body class="landing-page">
     <header class="landing-nav">
@@ -46,12 +47,12 @@
       <section class="landing-console" aria-label="Studio modules">
         <div class="console-top">
           <span></span><span></span><span></span>
-          <strong>Live workspace</strong>
+          <strong><a href="{% url 'studio:index' %}">Live workspace</a></strong>
         </div>
-        <div class="console-orbit" aria-hidden="true">
-          <i data-icon="video"></i>
-          <i data-icon="image"></i>
-          <i data-icon="captions"></i>
+        <div class="console-orbit">
+          <a href="{% url 'studio:community_videos' %}" aria-label="Video gallery"><i data-icon="video"></i></a>
+          <a href="{% url 'studio:community_images' %}" aria-label="Image gallery"><i data-icon="image"></i></a>
+          <a href="{% url 'studio:community_texts' %}" aria-label="Text library"><i data-icon="captions"></i></a>
         </div>
         <div class="console-grid">
           <article data-icon="wand-2">
@@ -79,6 +80,15 @@
     <footer class="landing-dock" aria-label="CherryX tools">
       <a href="{% url 'studio:video_editor' %}" data-icon="video">
         <span>Editor</span>
+      </a>
+      <a href="{% url 'studio:community_videos' %}" data-icon="play-square">
+        <span>Videos</span>
+      </a>
+      <a href="{% url 'studio:community_images' %}" data-icon="image">
+        <span>Gallery</span>
+      </a>
+      <a href="{% url 'studio:learn_index' %}" data-icon="book-open">
+        <span>Learn</span>
       </a>
       <a href="{% url 'studio:index' %}?tool=cover" data-icon="image">
         <span>Covers</span>

@@ -54,8 +54,9 @@
               <div class="current-plan-pill">{% ui "pricing_current_plan" %}</div>
             {% endif %}
             <div class="price-value">
-              <strong>{{ plan.price_display }}</strong>
+              <strong>{{ plan.cherryx_display }}</strong>
               <span>/ {{ plan.period_days }} {% ui "days" %}</span>
+              <small>{{ plan.telegram_usd_approx_display }}</small>
             </div>
             <div class="storage-limit">
               <strong>{{ plan.storage_text }}</strong>

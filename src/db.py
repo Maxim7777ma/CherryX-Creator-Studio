@@ -229,6 +229,28 @@ class Database:
                 rows = await cursor.fetchall()
         return {int(row[0]): str(row[1]) for row in rows if row[1]}
 
+    async def all_user_ids(self) -> list[int]:
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute("SELECT user_id FROM users ORDER BY updated_at DESC") as cursor:
+                rows = await cursor.fetchall()
+        return [int(row[0]) for row in rows]
+
+    async def bot_stats(self) -> dict[str, int]:
+        now = int(time.time())
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+                users = (await cursor.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM users WHERE active_until > ?", (now,)) as cursor:
+                active = (await cursor.fetchone())[0]
+            async with db.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM payments") as cursor:
+                payments_row = await cursor.fetchone()
+        return {
+            "users": int(users or 0),
+            "active": int(active or 0),
+            "payments": int(payments_row[0] if payments_row else 0),
+            "stars": int(payments_row[1] if payments_row else 0),
+        }
+
     async def add_conversion(
         self,
         user_id: int,

@@ -162,18 +162,38 @@
                 <a class="secondary-action" href="{{ originality_report_url }}" target="_blank" rel="noreferrer">{% ui "originality_full_report" %}</a>
               {% elif job.outputs %}
                 <a class="secondary-action" href="{{ job.download_all_url }}">{% if has_access %}{% ui "download_all" %}{% else %}{% ui "open_download" %}{% endif %}</a>
+                {% if not is_guest %}
+                  <a class="secondary-action" href="{{ job.publish_url }}">Publish</a>
+                {% endif %}
               {% endif %}
-              {% if job.status != "queued" and job.status != "running" %}
+              {% if job.status == "queued" or job.status == "running" or job.status == "processing" %}
+                <form method="post" action="{{ job.pause_url }}">
+                  {% csrf_token %}
+                  <button class="secondary-action" type="submit">{% ui "pause" %}</button>
+                </form>
+                <form method="post" action="{{ job.cancel_url }}">
+                  {% csrf_token %}
+                  <button class="danger-action" type="submit">{% if job.status == "running" %}Остановить{% else %}{% ui "cancel" %}{% endif %}</button>
+                </form>
+              {% elif job.status == "paused" %}
+                <form method="post" action="{{ job.resume_url }}">
+                  {% csrf_token %}
+                  <button class="secondary-action" type="submit">{% ui "continue_action" %}</button>
+                </form>
+                <form method="post" action="{{ job.cancel_url }}">
+                  {% csrf_token %}
+                  <button class="danger-action" type="submit">Stop</button>
+                </form>
+              {% endif %}
                 <form method="post" action="{{ job.delete_url }}">
                   {% csrf_token %}
                   <button class="danger-action" type="submit">{% ui "remove_history" %}</button>
                 </form>
-              {% endif %}
             </div>
           </div>
           <p class="job-message" data-job-message-wrap>
             <span data-job-message>{{ job.error|default:job.message }}</span>
-            <small class="job-eta" data-job-eta{% if not job.eta_text or job.status == "completed" or job.status == "failed" %} hidden{% endif %}>{{ job.eta_text }}</small>
+            <small class="job-eta" data-job-eta{% if not job.eta_text or job.status == "completed" or job.status == "failed" or job.status == "cancelled" or job.status == "paused" %} hidden{% endif %}>{{ job.eta_text }}</small>
           </p>
           <div class="job-state-summary">
             <span>
@@ -189,16 +209,6 @@
               <small>{% ui "files" %}</small>
             </span>
           </div>
-          {% if job.ai_summary %}
-            <div class="ai-meta-row" data-ai-meta-row>
-              {% for meta in job.ai_summary %}
-                <span class="ai-meta-chip is-{{ meta.status|default:'unknown' }}" title="{{ meta.fallback_reason|default:meta.reason }}">
-                  <b>{{ meta.label }}</b>
-                  <small>{{ meta.detail }}</small>
-                </span>
-              {% endfor %}
-            </div>
-          {% endif %}
           <div class="progress detail-progress" aria-label="progress">
             <span data-job-progress style="width: {{ job.progress }}%"></span>
           </div>
@@ -325,6 +335,8 @@
         const labels = {
           queued: "{% ui "queued" %}",
           running: "{% ui "active_jobs" %}",
+          processing: "Processing",
+          paused: "{% ui "pause" %}",
           completed: "{% ui "completed" %}",
           failed: "{% ui "failed" %}",
           download: "{% ui "download" %}",
@@ -538,7 +550,7 @@
           progressNode.style.width = `${progress}%`;
           progressTextNode.textContent = `${progress}%`;
           if (progressSummaryNode) progressSummaryNode.textContent = `${progress}%`;
-          if (job.eta_text && job.status !== "completed" && job.status !== "failed") {
+          if (job.eta_text && !["completed", "failed", "cancelled", "paused"].includes(job.status)) {
             etaNode.hidden = false;
             etaNode.textContent = job.eta_text;
           } else {
@@ -561,7 +573,7 @@
             if (!liveIndexes.has(card.dataset.outputIndex || "")) card.remove();
           });
           initPlayers();
-          return job.status === "queued" || job.status === "running";
+          return ["queued", "running", "processing"].includes(job.status);
         };
 
         const formatTime = (value) => {

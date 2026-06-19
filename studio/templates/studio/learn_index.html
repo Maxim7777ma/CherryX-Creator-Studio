@@ -1,0 +1,63 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:learn_index' %}">
+    <link rel="stylesheet" href="{% static 'studio/learn.css' %}?v=20260619-community-foundation">
+  </head>
+  <body class="learn-page">
+    <header class="learn-nav">
+      <a href="{% url 'studio:landing' %}">CherryX</a>
+      <nav>
+        <a href="{% url 'studio:index' %}">Live workspace</a>
+        <a href="{% url 'studio:community_videos' %}">Videos</a>
+        <a href="{% url 'studio:community_images' %}">Images</a>
+        <a href="{% url 'studio:community_texts' %}">Texts</a>
+        <a href="{% url 'studio:community_publish' %}">Publish</a>
+      </nav>
+    </header>
+    <main class="learn-shell">
+      <section class="learn-hero">
+        <p>Learning hub</p>
+        <h1>Articles, guides and launch lessons</h1>
+        <span>Admin-published SEO articles with WebP covers, clean URLs and structured cards.</span>
+      </section>
+
+      {% if featured_article %}
+        <a class="learn-featured" href="{% url 'studio:learn_article' featured_article.slug %}">
+          {% if featured_article.cover_image %}
+            <img src="{{ featured_article.cover_image.url }}" alt="">
+          {% endif %}
+          <span>
+            <small>Featured</small>
+            <strong>{{ featured_article.title }}</strong>
+            <em>{{ featured_article.excerpt }}</em>
+          </span>
+        </a>
+      {% endif %}
+
+      <section class="learn-grid" aria-label="Learning articles">
+        {% for article in articles %}
+          <a class="learn-card" href="{% url 'studio:learn_article' article.slug %}">
+            {% if article.cover_image %}
+              <img src="{{ article.cover_image.url }}" alt="">
+            {% else %}
+              <span class="learn-card-fallback">CherryX</span>
+            {% endif %}
+            <strong>{{ article.title }}</strong>
+            <p>{{ article.excerpt }}</p>
+          </a>
+        {% empty %}
+          <article class="learn-empty">
+            <strong>No articles yet</strong>
+            <p>Create the first published article in Django admin. Upload a cover and it will be converted to WebP automatically.</p>
+          </article>
+        {% endfor %}
+      </section>
+    </main>
+  </body>
+</html>

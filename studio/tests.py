@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import json
@@ -23,9 +24,10 @@ from PIL import Image
 from src import openai_ai
 from src import web_actions as actions
 from src.youtube_tools import SubtitleCue
+from .legal_documents import legal_document_content
 from . import views
 from .localization import app_messages, language_options, translate
-from .models import DesignerAsset, DesignerProject, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .models import AccountProfile, CommunityPurchase, CommunityWork, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, LearningArticle, MagicLoginToken, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 from .views import _job_record_params
 
 
@@ -54,6 +56,230 @@ class SiteSmokeTests(TransactionTestCase):
         self.assertContains(response, 'href="/app/design-projects/"')
         self.assertContains(response, 'href="/app/cherryx-pay/"')
         self.assertContains(response, "data-designer-launch")
+
+    def test_magic_login_token_logs_user_in_once(self) -> None:
+        user = get_user_model().objects.create_user(username="magic@example.com", email="magic@example.com", password="Strong123")
+        token = MagicLoginToken.create_for_user(user, timezone.now() + timedelta(minutes=30))
+
+        response = self.client.get(reverse("studio:magic_login", args=[token.token]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("studio:index"))
+        token.refresh_from_db()
+        self.assertIsNotNone(token.used_at)
+        self.assertIn("_auth_user_id", self.client.session)
+
+        self.client.logout()
+        response = self.client.get(reverse("studio:magic_login", args=[token.token]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("studio:login"))
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_legal_pages_use_telegram_stars_without_old_requisites(self) -> None:
+        forbidden = (
+            "WayForPay",
+            "3795908055",
+            "Tax ID",
+            "ФОП",
+            "ИНН",
+            "ІПН",
+            "РНОКПП",
+            "Individual entrepreneur",
+            "Entrepreneur individuel",
+            "Einzelunternehmer",
+        )
+        routes = [
+            reverse("studio:legal_info"),
+            reverse("studio:legal_terms"),
+            reverse("studio:legal_refund"),
+            reverse("studio:legal_contacts"),
+        ]
+
+        for route in routes:
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+                content = response.content.decode("utf-8")
+                self.assertIn("Telegram Stars", content)
+                self.assertIn("cherryxdigital@gmail.com", content)
+                for marker in forbidden:
+                    self.assertNotIn(marker, content)
+
+    def test_active_legal_documents_exist_for_all_site_languages(self) -> None:
+        forbidden = ("WayForPay", "3795908055", "ФОП", "ИНН", "ІПН", "РНОКПП", "Tax ID", "Individual entrepreneur")
+        languages = ("ru", "uk", "en", "fr", "de", "es", "it", "ka", "hy")
+
+        for language in languages:
+            for document_type in ("terms", "refund", "contacts"):
+                with self.subTest(language=language, document_type=document_type):
+                    document = legal_document_content(document_type, language)
+                    serialized = json.dumps(document, ensure_ascii=False)
+                    self.assertTrue(document["sections"])
+                    self.assertIn("Telegram Stars", serialized)
+                    for marker in forbidden:
+                        self.assertNotIn(marker, serialized)
+
+    def test_learning_and_community_pages_render_with_cherryx_purchase(self) -> None:
+        seller = get_user_model().objects.create_user(username="seller@example.com", email="seller@example.com", password="pass12345")
+        buyer = get_user_model().objects.create_user(username="buyer@example.com", email="buyer@example.com", password="pass12345")
+        AccountProfile.objects.create(user=seller, cherryx_balance=0)
+        AccountProfile.objects.create(user=buyer, cherryx_balance=200)
+        article = LearningArticle.objects.create(
+            title="First CherryX lesson",
+            excerpt="A practical guide for creators.",
+            body="Open workspace.\nPublish better.",
+            status=LearningArticle.STATUS_PUBLISHED,
+        )
+        video = CommunityWork.objects.create(
+            owner=seller,
+            title="Paid video template",
+            kind=CommunityWork.KIND_VIDEO,
+            excerpt="A paid public work.",
+            access=CommunityWork.ACCESS_PAID,
+            price_cherryx=120,
+            status=CommunityWork.STATUS_PUBLISHED,
+        )
+        image = CommunityWork.objects.create(
+            owner=seller,
+            title="Free cover idea",
+            kind=CommunityWork.KIND_IMAGE,
+            access=CommunityWork.ACCESS_FREE,
+            status=CommunityWork.STATUS_PUBLISHED,
+        )
+        text = CommunityWork.objects.create(
+            owner=seller,
+            title="Caption pack",
+            kind=CommunityWork.KIND_TEXT,
+            access=CommunityWork.ACCESS_FREE,
+            status=CommunityWork.STATUS_PUBLISHED,
+        )
+        paid_tmp = TemporaryDirectory()
+        paid_media_root = Path(paid_tmp.name)
+        paid_image_bytes = BytesIO()
+        Image.new("RGB", (80, 80), "#e11d48").save(paid_image_bytes, "PNG")
+        with override_settings(MEDIA_ROOT=paid_media_root):
+            paid_image = CommunityWork.objects.create(
+                owner=seller,
+                title="Paid source image",
+                kind=CommunityWork.KIND_IMAGE,
+                access=CommunityWork.ACCESS_PAID,
+                price_cherryx=30,
+                status=CommunityWork.STATUS_PUBLISHED,
+                media_file=SimpleUploadedFile("paid.png", paid_image_bytes.getvalue(), content_type="image/png"),
+            )
+
+            feed = self.client.get(reverse("studio:community_images"))
+            self.assertContains(feed, "Paid source image")
+            self.assertNotContains(feed, paid_image.media_file.url)
+            self.assertContains(feed, reverse("studio:community_work_preview", args=[paid_image.slug]))
+
+            detail = self.client.get(reverse("studio:community_work_detail", args=[paid_image.slug]))
+            self.assertContains(detail, reverse("studio:community_work_preview", args=[paid_image.slug]))
+            self.assertNotContains(detail, paid_image.media_file.url)
+
+            preview = self.client.get(reverse("studio:community_work_preview", args=[paid_image.slug]))
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(preview["Content-Type"], "image/webp")
+            self.assertEqual(preview["Cache-Control"], "no-store, private")
+
+            locked = self.client.get(reverse("studio:community_work_download", args=[paid_image.slug]))
+            self.assertEqual(locked.status_code, 302)
+            self.assertIn(reverse("studio:login"), locked.url)
+
+            direct_private = self.client.get(paid_image.media_file.url)
+            self.assertEqual(direct_private.status_code, 404)
+
+        for route, expected in (
+            (reverse("studio:learn_index"), article.title),
+            (reverse("studio:learn_article", args=[article.slug]), "Open workspace."),
+            (reverse("studio:community_videos"), video.title),
+            (reverse("studio:community_images"), image.title),
+            (reverse("studio:community_texts"), text.title),
+            (reverse("studio:community_work_detail", args=[video.slug]), "120 CherryX"),
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, expected)
+
+        self.client.force_login(buyer)
+        response = self.client.post(reverse("studio:community_purchase", args=[video.slug]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(CommunityPurchase.objects.filter(work=video, buyer=buyer).exists())
+        buyer.studio_profile.refresh_from_db()
+        seller.studio_profile.refresh_from_db()
+        self.assertEqual(buyer.studio_profile.cherryx_balance, 80)
+        self.assertEqual(seller.studio_profile.cherryx_balance, 120)
+
+        with override_settings(MEDIA_ROOT=paid_media_root):
+            response = self.client.post(reverse("studio:community_purchase", args=[paid_image.slug]))
+            self.assertEqual(response.status_code, 302)
+            download = self.client.get(reverse("studio:community_work_download", args=[paid_image.slug]))
+            self.assertEqual(download.status_code, 200)
+            download.close()
+            paid_image.refresh_from_db()
+            self.assertEqual(paid_image.download_count, 1)
+            buyer.studio_profile.refresh_from_db()
+            seller.studio_profile.refresh_from_db()
+            self.assertEqual(buyer.studio_profile.cherryx_balance, 50)
+            self.assertEqual(seller.studio_profile.cherryx_balance, 150)
+        paid_tmp.cleanup()
+
+        publish = self.client.post(
+            reverse("studio:community_publish"),
+            {
+                "kind": CommunityWork.KIND_TEXT,
+                "title": "Buyer public text",
+                "excerpt": "Shared from the account.",
+                "body": "Ready text pack.",
+                "access": CommunityWork.ACCESS_FREE,
+                "price_cherryx": 0,
+            },
+        )
+
+        self.assertEqual(publish.status_code, 302)
+        published = CommunityWork.objects.get(title="Buyer public text")
+        self.assertEqual(published.owner, buyer)
+        self.assertEqual(published.status, CommunityWork.STATUS_PUBLISHED)
+        self.assertContains(self.client.get(reverse("studio:community_texts")), "Buyer public text")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media_root = root / "media"
+            source_image = root / "result.png"
+            Image.new("RGB", (80, 80), "#2563eb").save(source_image, "PNG")
+            job = JobRecord.objects.create(
+                owner=buyer,
+                job_id="publishjob001",
+                kind="cover",
+                title="Generated cover",
+                status="completed",
+                progress=100,
+                output_count=1,
+                params_json=json.dumps({"action": "cover"}),
+            )
+            JobOutputRecord.objects.create(job=job, label="Cover", path=str(source_image), media_type="image/png", size=source_image.stat().st_size)
+            with override_settings(MEDIA_ROOT=media_root):
+                response = self.client.post(
+                    reverse("studio:community_publish"),
+                    {
+                        "source": "job",
+                        "source_id": job.job_id,
+                        "kind": CommunityWork.KIND_IMAGE,
+                        "title": "Published generated cover",
+                        "excerpt": "Copied from job output.",
+                        "body": "",
+                        "access": CommunityWork.ACCESS_FREE,
+                        "price_cherryx": 0,
+                    },
+                )
+
+            self.assertEqual(response.status_code, 302)
+            published_from_job = CommunityWork.objects.get(title="Published generated cover")
+            self.assertEqual(published_from_job.source_job, job)
+            self.assertTrue(published_from_job.media_file.name.endswith(".webp"))
 
     def test_designer_page_exposes_mobile_palette_and_drawer_hooks(self) -> None:
         response = self.client.get(reverse("studio:designer"))
@@ -300,6 +526,26 @@ class QueryOptimizationTests(TransactionTestCase):
         self.assertEqual(record.status, "cancelled")
         self.assertTrue(record.events.filter(status="cancelled").exists())
 
+    def test_running_job_can_be_stopped(self) -> None:
+        record = JobRecord.objects.create(
+            owner=self.user,
+            job_id="stoprunning01",
+            kind="cover",
+            title="Running job",
+            status="running",
+            progress=40,
+            params_json=json.dumps({"action": "cover"}),
+        )
+
+        response = self.client.post(reverse("studio:cancel_job", args=[record.job_id]), HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        record.refresh_from_db()
+        self.assertEqual(payload["job"]["status"], "cancelled")
+        self.assertEqual(record.status, "cancelled")
+        self.assertTrue(record.events.filter(status="cancelled").exists())
+
     def test_dashboard_job_actions_follow_status(self) -> None:
         JobRecord.objects.create(owner=self.user, job_id="queuedaction01", kind="cover", title="Queued action", status="queued", progress=1, params_json=json.dumps({"action": "cover"}))
         JobRecord.objects.create(owner=self.user, job_id="runningaction1", kind="cover", title="Running action", status="running", progress=40, params_json=json.dumps({"action": "cover"}))
@@ -311,7 +557,7 @@ class QueryOptimizationTests(TransactionTestCase):
         response = self.client.get(reverse("studio:dashboard_detail", args=["all"]))
 
         self.assertContains(response, 'action="/api/jobs/queuedaction01/cancel/"')
-        self.assertNotContains(response, 'action="/api/jobs/runningaction1/cancel/"')
+        self.assertContains(response, 'action="/api/jobs/runningaction1/cancel/"')
         self.assertContains(response, 'action="/api/jobs/failedaction01/repeat/"')
         self.assertContains(response, 'action="/api/jobs/cancelaction01/repeat/"')
         self.assertContains(response, 'href="/download/completeaction/all/"')
@@ -327,7 +573,50 @@ class QueryOptimizationTests(TransactionTestCase):
         self.assertIn("Ajax task", payload["html"])
         self.assertNotIn("stats-files-panel", payload["html"])
 
-    def test_dashboard_tasks_show_ai_fallback_summary(self) -> None:
+    def test_ajax_delete_job_removes_database_rows_and_media_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "outputs" / "django"
+            storage_root = root / "storage" / "django"
+            job_id = "delmedia0001"
+            output_file = output_root / job_id / "cover" / "result.png"
+            source_file = storage_root / job_id / "uploads" / "source.png"
+            output_file.parent.mkdir(parents=True)
+            source_file.parent.mkdir(parents=True)
+            output_file.write_bytes(b"generated")
+            source_file.write_bytes(b"source")
+
+            original_settings = actions.settings
+            try:
+                actions.settings = replace(actions.settings, storage_dir=root / "storage")
+                with mock.patch.object(actions, "WEB_OUTPUT_ROOT", output_root), mock.patch.object(actions, "WEB_STORAGE_ROOT", storage_root):
+                    record = JobRecord.objects.create(
+                        owner=self.user,
+                        job_id=job_id,
+                        kind="cover",
+                        title="Delete media",
+                        status="completed",
+                        progress=100,
+                        params_json=json.dumps({"source": str(source_file)}),
+                    )
+                    JobOutputRecord.objects.create(job=record, label="Result", path=str(output_file), media_type="image/png", size=output_file.stat().st_size)
+                    JobEventRecord.objects.create(job=record, status="completed", progress=100, message="Ready")
+
+                    response = self.client.post(reverse("studio:delete_job", args=[job_id]), HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+            finally:
+                actions.settings = original_settings
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            self.assertFalse(JobRecord.objects.filter(job_id=job_id).exists())
+            self.assertFalse(JobOutputRecord.objects.filter(job__job_id=job_id).exists())
+            self.assertFalse(JobEventRecord.objects.filter(job__job_id=job_id).exists())
+            self.assertFalse(output_file.exists())
+            self.assertFalse(source_file.exists())
+            self.assertFalse((output_root / job_id).exists())
+            self.assertFalse((storage_root / job_id).exists())
+
+    def test_dashboard_tasks_hide_ai_fallback_summary(self) -> None:
         JobRecord.objects.create(
             owner=self.user,
             job_id="aitasksummary1",
@@ -350,9 +639,10 @@ class QueryOptimizationTests(TransactionTestCase):
 
         response = self.client.get(reverse("studio:dashboard_detail", args=["all"]))
 
-        self.assertContains(response, "AI fallback")
-        self.assertContains(response, "Clip planner")
-        self.assertContains(response, "OpenAI is not configured")
+        self.assertContains(response, "AI task")
+        self.assertNotContains(response, "AI fallback")
+        self.assertNotContains(response, "Clip planner")
+        self.assertNotContains(response, "OpenAI is not configured")
 
     def test_share_roles_are_attached_in_one_batch_for_mixed_resources(self) -> None:
         owner = get_user_model().objects.create_user("owner-perf@example.com", email="owner-perf@example.com", password="pass12345")

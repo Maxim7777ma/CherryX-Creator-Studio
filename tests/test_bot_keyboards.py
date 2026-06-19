@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from src import bot_keyboards
+from src import bot
 
 
 def inline_callback_data(markup) -> list[str]:
@@ -22,8 +23,64 @@ class KeyboardTests(unittest.TestCase):
     def test_main_menu_contains_core_actions_and_optional_mini_app(self) -> None:
         markup = bot_keyboards.main_menu("ru", subscription_stars=100, mini_app_url="https://example.com/app")
 
-        self.assertEqual(inline_callback_data(markup), ["pay", "status", "help:menu", "help:resume", "language"])
-        self.assertIn("Открыть Mini App", inline_texts(markup))
+        self.assertEqual(inline_callback_data(markup), ["pay", "status", "wallet", "help:pay", "language"])
+        self.assertIn("Открыть CherryX", inline_texts(markup))
+
+    def test_payment_menu_localized_for_supported_languages(self) -> None:
+        expected_wallet = {
+            "ru": "Баланс",
+            "uk": "Баланс",
+            "en": "Wallet",
+            "fr": "Solde",
+            "de": "Guthaben",
+            "es": "Saldo",
+            "it": "Saldo",
+            "ka": "ბალანსი",
+            "hy": "Բալանս",
+        }
+        for lang, wallet_label in expected_wallet.items():
+            with self.subTest(lang=lang):
+                markup = bot_keyboards.main_menu(lang, subscription_stars=100)
+                self.assertIn(wallet_label, inline_texts(markup))
+                self.assertNotIn("Wallet", inline_texts(markup) if lang != "en" else [])
+
+    def test_language_keyboard_contains_all_site_languages(self) -> None:
+        texts = inline_texts(bot_keyboards.language_keyboard())
+
+        for label in ("Русский", "Українська", "English", "Français", "Deutsch", "Español", "ქართული", "Հայերեն", "Italiano"):
+            self.assertIn(label, texts)
+
+    def test_billing_payment_texts_are_localized_for_supported_languages(self) -> None:
+        keys = [
+            "intro",
+            "choose",
+            "enter_stars",
+            "invoice",
+            "need_email",
+            "account_created",
+            "wallet_linked",
+            "pay_support",
+        ]
+        for lang in ("ru", "uk", "en", "fr", "de", "es", "it", "ka", "hy"):
+            for key in keys:
+                with self.subTest(lang=lang, key=key):
+                    value = bot.billing_text(
+                        lang,
+                        key,
+                        title="T",
+                        description="D",
+                        stars=1,
+                        cherryx=10,
+                        email="a@example.com",
+                        password="p",
+                        login_url="https://example.com",
+                        balance=1,
+                        access="active",
+                    )
+                    self.assertNotIn("вЂ", value)
+                    self.assertNotIn("бѓ", value)
+                    self.assertNotIn("ХЋ", value)
+                    self.assertNotIn("Рџ", value)
 
     def test_formats_keyboard_builds_convert_callbacks(self) -> None:
         markup = bot_keyboards.formats_keyboard("sess1", ["png", "webp"], "image")

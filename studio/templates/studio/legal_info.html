@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "merchant_legal_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-legal-page">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260619-telegram-stars-legal">
   </head>
   <body class="landing-page legal-info-page">
     <header class="landing-nav">
@@ -25,6 +25,29 @@
         <p class="eyebrow">{% ui "merchant_legal_label" %}</p>
         <h1>{% ui "merchant_legal_title" %}</h1>
         <p>{% ui "merchant_legal_copy" %}</p>
+      </section>
+
+      <section class="legal-stars-card legal-stars-card-index" aria-labelledby="legal-stars-index-title">
+        <div>
+          <span class="legal-document-kicker">Telegram Stars</span>
+          <h2 id="legal-stars-index-title">{% ui "legal_stars_how_title" %}</h2>
+          <p>{% ui "legal_stars_how_copy" %}</p>
+        </div>
+        <ol>
+          <li>{% ui "legal_stars_step_1" %}</li>
+          <li>{% ui "legal_stars_step_2" %}</li>
+          <li>{% ui "legal_stars_step_3" %}</li>
+          <li>{% ui "legal_stars_step_4" %}</li>
+        </ol>
+      </section>
+
+      <section class="legal-document-section legal-index-contact-strip">
+        <h2>{% ui "legal_provider_contacts_title" %}</h2>
+        <ul class="legal-contact-list">
+          <li>Email: <a href="mailto:cherryxdigital@gmail.com">cherryxdigital@gmail.com</a></li>
+          <li>{% ui "merchant_phone" %}: <a href="tel:+380963635905">+380 (96) 363-59-05</a></li>
+          <li>{% ui "legal_support_contacts_note" %}</li>
+        </ul>
       </section>
 
       <section class="legal-document-list" aria-label="{% ui "merchant_legal_title" %}">

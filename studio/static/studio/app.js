@@ -11,6 +11,9 @@ const DESIGN_HISTORY_LIMIT = 80;
 const DESIGN_WIDTH = 9000;
 const DESIGN_HEIGHT = 6400;
 const DESIGN_GRID = 8;
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "processing", "paused"]);
+const RUNNING_JOB_STATUSES = new Set(["queued", "running", "processing"]);
+const FINISHED_JOB_STATUSES = new Set(["completed", "failed", "cancelled", "paused"]);
 const DESIGN_COLOR_PALETTE = ["#0f172a", "#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#ffffff", "#e2e8f0", "#94a3b8", "transparent"];
 const DESIGN_FRAME_PRESETS = {
   iphone: { label: "iPhone", w: 393, h: 852 },
@@ -56,6 +59,8 @@ document.querySelectorAll(".tab[data-tab]").forEach((button) => {
   });
 });
 
+window.addEventListener("resize", scrollActiveMobileNavIcon, { passive: true });
+
 document.querySelectorAll(".job-form").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -76,7 +81,7 @@ document.querySelectorAll(".job-form").forEach((form) => {
         throw new Error(payload.error || i18n.task_failed || "Task did not start");
       }
       renderJob(payload.job);
-      pollJob(payload.job.id);
+      if (RUNNING_JOB_STATUSES.has(payload.job.status)) pollJob(payload.job.id);
     } catch (error) {
       renderJob({
         id: `error-${Date.now()}`,
@@ -620,12 +625,38 @@ function setupOriginalityChecker() {
     const button = form.querySelector("button[type='submit']");
     const textInput = form.querySelector("[data-originality-text]");
     const fileInput = form.querySelector("input[type='file']");
+    const sourceButtons = [...form.querySelectorAll("[data-originality-source]")];
+    const sourcePanels = [...form.querySelectorAll("[data-originality-panel]")];
     if (!result) return;
+
+    const setOriginalitySource = (source) => {
+      const nextSource = source === "file" ? "file" : "text";
+      form.dataset.originalitySource = nextSource;
+      sourceButtons.forEach((sourceButton) => {
+        const active = sourceButton.dataset.originalitySource === nextSource;
+        sourceButton.classList.toggle("is-active", active);
+        sourceButton.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      sourcePanels.forEach((sourcePanel) => {
+        const active = sourcePanel.dataset.originalityPanel === nextSource;
+        sourcePanel.hidden = !active;
+        sourcePanel.classList.toggle("is-active", active);
+        sourcePanel.querySelectorAll("input, textarea, select").forEach((control) => {
+          control.disabled = !active;
+        });
+      });
+    };
+
+    sourceButtons.forEach((sourceButton) => {
+      sourceButton.addEventListener("click", () => setOriginalitySource(sourceButton.dataset.originalitySource));
+    });
+    setOriginalitySource(form.dataset.originalitySource || "text");
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const hasText = Boolean(textInput && textInput.value.trim());
-      const hasFile = Boolean(fileInput && fileInput.files && fileInput.files.length);
+      const source = form.dataset.originalitySource || "text";
+      const hasText = source === "text" && Boolean(textInput && textInput.value.trim());
+      const hasFile = source === "file" && Boolean(fileInput && fileInput.files && fileInput.files.length);
       if (!hasText && !hasFile) {
         renderOriginalityError(result, i18n.originality_empty || "Paste text or upload a document.");
         return;
@@ -855,6 +886,7 @@ function setupDesignerPanel(panel) {
   const shell = panel.querySelector("[data-design-shell]");
   const plane = panel.querySelector("[data-design-plane]");
   const vectorLayer = panel.querySelector("[data-design-vector-layer]");
+  const emptyPanel = panel.querySelector("[data-design-empty-panel]");
   const tools = [...panel.querySelectorAll("[data-design-tool]")];
   const photoInput = panel.querySelector("[data-design-photo]");
   const fillInput = panel.querySelector("[data-design-fill]");
@@ -1753,6 +1785,7 @@ function setupDesignerPanelV2(panel) {
   const shell = panel.querySelector("[data-design-shell]");
   const plane = panel.querySelector("[data-design-plane]");
   const vectorLayer = panel.querySelector("[data-design-vector-layer]");
+  const emptyPanel = panel.querySelector("[data-design-empty-panel]");
   const tools = [...panel.querySelectorAll("[data-design-tool]")];
   const photoInput = panel.querySelector("[data-design-photo]");
   const fillInput = panel.querySelector("[data-design-fill]");
@@ -1796,6 +1829,8 @@ function setupDesignerPanelV2(panel) {
   let rotateState = null;
   let marqueeState = null;
   let panState = null;
+  const touchPointers = new Map();
+  let pinchState = null;
   let zoom = 1;
   let penMode = "pen";
   let vectorEdit = false;
@@ -1935,10 +1970,38 @@ function setupDesignerPanelV2(panel) {
   };
 
   const generateDesignPreview = async () => {
-    const frame = objects().find((item) => item.type === "frame") || objects()[0];
-    if (!frame) return "";
+    const visibleObjects = objects().filter((item) => !item.hidden);
+    const visibleVectors = vectors().filter((item) => !item.hidden && Array.isArray(item.points) && item.points.length);
+    const frames = visibleObjects.filter((item) => item.type === "frame");
+    const frameScore = (frame) => {
+      const box = { x: Number(frame.x || 0), y: Number(frame.y || 0), w: Number(frame.w || 1), h: Number(frame.h || 1) };
+      const objectScore = visibleObjects.filter((item) => item.id !== frame.id && (item.parentId === frame.id || rectsIntersect(box, item))).length * 4;
+      const vectorScore = visibleVectors.filter((item) => item.parentId === frame.id || rectsIntersect(box, vectorBoundsV2(item))).reduce((sum, item) => sum + Math.max(1, Math.min(10, item.points.length / 16)), 0);
+      return objectScore + vectorScore;
+    };
+    const bestFrame = frames
+      .map((frame) => ({ frame, score: frameScore(frame) }))
+      .sort((left, right) => right.score - left.score)[0];
+    let target = bestFrame && bestFrame.score > 0 ? bestFrame.frame : null;
+    if (!target && (visibleObjects.length || visibleVectors.length)) {
+      const bounds = boundsForLayersV2(visibleObjects, visibleVectors);
+      const pad = Math.max(80, Math.min(520, Math.max(bounds.w, bounds.h) * 0.1));
+      target = {
+        id: "__preview_all__",
+        type: "frame",
+        name: "Project preview",
+        x: Math.max(0, bounds.x - pad),
+        y: Math.max(0, bounds.y - pad),
+        w: bounds.w + pad * 2,
+        h: bounds.h + pad * 2,
+        fill: "#ffffff",
+        previewAll: true,
+      };
+    }
+    if (!target && frames.length) target = frames[0];
+    if (!target) return "";
     try {
-      const svg = buildExportSvgV2(frame, state);
+      const svg = buildExportSvgV2(target, state);
       const image = new Image();
       image.crossOrigin = "anonymous";
       const loaded = new Promise((resolve, reject) => {
@@ -1948,9 +2011,9 @@ function setupDesignerPanelV2(panel) {
       image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
       await loaded;
       const canvas = document.createElement("canvas");
-      const ratio = Math.min(1, 720 / Math.max(1, frame.w), 480 / Math.max(1, frame.h));
-      canvas.width = Math.max(240, Math.round(frame.w * ratio));
-      canvas.height = Math.max(160, Math.round(frame.h * ratio));
+      const ratio = Math.min(1, 720 / Math.max(1, target.w), 480 / Math.max(1, target.h));
+      canvas.width = Math.max(240, Math.round(target.w * ratio));
+      canvas.height = Math.max(160, Math.round(target.h * ratio));
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL("image/jpeg", 0.78);
     } catch {
@@ -2161,6 +2224,7 @@ function setupDesignerPanelV2(panel) {
       .forEach((object) => renderObject(object, null, plane));
     renderLayers();
     renderInspector();
+    if (emptyPanel) emptyPanel.hidden = objects().length + vectors().length > 0;
     syncColorInputs();
   };
 
@@ -2782,6 +2846,12 @@ function setupDesignerPanelV2(panel) {
       inspector.innerHTML = `
         <section class="designer-inspector-section is-empty">
           <span>${escapeHtml(canvasLabel)}</span>
+          <div class="designer-start-presets">
+            <button type="button" data-frame-preset-proxy="iphone">iPhone</button>
+            <button type="button" data-frame-preset-proxy="story">Story</button>
+            <button type="button" data-frame-preset-proxy="youtube">YouTube</button>
+            <button type="button" data-frame-preset-proxy="a4">A4</button>
+          </div>
           <div class="designer-selection-actions">
             <button type="button" data-design-tool-proxy="frame">${escapeHtml(i18n.frame || "Frame")}</button>
             <button type="button" data-design-tool-proxy="text">${escapeHtml(i18n.text || "Text")}</button>
@@ -2793,6 +2863,12 @@ function setupDesignerPanelV2(panel) {
       inspector.querySelectorAll("[data-design-tool-proxy]").forEach((button) => {
         button.addEventListener("click", () => {
           const match = tools.find((toolButton) => toolButton.dataset.designTool === button.dataset.designToolProxy);
+          if (match) match.click();
+        });
+      });
+      inspector.querySelectorAll("[data-frame-preset-proxy]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const match = presetButtons.find((preset) => preset.dataset.framePreset === button.dataset.framePresetProxy);
           if (match) match.click();
         });
       });
@@ -4631,6 +4707,16 @@ function setupDesignerPanelV2(panel) {
     });
   });
 
+  emptyPanel?.querySelectorAll("[data-empty-tool]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = button.dataset.emptyTool || "select";
+      if (next === "frame") addDesignObject("frame");
+      else if (next === "text") addDesignObject("text");
+      else if (next === "shape-rect") addDesignObject("shape", { shape: "rect", name: "Rectangle" });
+      else setTool(next);
+    });
+  });
+
   zoomButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const action = button.dataset.designZoom;
@@ -4741,64 +4827,15 @@ function setupDesignerPanelV2(panel) {
 
   function setupMobileDesignerWorkspace() {
     const media = window.matchMedia("(max-width: 760px)");
-    const inspectorShell = panel.querySelector("[data-designer-mobile-drawer]");
     const toolbar = panel.querySelector("[data-designer-mobile-palette]");
-    const storageKey = "designerMobileInspectorHeight.v2";
-    let startY = 0;
-    let startHeight = 0;
-    const defaultHeight = () => 44;
-    const maxHeight = () => Math.max(300, (window.innerHeight || 760) - 128);
-    const clampHeight = (value) => Math.max(38, Math.min(maxHeight(), Math.round(Number(value) || defaultHeight())));
-    const applyHeight = (value, remember = true) => {
-      if (!inspectorShell) return;
-      const next = clampHeight(value);
-      document.documentElement.style.setProperty("--mobile-designer-inspector-height", `${next}px`);
-      inspectorShell.classList.toggle("is-sheet-collapsed", next <= 50);
-      if (remember) localStorage.setItem(storageKey, String(next));
-    };
     const sync = () => {
       document.body.classList.toggle("is-mobile-designer", media.matches);
       if (!media.matches) return;
-      applyHeight(localStorage.getItem(storageKey) || defaultHeight(), false);
       requestAnimationFrame(() => {
         updatePlaneSize();
         fitZoom();
       });
     };
-    const resize = (event) => {
-      if (!startHeight) return;
-      applyHeight(startHeight + (startY - event.clientY));
-    };
-    const stopResize = () => {
-      startHeight = 0;
-      document.body.classList.remove("is-resizing-designer-sheet");
-      window.removeEventListener("pointermove", resize);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
-    const startResize = (event) => {
-      if (!media.matches || !inspectorShell) return;
-      event.preventDefault();
-      startY = event.clientY;
-      startHeight = inspectorShell.getBoundingClientRect().height;
-      document.body.classList.add("is-resizing-designer-sheet");
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      window.addEventListener("pointermove", resize);
-      window.addEventListener("pointerup", stopResize, {once: true});
-      window.addEventListener("pointercancel", stopResize, {once: true});
-    };
-    if (inspectorShell && !inspectorShell.querySelector(".designer-inspector-grip")) {
-      const grip = document.createElement("button");
-      grip.className = "designer-inspector-grip";
-      grip.type = "button";
-      grip.setAttribute("aria-label", i18n.resize_panel || "Resize panel");
-      inspectorShell.prepend(grip);
-      grip.addEventListener("pointerdown", startResize);
-      grip.addEventListener("dblclick", () => {
-        const current = inspectorShell.getBoundingClientRect().height;
-        applyHeight(current <= 50 ? defaultHeight() : 38);
-      });
-    }
     toolbar?.querySelectorAll("[data-design-tool]").forEach((button) => {
       button.addEventListener("click", () => {
         if (!media.matches) return;
@@ -5215,9 +5252,15 @@ function buildExportSvgV2(target, designState = null) {
     body = vectorMarkupV2(target, x, y);
   } else if (target.type === "frame" || target.type === "group") {
     const background = target.type === "frame" ? `<rect width="100%" height="100%" fill="${escapeHtml(target.fill || "#ffffff")}"/>` : "";
-    const children = childrenOf(target.id).map((child) => objectMarkup(child, x, y)).join("");
-    const childVectors = vectorsOf(target.id).map((vector) => vectorMarkupV2(vector, x, y)).join("");
-    const looseVectors = storage.vectors.filter((vector) => !vector.parentId && inBounds(vector)).map((vector) => vectorMarkupV2(vector, x, y)).join("");
+    const scopedChildren = target.previewAll
+      ? storage.objects.filter((item) => item.id !== target.id && !item.hidden && inBounds(item))
+      : childrenOf(target.id);
+    const scopedVectors = target.previewAll
+      ? storage.vectors.filter((vector) => !vector.hidden && inBounds(vector))
+      : vectorsOf(target.id);
+    const children = scopedChildren.map((child) => objectMarkup(child, x, y)).join("");
+    const childVectors = scopedVectors.map((vector) => vectorMarkupV2(vector, x, y)).join("");
+    const looseVectors = target.previewAll ? "" : storage.vectors.filter((vector) => !vector.parentId && inBounds(vector)).map((vector) => vectorMarkupV2(vector, x, y)).join("");
     body = `${background}${children}${childVectors}${looseVectors}`;
   } else {
     body = objectMarkup(target, x, y);
@@ -5380,7 +5423,20 @@ function activateTab(target, options = {}) {
   document.querySelectorAll(".tool-panel").forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === `tab-${target}`);
   });
+  scrollActiveMobileNavIcon();
   if (shouldReveal) scrollActiveMobileTool();
+}
+
+function scrollActiveMobileNavIcon() {
+  if (!window.matchMedia("(max-width: 760px)").matches) return;
+  const nav = document.querySelector(".tabs, .mobile-workspace-dock");
+  const active = nav?.querySelector(".is-active");
+  if (!nav || !active) return;
+  window.requestAnimationFrame(() => {
+    const left = active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    nav.scrollTo({ left: Math.max(0, left), behavior: reducedMotion ? "auto" : "smooth" });
+  });
 }
 
 function scrollActiveMobileTool() {
@@ -5391,7 +5447,14 @@ function scrollActiveMobileTool() {
   void panel.offsetWidth;
   panel.classList.add("is-mobile-panel-enter");
   window.requestAnimationFrame(() => {
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    const layout = document.querySelector(".layout");
+    const topbar = document.querySelector(".studio-topbar");
+    const anchor = layout || panel;
+    const topbarHeight = topbar ? topbar.getBoundingClientRect().height : 0;
+    const offset = Math.max(8, topbarHeight + 6);
+    const targetY = Math.max(0, anchor.getBoundingClientRect().top + window.scrollY - offset);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: targetY, behavior: reducedMotion ? "auto" : "smooth" });
   });
 }
 
@@ -5399,11 +5462,13 @@ function restoreActiveTab() {
   const requested = new URLSearchParams(window.location.search).get("tool");
   if (requested && document.getElementById(`tab-${requested}`)) {
     activateTab(requested, { reveal: false });
+    scrollActiveMobileNavIcon();
     return;
   }
   const saved = localStorage.getItem(ACTIVE_TAB_KEY);
   if (saved && document.getElementById(`tab-${saved}`)) {
     activateTab(saved, { reveal: false });
+    scrollActiveMobileNavIcon();
   }
 }
 
@@ -5479,6 +5544,43 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const jobControlButton = event.target.closest("[data-pause-url], [data-resume-url], [data-cancel-url]");
+  if (jobControlButton) {
+    event.preventDefault();
+    closeJobActionMenus();
+    const isPause = Boolean(jobControlButton.dataset.pauseUrl);
+    const isResume = Boolean(jobControlButton.dataset.resumeUrl);
+    const url = jobControlButton.dataset.pauseUrl || jobControlButton.dataset.resumeUrl || jobControlButton.dataset.cancelUrl;
+    const label = jobControlButton.querySelector("span");
+    const originalText = label ? label.textContent : jobControlButton.textContent;
+    const loadingText = isPause ? (i18n.pausing || "Pausing") : isResume ? (i18n.resuming || "Resuming") : (i18n.stopping || "Stopping");
+    jobControlButton.disabled = true;
+    if (label) label.textContent = loadingText;
+    else jobControlButton.textContent = loadingText;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": csrfToken(),
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || i18n.action_failed || i18n.cancel_failed || "Could not update task");
+      }
+      renderJob(payload.job);
+      if (RUNNING_JOB_STATUSES.has(payload.job.status)) pollJob(payload.job.id);
+      else polling.delete(payload.job.id);
+    } catch (error) {
+      jobControlButton.disabled = false;
+      if (label) label.textContent = originalText;
+      else jobControlButton.textContent = originalText;
+      window.alert(error.message || String(error));
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-repeat-url]");
   if (!button) return;
   event.preventDefault();
@@ -5501,7 +5603,7 @@ document.addEventListener("click", async (event) => {
       throw new Error(payload.error || i18n.repeat_failed || "Could not repeat task");
     }
     renderJob(payload.job);
-    pollJob(payload.job.id);
+    if (RUNNING_JOB_STATUSES.has(payload.job.status)) pollJob(payload.job.id);
   } catch (error) {
     renderJob({
       id: `error-${Date.now()}`,
@@ -5541,7 +5643,7 @@ function renderInitialJobs() {
     const initialJobs = JSON.parse(element.textContent);
     [...initialJobs].reverse().forEach((job) => {
       renderJob(job);
-      if (job.status === "queued" || job.status === "running") {
+      if (RUNNING_JOB_STATUSES.has(job.status)) {
         pollJob(job.id);
       }
     });
@@ -5780,7 +5882,7 @@ async function pollJob(jobId) {
       if (!response.ok) throw new Error("status");
       const payload = await response.json();
       renderJob(payload.job);
-      if (payload.job.status !== "completed" && payload.job.status !== "failed") {
+      if (!FINISHED_JOB_STATUSES.has(payload.job.status)) {
         window.setTimeout(tick, payload.job.status === "queued" ? 8000 : 5000);
       } else {
         polling.delete(jobId);
@@ -5820,9 +5922,8 @@ function renderJob(job) {
     </div>
     <p class="job-message">
       <span>${escapeHtml(job.error || job.message || "")}</span>
-      ${job.eta_text && job.status !== "completed" && job.status !== "failed" ? `<small class="job-eta">${escapeHtml(job.eta_text)}</small>` : ""}
+      ${job.eta_text && !FINISHED_JOB_STATUSES.has(job.status) ? `<small class="job-eta">${escapeHtml(job.eta_text)}</small>` : ""}
     </p>
-    ${renderAiMeta(job.ai)}
     <div class="progress" aria-label="progress">
       <span style="width: ${Number(job.progress || 0)}%"></span>
     </div>
@@ -5840,11 +5941,23 @@ function renderJobActionMenu(job) {
   if (job.repeatable && job.repeat_url) {
     actions.push(`<button class="job-action-item" type="button" data-repeat-url="${escapeHtml(job.repeat_url)}" data-icon="rotate-ccw"><span>${escapeHtml(i18n.repeat || "Repeat")}</span></button>`);
   }
+  if (RUNNING_JOB_STATUSES.has(job.status) && job.pause_url) {
+    actions.push(`<button class="job-action-item" type="button" data-pause-url="${escapeHtml(job.pause_url)}" data-icon="pause"><span>${escapeHtml(i18n.pause || "Pause")}</span></button>`);
+  }
+  if (job.status === "paused" && job.resume_url) {
+    actions.push(`<button class="job-action-item" type="button" data-resume-url="${escapeHtml(job.resume_url)}" data-icon="play"><span>${escapeHtml(i18n.continue || i18n.continue_action || "Continue")}</span></button>`);
+  }
+  if ((RUNNING_JOB_STATUSES.has(job.status) || job.status === "paused") && job.cancel_url) {
+    actions.push(`<button class="job-action-item is-danger" type="button" data-cancel-url="${escapeHtml(job.cancel_url)}" data-icon="square"><span>${escapeHtml(i18n.stop || i18n.cancel || "Stop")}</span></button>`);
+  }
   if ((job.outputs || []).length && job.download_all_url) {
     const href = hasAccess ? job.download_all_url : checkoutUrl;
     actions.push(`<a class="job-action-item" href="${escapeHtml(href)}" data-icon="download"><span>${escapeHtml(hasAccess ? (i18n.download_all || "Download all") : "Checkout")}</span></a>`);
   }
-  if (job.delete_url && job.status !== "queued" && job.status !== "running") {
+  if (job.status === "completed" && (job.outputs || []).length && job.publish_url) {
+    actions.push(`<a class="job-action-item" href="${escapeHtml(job.publish_url)}" data-icon="send"><span>Publish</span></a>`);
+  }
+  if (job.delete_url) {
     actions.push(`<button class="job-action-item is-danger" type="button" data-delete-url="${escapeHtml(job.delete_url)}" data-icon="trash-2"><span>${escapeHtml(i18n.delete || "Delete")}</span></button>`);
   }
   if (!actions.length) return "";
@@ -5945,7 +6058,7 @@ function updateJobsPanel() {
 }
 
 function jobMatchesFilter(status, filter) {
-  if (filter === "active") return status === "queued" || status === "running";
+  if (filter === "active") return ACTIVE_JOB_STATUSES.has(status);
   if (filter === "completed") return status === "completed";
   if (filter === "failed") return status === "failed" || status === "cancelled";
   return true;
@@ -6091,6 +6204,8 @@ function statusLabel(status) {
   return {
     queued: i18n.queued || "Queued",
     running: i18n.running || "In progress",
+    processing: i18n.processing || "Processing",
+    paused: i18n.paused || "Paused",
     completed: i18n.completed || "Done",
     failed: i18n.failed || "Failed",
     cancelled: i18n.cancelled || "Cancelled",

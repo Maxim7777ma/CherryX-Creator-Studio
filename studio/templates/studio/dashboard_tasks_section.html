@@ -6,7 +6,7 @@
   </div>
   <div class="stats-list">
     {% for job in jobs %}
-      <article class="stats-row stats-job-row is-{{ job.status }}">
+      <article class="stats-row stats-job-row is-{{ job.status }}" data-stats-job-row data-job-title="{{ job.title }}">
         <span>
           <b>{{ job.title }}</b>
           <small>{{ job.message }}{% if job.error %} · {{ job.error }}{% endif %}</small>
@@ -17,14 +17,28 @@
         </strong>
         <div class="stats-actions">
           <a href="{{ job.detail_url }}">{% ui "open" %}</a>
-          {% if job.status == "queued" %}
+          {% if job.status == "queued" or job.status == "running" or job.status == "processing" %}
+            <form method="post" action="{{ job.pause_url }}">
+              {% csrf_token %}
+              <button type="submit">{% ui "pause" %}</button>
+            </form>
             <form method="post" action="{{ job.cancel_url }}">
               {% csrf_token %}
-              <button type="submit">{% ui "cancel" %}</button>
+              <button class="is-danger" type="submit">{% if job.status == "running" %}Остановить{% else %}{% ui "cancel" %}{% endif %}</button>
+            </form>
+          {% elif job.status == "paused" %}
+            <form method="post" action="{{ job.resume_url }}">
+              {% csrf_token %}
+              <button type="submit">{% ui "continue_action" %}</button>
+            </form>
+            <form method="post" action="{{ job.cancel_url }}">
+              {% csrf_token %}
+              <button class="is-danger" type="submit">Stop</button>
             </form>
           {% endif %}
           {% if job.status == "completed" and job.outputs %}
             <a href="{{ job.download_all_url }}">{% ui "download_all" %}</a>
+            <a href="{{ job.publish_url }}">Publish</a>
           {% endif %}
           {% if job.status == "completed" and job.repeatable %}
             <form method="post" action="{{ job.repeat_url }}">
@@ -39,16 +53,11 @@
                 <button type="submit">{% ui "retry" %}</button>
               </form>
             {% endif %}
-            <form method="post" action="{{ job.delete_url }}">
-              {% csrf_token %}
-              <button class="is-danger" type="submit">{% ui "delete" %}</button>
-            </form>
-          {% elif job.status == "completed" %}
-            <form method="post" action="{{ job.delete_url }}">
-              {% csrf_token %}
-              <button class="is-danger" type="submit">{% ui "delete" %}</button>
-            </form>
           {% endif %}
+          <form method="post" action="{{ job.delete_url }}" data-stats-delete-form>
+            {% csrf_token %}
+            <button class="is-danger" type="submit">{% ui "delete" %}</button>
+          </form>
         </div>
       </article>
     {% empty %}

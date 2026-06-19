@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-stats-metric-strip">
-    <script defer src="{% static 'studio/app.js' %}?v=20260617-resume-template-cards-polish"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-upload-compact">
+    <script defer src="{% static 'studio/app.js' %}?v=20260618-hide-ai-badges"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
@@ -74,7 +74,7 @@
             <h2 id="subscription-title">{{ subscription_panel.current_plan.name }}</h2>
             <p>{{ subscription_panel.current_plan.headline }}</p>
             <div class="subscription-current-grid">
-              <span><b>{{ subscription_panel.current_plan.price_label }}</b><small>{% ui "billing_price" %}</small></span>
+              <span><b>{{ subscription_panel.current_plan.cherryx_price_label }}</b><small>{% ui "billing_price" %}</small></span>
               <span><b>{{ subscription_panel.current_plan.storage_text }}</b><small>{% ui "billing_storage" %}</small></span>
               <span><b>{{ subscription_panel.days_left }}</b><small>{% ui "billing_days_left" %}</small></span>
               <span><b>{{ subscription_panel.days_used }}</b><small>{% ui "billing_days_used" %}</small></span>
@@ -101,15 +101,15 @@
                   {% endfor %}
                 </ul>
                 <div class="subscription-proration">
-                  <span><small>{% ui "billing_base_price" %}</small><b>{{ plan.price_display }}</b></span>
+                  <span><small>{% ui "billing_base_price" %}</small><b>{{ plan.cherryx_display }}</b><small>{{ plan.telegram_usd_approx_display }}</small></span>
                   {% if not plan.is_current %}
                     <span><small>{% ui "billing_remaining_credit" %}</small><b>-{{ plan.credit_display }}</b></span>
                   {% endif %}
                   <span class="is-due"><small>{% ui "billing_now_due" %}</small><b>{{ plan.due_display }}</b></span>
                 </div>
                 <footer>
-                  <b>{{ plan.price_display }}</b>
-                  <small>{% ui "billing_now_due" %}: {{ plan.due_display }}</small>
+                  <b>{{ plan.cherryx_display }}</b>
+                  <small>{{ plan.telegram_usd_approx_display }} · {% ui "billing_now_due" %}: {{ plan.due_display }}</small>
                   <a href="{{ plan.checkout_url }}">{% if plan.is_current %}{% ui "billing_extend" %}{% else %}{% ui "billing_change_plan" %}{% endif %}</a>
                 </footer>
               </article>
@@ -646,26 +646,38 @@
           <form class="originality-form" data-originality-form data-endpoint="{% url 'studio:start_originality' %}">
             {% csrf_token %}
             <input type="hidden" name="mode" value="local">
+            <div class="originality-source-switch" data-originality-source-switch aria-label="{% ui "originality_source" %}">
+              <button class="is-active" type="button" data-originality-source="text" aria-pressed="true">
+                <strong>{% ui "originality_enter_text" %}</strong>
+                <small>{% ui "originality_enter_text_hint" %}</small>
+              </button>
+              <button type="button" data-originality-source="file" aria-pressed="false">
+                <strong>{% ui "originality_upload_file" %}</strong>
+                <small>{% ui "originality_upload_file_hint" %}</small>
+              </button>
+            </div>
             <div class="originality-compose">
-              <label class="field field-wide">
+              <label class="field field-wide originality-input-panel is-active" data-originality-panel="text">
                 <span>{% ui "originality_text" %}</span>
                 <textarea name="text" rows="12" placeholder="{% ui "originality_placeholder" %}" data-originality-text></textarea>
               </label>
-              <label class="field file-field compact-upload originality-upload">
-                <span>{% ui "originality_file" %}</span>
-                <input type="file" name="file" accept=".txt,.md,.rtf,.csv,.json,.html,.htm,.docx,.pdf,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-preview="originality-preview" data-document-preview-endpoint="{% url 'studio:originality_document_preview' %}">
-                <span class="file-dropzone">
-                  <span class="file-icon">TXT</span>
-                  <span class="file-copy">
-                    <strong>{% ui "originality_upload_title" %}</strong>
-                    <small>{% ui "originality_upload_hint" %}</small>
+              <div class="originality-input-panel originality-file-panel" data-originality-panel="file" hidden>
+                <label class="field file-field compact-upload originality-upload">
+                  <span>{% ui "originality_file" %}</span>
+                  <input type="file" name="file" accept=".txt,.md,.rtf,.csv,.json,.html,.htm,.docx,.pdf,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" data-preview="originality-preview" data-document-preview-endpoint="{% url 'studio:originality_document_preview' %}" disabled>
+                  <span class="file-dropzone">
+                    <span class="file-icon">TXT</span>
+                    <span class="file-copy">
+                      <strong>{% ui "originality_upload_title" %}</strong>
+                      <small>{% ui "originality_upload_hint" %}</small>
+                    </span>
+                    <span class="file-button">{% ui "choose_file" %}</span>
                   </span>
-                  <span class="file-button">{% ui "choose_file" %}</span>
-                </span>
-                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
-              </label>
-              <div class="media-preview originality-preview" id="originality-preview">
-                <span>{% ui "preview_file" %}</span>
+                  <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+                </label>
+                <div class="media-preview originality-preview" id="originality-preview">
+                  <span>{% ui "preview_file" %}</span>
+                </div>
               </div>
               <button class="primary-action originality-submit" type="submit" data-icon="scan-text">{% ui "originality_run" %}</button>
             </div>

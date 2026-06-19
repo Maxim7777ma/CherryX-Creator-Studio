@@ -23,6 +23,9 @@ class CherryXMusicStudio {
     this.tracks = 6;
     this.trackNames = [];
     this.zoom = 1;
+    this.projectLyrics = "";
+    this.lyricsPanel = { open: false, minimized: false, x: null, y: null, width: 390, height: 460 };
+    this.lyricsSaveTimer = null;
 
     this.bpm = 120;
     this.currentTime = 0;
@@ -61,6 +64,29 @@ class CherryXMusicStudio {
     this.audioGraphReady = false;
     this.audioUnlockPromise = null;
     this.toneLoadPromise = null;
+    this.mediaRecorder = null;
+    this.recordChunks = [];
+    this.recordStream = null;
+    this.isRecording = false;
+    this.assetPreviewAudio = null;
+    this.assetPreviewButton = null;
+    this.audioInputs = [];
+    this.midiInputs = [];
+    this.activeAudioInputId = "";
+    this.activeMidiInputId = "";
+    this.audioInputRole = "vocal";
+    this.monitorInput = false;
+    this.noiseReduction = false;
+    this.deviceTestStream = null;
+    this.deviceAudioContext = null;
+    this.deviceAnalyser = null;
+    this.deviceMonitorSource = null;
+    this.deviceMeterTimer = null;
+    this.midiAccess = null;
+    this.recordingStartTime = 0;
+    this.recordingEndTime = 0;
+    this.recordingTrack = 0;
+    this.recordingClipId = null;
     this.history = [];
     this.historyIndex = -1;
     this.maxUndoSteps = 5;
@@ -125,12 +151,25 @@ class CherryXMusicStudio {
     this.elements.assetList = q("[data-asset-list]");
     this.elements.assetSearch = q("[data-asset-search]");
     this.elements.audioInput = q("[data-audio-input]");
+    this.elements.deviceStatus = q("[data-device-status]");
+    this.elements.recordLabel = q("[data-record-label]");
+    this.elements.deviceModal = q("[data-device-modal]");
+    this.elements.deviceSummary = q("[data-device-summary]");
+    this.elements.audioInputList = q("[data-audio-input-list]");
+    this.elements.midiInputList = q("[data-midi-input-list]");
+    this.elements.inputMeter = q("[data-input-meter]");
+    this.elements.deviceMonitor = q("[data-device-monitor]");
+    this.elements.deviceNoise = q("[data-device-noise]");
+    this.elements.midiReadout = q("[data-midi-readout]");
     this.elements.inspector = q("[data-inspector]");
     this.elements.activePatternLabel = q("[data-active-pattern-label]");
     this.elements.zoomLevel = q("[data-zoom-level]");
     this.elements.patternSelect = q("[data-pattern-select]");
     this.elements.channelSelect = q("[data-channel-select]");
     this.elements.noteLength = q("[data-note-length]");
+    this.elements.lyricsPad = q("[data-lyrics-pad]");
+    this.elements.lyricsEditor = q("[data-lyrics-editor]");
+    this.elements.lyricsCount = q("[data-lyrics-count]");
   }
 
   bindEvents() {
@@ -212,11 +251,14 @@ class CherryXMusicStudio {
     }, true);
     this.elements.playlistGrid?.addEventListener("dragover", event => event.preventDefault());
     this.elements.playlistGrid?.addEventListener("drop", event => this.handlePlaylistDrop(event));
+    this.elements.assetList?.addEventListener("dragover", event => event.preventDefault());
+    this.elements.assetList?.addEventListener("drop", event => this.handleAssetListDrop(event));
     this.elements.ruler?.addEventListener("mousedown", event => {
       if (event.shiftKey) this.startSurfacePan(event, this.elements.playlistGrid);
     }, true);
     this.elements.ruler?.addEventListener("mousedown", event => this.startTimelineSeek(event));
     this.elements.playhead?.addEventListener("mousedown", event => this.startTimelineSeek(event));
+    window.addEventListener("resize", () => this.applyLyricsPanelMetrics());
 
     this.container.querySelector("[data-save-project]")?.addEventListener("click", () => this.saveProject());
     this.container.querySelector("[data-add-channel]")?.addEventListener("click", () => this.addChannel());
@@ -226,7 +268,49 @@ class CherryXMusicStudio {
       if (deleteButton) this.deleteTrack(Number(deleteButton.dataset.deleteTrack));
     });
     this.container.querySelector('[data-action="new-pattern"]')?.addEventListener("click", () => this.addPatternClip());
-    this.container.querySelector('[data-action="upload-audio"]')?.addEventListener("click", () => this.elements.audioInput?.click());
+    this.container.querySelectorAll('[data-action="upload-audio"]').forEach(button => {
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        this.elements.audioInput?.click();
+      });
+    });
+    this.container.querySelector('[data-action="scan-devices"]')?.addEventListener("click", () => this.openDevicesModal());
+    this.container.querySelector('[data-action="record-audio"]')?.addEventListener("click", () => this.toggleAudioRecording());
+    this.container.querySelector("[data-device-close]")?.addEventListener("click", () => this.closeDevicesModal());
+    this.elements.deviceModal?.addEventListener("click", event => {
+      if (event.target === this.elements.deviceModal) this.closeDevicesModal();
+    });
+    this.container.querySelector("[data-device-refresh]")?.addEventListener("click", () => this.scanAudioDevices({ render: true, notify: true }));
+    this.container.querySelector("[data-device-test]")?.addEventListener("click", () => this.toggleDeviceTest());
+    this.container.querySelector("[data-device-record]")?.addEventListener("click", () => this.toggleAudioRecording());
+    this.container.querySelector("[data-midi-test]")?.addEventListener("click", () => this.listenToMidiInputs());
+    this.container.querySelectorAll("[data-input-role]").forEach(button => {
+      button.addEventListener("click", () => {
+        this.audioInputRole = button.dataset.inputRole || "vocal";
+        this.renderDevicesModal();
+        this.markDirty();
+      });
+    });
+    this.elements.deviceMonitor?.addEventListener("change", event => {
+      this.monitorInput = Boolean(event.target.checked);
+      if (this.deviceTestStream) this.attachInputMonitor();
+      this.markDirty();
+    });
+    this.elements.deviceNoise?.addEventListener("change", event => {
+      this.noiseReduction = Boolean(event.target.checked);
+      this.markDirty();
+    });
+    this.container.querySelector('[data-action="toggle-lyrics"]')?.addEventListener("click", () => this.toggleLyricsPad());
+    this.elements.lyricsEditor?.addEventListener("input", () => this.handleLyricsInput());
+    this.elements.lyricsEditor?.addEventListener("blur", () => this.commitLyricsNow());
+    this.container.querySelectorAll("[data-lyrics-command]").forEach(button => {
+      button.addEventListener("click", () => this.applyLyricsCommand(button.dataset.lyricsCommand, button.dataset.commandValue || null));
+    });
+    this.container.querySelector('[data-lyrics-window="close"]')?.addEventListener("click", () => this.closeLyricsPad());
+    this.container.querySelector('[data-lyrics-window="minimize"]')?.addEventListener("click", () => this.minimizeLyricsPad());
+    this.container.querySelector("[data-lyrics-drag]")?.addEventListener("pointerdown", event => this.startLyricsDrag(event));
+    this.elements.lyricsPad?.addEventListener("mouseup", () => this.storeLyricsPanelMetrics());
+    this.elements.lyricsPad?.addEventListener("touchend", () => this.storeLyricsPanelMetrics(), { passive: true });
     this.container.querySelector('[data-action="export-audio"]')?.addEventListener("click", () => {
       this.toast(this.t("audio_export_unavailable", "Audio export is not connected yet."), "info");
     });
@@ -727,6 +811,7 @@ class CherryXMusicStudio {
   }
 
   pause() {
+    if (this.isRecording) this.stopAudioRecording();
     this.isPlaying = false;
     this.stopClock();
     this.stopStepPlayback();
@@ -735,6 +820,7 @@ class CherryXMusicStudio {
   }
 
   stop() {
+    if (this.isRecording) this.stopAudioRecording();
     this.isPlaying = false;
     this.currentTime = 0;
     this.playTick = 0;
@@ -776,6 +862,7 @@ class CherryXMusicStudio {
       this.currentTime += 0.05;
       this.updateTimeDisplay();
       this.updatePlayhead();
+      this.updateRecordingClip();
     }, 50);
   }
 
@@ -1140,6 +1227,8 @@ class CherryXMusicStudio {
     this.renderStepSequencer();
     this.renderMixer();
     this.renderAssets();
+    this.renderDevicesModal();
+    this.renderLyricsPad();
     this.updateTimeDisplay();
     this.updatePlayhead();
     this.updateActivePatternLabel();
@@ -1486,12 +1575,12 @@ class CherryXMusicStudio {
     if (!this.elements.playlistGrid) return;
     event.preventDefault();
     event.stopPropagation();
-    this.startBoxSelection(event, this.elements.playlistGrid, ".cx-pattern-clip,.cx-audio-clip", boxRect => {
+    this.startBoxSelection(event, this.elements.playlistGrid, ".cx-pattern-clip,.cx-audio-clip,.cx-recording-clip", boxRect => {
       this.selectedClipIds.clear();
       this.selectedNoteIds.clear();
       this.selectedClipId = null;
       this.selectedNoteId = null;
-      this.elements.playlistGrid.querySelectorAll(".cx-pattern-clip,.cx-audio-clip").forEach(el => {
+      this.elements.playlistGrid.querySelectorAll(".cx-pattern-clip,.cx-audio-clip,.cx-recording-clip").forEach(el => {
         const selected = this.rectsIntersect(boxRect, el.getBoundingClientRect());
         el.classList.toggle("cx-clip-selected", selected);
         if (selected) this.selectedClipIds.add(el.dataset.clipId);
@@ -1752,7 +1841,8 @@ class CherryXMusicStudio {
       const lane = this.container.querySelector(`[data-track-lane="${clip.track}"]`);
       if (!lane) return;
       const el = document.createElement("div");
-      el.className = `${clip.type === "audio" ? "cx-audio-clip" : "cx-pattern-clip"} ${clip.id === this.selectedClipId || this.selectedClipIds.has(clip.id) ? "cx-clip-selected" : ""}`;
+      const clipClass = clip.type === "audio" ? "cx-audio-clip" : (clip.type === "recording" ? "cx-recording-clip" : "cx-pattern-clip");
+      el.className = `${clipClass} ${clip.id === this.selectedClipId || this.selectedClipIds.has(clip.id) ? "cx-clip-selected" : ""}`;
       el.classList.toggle("is-muted", Boolean(clip.muted));
       el.dataset.clipId = clip.id;
       el.style.left = `${clip.x}px`;
@@ -1792,6 +1882,13 @@ class CherryXMusicStudio {
 
   clipMarkup(clip) {
     const title = this.escapeHtml(clip.name || "Clip");
+    if (clip.type === "recording") {
+      return `
+        <span class="cx-recording-dot"></span>
+        <span class="cx-clip-title">${title}</span>
+        <span class="cx-recording-time">${this.escapeHtml(this.formatTime(Math.max(0, this.currentTime - this.recordingStartTime)))}</span>
+      `;
+    }
     if (clip.type === "audio") {
       const fadeIn = Math.max(0, Number(clip.fadeIn || 0));
       const fadeOut = Math.max(0, Number(clip.fadeOut || 0));
@@ -1833,7 +1930,7 @@ class CherryXMusicStudio {
       this.suppressClipClick = false;
       return;
     }
-    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip")) return;
+    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip, .cx-recording-clip")) return;
     if (this.arrangeTool !== "draw") return;
     const point = this.relativePoint(event, lane);
     this.createPatternAt(Number(lane.dataset.trackLane || 0), this.snapX(point.x));
@@ -1975,7 +2072,7 @@ class CherryXMusicStudio {
   }
 
   createPatternClipFromLane(event, lane) {
-    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip")) return;
+    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip, .cx-recording-clip")) return;
     const pattern = this.createPattern(`Pattern ${this.patterns.length + 1}`);
     this.patterns.push(pattern);
     this.selectedPatternId = pattern.id;
@@ -1990,28 +2087,54 @@ class CherryXMusicStudio {
   }
 
   handlePlaylistDrop(event) {
+    const files = [...(event.dataTransfer?.files || [])];
+    if (files.length) {
+      event.preventDefault();
+      const lane = event.target.closest("[data-track-lane]");
+      const point = lane ? this.relativePoint(event, lane) : { x: this.cellWidth };
+      const track = lane ? Number(lane.dataset.trackLane || 0) : Math.min(this.tracks - 1, 1);
+      this.handleImportFiles(files, { track, x: this.snapX(Math.max(0, point.x)) });
+      return;
+    }
     const lane = event.target.closest("[data-track-lane]");
     if (lane) this.handleLaneDrop(event, lane);
   }
 
   handleLaneDrop(event, lane) {
     event.preventDefault();
+    const files = [...(event.dataTransfer?.files || [])];
+    if (files.length) {
+      const point = this.relativePoint(event, lane);
+      this.handleImportFiles(files, { track: Number(lane.dataset.trackLane || 0), x: this.snapX(Math.max(0, point.x)) });
+      return;
+    }
     const assetId = event.dataTransfer?.getData("text/cx-asset-id");
     if (!assetId) return;
     const point = this.relativePoint(event, lane);
     this.addAudioClipFromAsset(assetId, Number(lane.dataset.trackLane || 0), this.snapX(point.x));
   }
 
-  addAudioClipFromAsset(assetId, track = 1, x = this.cellWidth) {
+  handleAssetListDrop(event) {
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) return;
+    event.preventDefault();
+    this.handleImportFiles(files, { addToPlaylist: false });
+  }
+
+  addAudioClipFromAsset(assetId, track = 1, x = this.cellWidth, options = {}) {
     const asset = this.assets.find(item => String(item.id) === String(assetId) || String(item.serverId) === String(assetId));
-    if (!asset) return;
+    if (!asset || !this.isAudioAsset(asset)) {
+      this.toast(this.t("audio_only_clip", "Only audio files can be placed on the playlist."), "info");
+      return;
+    }
+    const durationWidth = Number(asset.duration || 0) ? Math.max(this.cellWidth * 2, this.secondsToPixels(Number(asset.duration || 0))) : this.cellWidth * 8;
     const clip = {
       id: this.uuid(),
       type: "audio",
       name: asset.name,
       track: this.clamp(track, 0, this.tracks - 1),
       x,
-      width: this.cellWidth * 8,
+      width: options.width || durationWidth,
       assetId: asset.serverId || asset.id,
       volume: 85,
       fadeIn: 0,
@@ -2021,12 +2144,13 @@ class CherryXMusicStudio {
     };
     this.clips.push(clip);
     this.renderPlaylist();
-    this.selectClip(clip.id);
-    this.saveHistory();
+    if (options.select !== false) this.selectClip(clip.id);
+    if (options.saveHistory !== false) this.saveHistory();
+    return clip;
   }
 
   showLaneContextMenu(event, lane) {
-    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip")) return;
+    if (event.target.closest(".cx-pattern-clip, .cx-audio-clip, .cx-recording-clip")) return;
     event.preventDefault();
     const point = this.relativePoint(event, lane);
     const track = Number(lane.dataset.trackLane || 0);
@@ -2261,7 +2385,7 @@ class CherryXMusicStudio {
   }
 
   isClipResizeEdge(event) {
-    const clipEl = event.target.closest?.(".cx-pattern-clip, .cx-audio-clip");
+    const clipEl = event.target.closest?.(".cx-pattern-clip, .cx-audio-clip, .cx-recording-clip");
     if (!clipEl) return false;
     const rect = clipEl.getBoundingClientRect();
     const threshold = Math.min(12, Math.max(8, rect.width * 0.16));
@@ -2689,22 +2813,115 @@ class CherryXMusicStudio {
   }
 
   async handleAudioUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const asset = { id: this.uuid(), serverId: null, name: file.name, size: file.size, type: file.type, url: URL.createObjectURL(file), uploaded: false };
-    this.assets.push(asset);
-    this.clips.push({ id: this.uuid(), type: "audio", name: file.name, track: 1, x: this.cellWidth, width: this.cellWidth * 6, assetId: asset.id, volume: 85, fadeIn: 0, fadeOut: 0, trimStart: 0, trimEnd: 0, muted: false });
-    this.renderAssets();
-    this.renderPlaylist();
-    this.saveHistory();
-    await this.uploadAssetToServer(file, asset);
+    const files = [...(event.target.files || [])];
+    if (!files.length) return;
+    await this.handleImportFiles(files);
     event.target.value = "";
   }
 
-  async uploadAssetToServer(file, asset) {
+  async handleImportFiles(files, placement = {}) {
+    let imported = 0;
+    let changed = 0;
+    const shouldPlace = placement.addToPlaylist !== false;
+    for (const file of files) {
+      const isAudio = this.isAudioFile(file);
+      const isPackage = this.isImportPackage(file);
+      if (isAudio && !isPackage) {
+        const asset = this.localAudioAsset(file);
+        this.assets.push(asset);
+        if (shouldPlace) {
+          const track = Number.isFinite(Number(placement.track)) ? Number(placement.track) : Math.min(this.tracks - 1, Math.max(0, this.assets.length - 1));
+          const x = Number.isFinite(Number(placement.x)) ? Number(placement.x) : this.cellWidth;
+          this.addAudioClipFromAsset(asset.id, track, x);
+        }
+        this.renderAssets();
+        this.renderPlaylist();
+        imported += 1;
+        changed += 1;
+        await this.uploadAssetToServer(file, asset);
+      } else {
+        const result = await this.uploadAssetToServer(file, null);
+        const serverAssets = Array.isArray(result?.assets) ? result.assets : (result?.asset ? [result.asset] : []);
+        const audioAssets = serverAssets.filter(item => this.isAudioAsset(item));
+        const sourceAssets = serverAssets.filter(item => !this.isAudioAsset(item));
+        if (audioAssets.length || sourceAssets.length) {
+          this.mergeServerAssets(serverAssets);
+          if (shouldPlace) {
+            audioAssets.forEach((asset, index) => {
+              const track = Number.isFinite(Number(placement.track)) && audioAssets.length === 1
+                ? Number(placement.track)
+                : this.ensureImportTrack(asset.name || file.name, index);
+              const x = Number.isFinite(Number(placement.x)) ? Number(placement.x) : 0;
+              this.addAudioClipFromAsset(asset.id, track, x);
+            });
+          }
+          imported += audioAssets.length;
+          changed += serverAssets.length;
+          this.renderAssets();
+          this.renderPlaylist();
+        }
+      }
+    }
+    if (changed) {
+      this.saveHistory();
+      this.toast(this.t("audio_imported", "Imported {count} audio file(s)", { count: imported }), imported ? "success" : "info");
+    }
+  }
+
+  localAudioAsset(file) {
+    return { id: this.uuid(), serverId: null, kind: "audio", name: file.name, size: file.size, type: file.type, media_type: file.type, url: URL.createObjectURL(file), uploaded: false };
+  }
+
+  isAudioFile(file) {
+    const name = String(file?.name || "").toLowerCase();
+    return String(file?.type || "").startsWith("audio/") || /\.(wav|mp3|ogg|oga|flac|m4a|aac|aiff|aif|webm)$/.test(name);
+  }
+
+  isImportPackage(file) {
+    const name = String(file?.name || "").toLowerCase();
+    return /\.(zip|flp|mid|midi)$/.test(name);
+  }
+
+  isAudioAsset(asset) {
+    return asset && (asset.kind === "audio" || String(asset.media_type || asset.type || "").startsWith("audio/"));
+  }
+
+  mergeServerAssets(serverAssets) {
+    serverAssets.forEach(serverAsset => {
+      const id = serverAsset.id;
+      const existing = this.assets.find(item => String(item.serverId || item.id) === String(id));
+      const normalized = {
+        id,
+        serverId: id,
+        kind: serverAsset.kind || "audio",
+        name: serverAsset.name || "Audio",
+        size: serverAsset.size || 0,
+        type: serverAsset.media_type || "",
+        media_type: serverAsset.media_type || "",
+        url: serverAsset.preview_url || "",
+        uploaded: true,
+        duration: Number(serverAsset.duration || 0),
+      };
+      if (existing) Object.assign(existing, normalized);
+      else this.assets.push(normalized);
+    });
+  }
+
+  ensureImportTrack(name, offset = 0) {
+    const clean = String(name || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+    const index = Math.min(23, Math.max(0, offset));
+    while (this.tracks <= index) {
+      this.tracks += 1;
+      this.trackNames[this.tracks - 1] = `${this.t("track", "Track")} ${this.tracks}`;
+    }
+    this.trackNames[index] = clean || this.trackNames[index] || `${this.t("track", "Track")} ${index + 1}`;
+    return index;
+  }
+
+  async uploadAssetToServer(file, asset = null) {
     if (!this.projectId) {
       this.toast(this.t("save_first_audio_local", "Save the project first; this audio is local for now."), "info");
-      return;
+      return null;
     }
     try {
       const formData = new FormData();
@@ -2716,15 +2933,562 @@ class CherryXMusicStudio {
       });
       if (!uploadResponse.ok) throw new Error(`Upload failed: ${uploadResponse.status}`);
       const data = await uploadResponse.json();
-      asset.uploaded = true;
-      asset.serverId = data.asset?.id || null;
-      asset.url = data.asset?.preview_url || asset.url;
-      this.renderAssets();
-      this.toast(this.t("audio_uploaded", "Audio uploaded"), "success");
+      if (asset && data.asset) {
+        asset.uploaded = true;
+        asset.serverId = data.asset.id || null;
+        asset.kind = data.asset.kind || asset.kind || "audio";
+        asset.url = data.asset.preview_url || asset.url;
+        this.renderAssets();
+      }
+      return data;
     } catch (error) {
       console.warn(error);
       this.toast(this.t("audio_local_upload_error", "Audio stayed local. Upload API error."), "error");
+      return null;
     }
+  }
+
+  async openDevicesModal() {
+    this.elements.deviceModal?.classList.remove("is-hidden");
+    await this.scanAudioDevices({ render: true, notify: false });
+  }
+
+  closeDevicesModal() {
+    this.elements.deviceModal?.classList.add("is-hidden");
+    this.stopDeviceTest();
+  }
+
+  async scanAudioDevices(options = {}) {
+    const lines = [];
+    try {
+      if (navigator.mediaDevices?.enumerateDevices) {
+        try {
+          const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          permissionStream.getTracks().forEach(track => track.stop());
+        } catch (_) {}
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        this.audioInputs = devices.filter(device => device.kind === "audioinput");
+        if (!this.activeAudioInputId && this.audioInputs[0]?.deviceId) this.activeAudioInputId = this.audioInputs[0].deviceId;
+        lines.push(`${this.audioInputs.length || 0} mic/input`);
+      } else {
+        lines.push("mic API unavailable");
+      }
+    } catch (error) {
+      lines.push("mic permission needed");
+    }
+    try {
+      if (navigator.requestMIDIAccess) {
+        this.midiAccess = await navigator.requestMIDIAccess();
+        this.midiInputs = [...this.midiAccess.inputs.values()];
+        if (!this.activeMidiInputId && this.midiInputs[0]?.id) this.activeMidiInputId = this.midiInputs[0].id;
+        lines.push(`${this.midiInputs.length || 0} MIDI in`);
+      } else {
+        lines.push("MIDI not supported");
+      }
+    } catch (error) {
+      lines.push("MIDI blocked");
+    }
+    const status = lines.join(" - ");
+    if (this.elements.deviceStatus) this.elements.deviceStatus.textContent = status;
+    if (this.elements.deviceSummary) this.elements.deviceSummary.textContent = status;
+    if (options.render) this.renderDevicesModal();
+    if (options.notify) this.toast(status, "info");
+    return status;
+  }
+
+  renderDevicesModal() {
+    if (this.elements.deviceMonitor) this.elements.deviceMonitor.checked = Boolean(this.monitorInput);
+    if (this.elements.deviceNoise) this.elements.deviceNoise.checked = Boolean(this.noiseReduction);
+    this.container.querySelectorAll("[data-input-role]").forEach(button => {
+      button.classList.toggle("active", button.dataset.inputRole === this.audioInputRole);
+    });
+    if (this.elements.audioInputList) {
+      this.elements.audioInputList.innerHTML = this.audioInputs.length
+        ? this.audioInputs.map((device, index) => `
+          <button type="button" class="${device.deviceId === this.activeAudioInputId ? "active" : ""}" data-audio-device-id="${this.escapeHtml(device.deviceId)}">
+            <b>${this.escapeHtml(device.label || `Audio input ${index + 1}`)}</b>
+            <span>${this.escapeHtml(device.deviceId === this.activeAudioInputId ? "Selected for Record" : "Use for recording")}</span>
+          </button>
+        `).join("")
+        : `<p>No audio inputs found. Allow microphone access and refresh.</p>`;
+      this.elements.audioInputList.querySelectorAll("[data-audio-device-id]").forEach(button => {
+        button.addEventListener("click", () => {
+          this.activeAudioInputId = button.dataset.audioDeviceId || "";
+          this.stopDeviceTest();
+          this.renderDevicesModal();
+          this.markDirty();
+        });
+      });
+    }
+    if (this.elements.midiInputList) {
+      this.elements.midiInputList.innerHTML = this.midiInputs.length
+        ? this.midiInputs.map((input, index) => `
+          <button type="button" class="${input.id === this.activeMidiInputId ? "active" : ""}" data-midi-device-id="${this.escapeHtml(input.id)}">
+            <b>${this.escapeHtml(input.name || `MIDI input ${index + 1}`)}</b>
+            <span>${this.escapeHtml(input.id === this.activeMidiInputId ? "Selected" : "Use keyboard")}</span>
+          </button>
+        `).join("")
+        : `<p>No MIDI input found. Connect a keyboard and refresh.</p>`;
+      this.elements.midiInputList.querySelectorAll("[data-midi-device-id]").forEach(button => {
+        button.addEventListener("click", () => {
+          this.activeMidiInputId = button.dataset.midiDeviceId || "";
+          this.listenToMidiInputs();
+          this.renderDevicesModal();
+          this.markDirty();
+        });
+      });
+    }
+    this.updateDeviceStatusLabel();
+  }
+
+  updateDeviceStatusLabel() {
+    const audio = this.audioInputs.find(device => device.deviceId === this.activeAudioInputId);
+    const midi = this.midiInputs.find(input => input.id === this.activeMidiInputId);
+    const role = this.audioInputRoleLabel(this.audioInputRole);
+    const label = `${role} - ${audio?.label || "Default mic"}${midi ? ` - ${midi.name || "MIDI"}` : ""}`;
+    if (this.elements.deviceStatus) this.elements.deviceStatus.textContent = label;
+    if (this.elements.deviceSummary) this.elements.deviceSummary.textContent = label;
+  }
+
+  audioInputRoleLabel(role) {
+    return ({ vocal: "Vocal", guitar: "Guitar", line: "Line", instrument: "Instrument" })[role] || "Input";
+  }
+
+  audioInputConstraints() {
+    const audio = {
+      echoCancellation: Boolean(this.noiseReduction),
+      noiseSuppression: Boolean(this.noiseReduction),
+      autoGainControl: Boolean(this.noiseReduction)
+    };
+    if (this.activeAudioInputId) audio.deviceId = { exact: this.activeAudioInputId };
+    return { audio };
+  }
+
+  async getSelectedAudioStream() {
+    try {
+      return await navigator.mediaDevices.getUserMedia(this.audioInputConstraints());
+    } catch (error) {
+      if (!this.activeAudioInputId) throw error;
+      this.activeAudioInputId = "";
+      this.renderDevicesModal();
+      return navigator.mediaDevices.getUserMedia(this.audioInputConstraints());
+    }
+  }
+
+  async toggleDeviceTest() {
+    if (this.deviceTestStream) {
+      this.stopDeviceTest();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.toast(this.t("recording_unavailable", "Recording is not available in this browser."), "error");
+      return;
+    }
+    try {
+      this.deviceTestStream = await this.getSelectedAudioStream();
+      this.startInputMeter();
+      this.attachInputMonitor();
+      this.container.querySelector("[data-device-test]")?.classList.add("is-active");
+      this.toast("Input test started", "success");
+    } catch (error) {
+      this.toast(this.t("recording_permission", "Allow microphone access to record."), "error");
+    }
+  }
+
+  stopDeviceTest() {
+    if (this.deviceMeterTimer) cancelAnimationFrame(this.deviceMeterTimer);
+    this.deviceMeterTimer = null;
+    try { this.deviceMonitorSource?.disconnect(); } catch (_) {}
+    this.deviceMonitorSource = null;
+    this.deviceAnalyser = null;
+    this.deviceTestStream?.getTracks().forEach(track => track.stop());
+    this.deviceTestStream = null;
+    if (this.elements.inputMeter) this.elements.inputMeter.style.width = "0%";
+    this.container.querySelector("[data-device-test]")?.classList.remove("is-active");
+  }
+
+  startInputMeter() {
+    if (!this.deviceTestStream) return;
+    this.deviceAudioContext = this.deviceAudioContext || new (window.AudioContext || window.webkitAudioContext)();
+    this.deviceAnalyser = this.deviceAudioContext.createAnalyser();
+    this.deviceAnalyser.fftSize = 256;
+    const source = this.deviceAudioContext.createMediaStreamSource(this.deviceTestStream);
+    source.connect(this.deviceAnalyser);
+    const data = new Uint8Array(this.deviceAnalyser.frequencyBinCount);
+    const tick = () => {
+      if (!this.deviceAnalyser) return;
+      this.deviceAnalyser.getByteTimeDomainData(data);
+      let peak = 0;
+      data.forEach(value => {
+        peak = Math.max(peak, Math.abs(value - 128));
+      });
+      const level = this.clamp(Math.round((peak / 70) * 100), 0, 100);
+      if (this.elements.inputMeter) this.elements.inputMeter.style.width = `${level}%`;
+      this.deviceMeterTimer = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  attachInputMonitor() {
+    if (!this.deviceTestStream || !this.deviceAudioContext) return;
+    try { this.deviceMonitorSource?.disconnect(); } catch (_) {}
+    this.deviceMonitorSource = null;
+    if (!this.monitorInput) return;
+    this.deviceMonitorSource = this.deviceAudioContext.createMediaStreamSource(this.deviceTestStream);
+    this.deviceMonitorSource.connect(this.deviceAudioContext.destination);
+  }
+
+  listenToMidiInputs() {
+    if (!this.midiAccess) {
+      this.scanAudioDevices({ render: true, notify: false }).then(() => this.listenToMidiInputs());
+      return;
+    }
+    this.midiInputs.forEach(input => {
+      input.onmidimessage = message => this.handleMidiMessage(message, input);
+    });
+    this.container.querySelector("[data-midi-test]")?.classList.add("is-active");
+    if (this.elements.midiReadout) this.elements.midiReadout.textContent = "Live MIDI sound is on. Use the selected studio instrument.";
+  }
+
+  handleMidiMessage(message, input) {
+    if (this.activeMidiInputId && input.id !== this.activeMidiInputId) return;
+    const [status, note, velocity] = message.data || [];
+    const command = status & 0xf0;
+    if (command !== 0x90 && command !== 0x80) return;
+    const isOn = command === 0x90 && velocity > 0;
+    const noteName = this.midiNoteName(note);
+    if (isOn) this.playMidiLiveNote(noteName, velocity);
+    if (this.elements.midiReadout) {
+      this.elements.midiReadout.textContent = `${isOn ? "Key" : "Release"} ${noteName} - velocity ${velocity || 0}`;
+    }
+  }
+
+  async playMidiLiveNote(noteName, velocity = 90) {
+    await this.unlockAudio();
+    const channel = this.getSelectedChannel() || this.channels.find(item => item.type === "instrument") || this.channels[0];
+    if (!channel) return;
+    const pack = this.ensureSynth(channel);
+    if (!pack?.synth) return;
+    try {
+      pack.synth.triggerAttackRelease(noteName, "8n", undefined, this.clamp(Number(velocity || 90) / 127, 0.08, 1));
+    } catch (_) {}
+  }
+
+  midiNoteName(note) {
+    const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const value = Number(note || 0);
+    const octave = Math.floor(value / 12) - 1;
+    return `${names[value % 12]}${octave}`;
+  }
+
+  async legacyScanAudioDevices() {
+    const lines = [];
+    try {
+      if (navigator.mediaDevices?.enumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const inputs = devices.filter(device => device.kind === "audioinput");
+        lines.push(`${inputs.length || 0} mic/input`);
+      } else {
+        lines.push("mic API unavailable");
+      }
+    } catch (error) {
+      lines.push("mic permission needed");
+    }
+    try {
+      if (navigator.requestMIDIAccess) {
+        const midi = await navigator.requestMIDIAccess();
+        lines.push(`${midi.inputs.size || 0} MIDI in`);
+      } else {
+        lines.push("MIDI not supported");
+      }
+    } catch (error) {
+      lines.push("MIDI blocked");
+    }
+    const status = lines.join(" · ");
+    if (this.elements.deviceStatus) this.elements.deviceStatus.textContent = status;
+    this.toast(status, "info");
+  }
+
+  async toggleAudioRecording() {
+    if (this.isRecording) {
+      this.pause();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      this.toast(this.t("recording_unavailable", "Recording is not available in this browser."), "error");
+      return;
+    }
+    try {
+      this.stopDeviceTest();
+      this.recordStream = await this.getSelectedAudioStream();
+      this.recordChunks = [];
+      this.recordingStartTime = Math.max(0, Number(this.currentTime || 0));
+      this.recordingEndTime = this.recordingStartTime;
+      this.recordingTrack = this.ensureRecordingTrack();
+      this.createRecordingPlaceholder();
+      const type = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+      this.mediaRecorder = new MediaRecorder(this.recordStream, type ? { mimeType: type } : undefined);
+      this.mediaRecorder.addEventListener("dataavailable", event => {
+        if (event.data && event.data.size) this.recordChunks.push(event.data);
+      });
+      this.mediaRecorder.addEventListener("stop", () => this.finishAudioRecording());
+      this.mediaRecorder.start();
+      this.isRecording = true;
+      this.container.classList.add("is-recording");
+      if (this.elements.recordLabel) this.elements.recordLabel.textContent = this.t("stop", "Stop");
+      this.container.querySelector('[data-action="record-audio"]')?.classList.add("is-recording");
+      if (this.elements.deviceStatus) this.elements.deviceStatus.textContent = this.t("recording_from", "Recording from {time}", { time: this.formatTime(this.recordingStartTime) });
+      this.toast(this.t("recording_started", "Recording started"), "success");
+      if (!this.isPlaying) await this.play();
+    } catch (error) {
+      this.removeRecordingPlaceholder();
+      this.toast(this.t("recording_permission", "Allow microphone access to record."), "error");
+    }
+  }
+
+  stopAudioRecording() {
+    this.recordingEndTime = Math.max(this.recordingStartTime, Number(this.currentTime || this.recordingStartTime));
+    try {
+      this.mediaRecorder?.stop();
+    } catch (_) {}
+  }
+
+  async finishAudioRecording() {
+    this.isRecording = false;
+    this.container.classList.remove("is-recording");
+    this.recordStream?.getTracks().forEach(track => track.stop());
+    this.recordStream = null;
+    this.mediaRecorder = null;
+    if (this.elements.recordLabel) this.elements.recordLabel.textContent = this.t("mic", "Mic");
+    this.container.querySelector('[data-action="record-audio"]')?.classList.remove("is-recording");
+    const blob = new Blob(this.recordChunks, { type: this.recordChunks[0]?.type || "audio/webm" });
+    this.recordChunks = [];
+    const startTime = this.recordingStartTime;
+    const endTime = Math.max(this.recordingEndTime, startTime + 0.05);
+    const track = this.recordingTrack;
+    this.removeRecordingPlaceholder();
+    if (!blob.size) return;
+    const file = new File([blob], `recording-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`, { type: blob.type || "audio/webm" });
+    if (this.elements.deviceStatus) this.elements.deviceStatus.textContent = this.t("recording_saved", "Recording added to files.");
+    await this.addRecordedFile(file, startTime, endTime, track);
+  }
+
+  ensureRecordingTrack() {
+    const existing = this.trackNames.findIndex(name => /record|запис/i.test(String(name || "")));
+    if (existing >= 0) return existing;
+    if (this.tracks < 12) {
+      const index = this.tracks;
+      this.tracks += 1;
+      this.trackNames[index] = this.t("recording_track", "Recording");
+      this.renderTrackGrid();
+      this.renderPlaylist();
+      return index;
+    }
+    return Math.max(0, this.tracks - 1);
+  }
+
+  createRecordingPlaceholder() {
+    this.removeRecordingPlaceholder();
+    const clip = {
+      id: this.uuid(),
+      type: "recording",
+      name: this.t("recording", "Recording"),
+      track: this.clamp(this.recordingTrack, 0, this.tracks - 1),
+      x: this.secondsToPixels(this.recordingStartTime),
+      width: Math.max(this.cellWidth, 2),
+      color: "#ef4444"
+    };
+    this.recordingClipId = clip.id;
+    this.clips.push(clip);
+    this.renderPlaylist();
+    this.updateRecordingClip();
+  }
+
+  updateRecordingClip() {
+    if (!this.isRecording || !this.recordingClipId) return;
+    const clip = this.clips.find(item => item.id === this.recordingClipId);
+    if (!clip) return;
+    clip.width = Math.max(this.cellWidth, this.secondsToPixels(Math.max(0.05, this.currentTime - this.recordingStartTime)));
+    const el = this.container.querySelector(`[data-clip-id="${clip.id}"]`);
+    if (!el) {
+      this.renderPlaylist();
+      return;
+    }
+    el.style.width = `${clip.width}px`;
+    const time = el.querySelector(".cx-recording-time");
+    if (time) time.textContent = this.formatTime(Math.max(0, this.currentTime - this.recordingStartTime));
+  }
+
+  removeRecordingPlaceholder() {
+    if (!this.recordingClipId) return;
+    this.clips = this.clips.filter(clip => clip.id !== this.recordingClipId);
+    this.recordingClipId = null;
+    this.renderPlaylist();
+  }
+
+  async addRecordedFile(file, startTime, endTime, track) {
+    const asset = this.localAudioAsset(file);
+    this.assets.push(asset);
+    this.renderAssets();
+    const width = Math.max(this.cellWidth, this.secondsToPixels(Math.max(0.1, endTime - startTime)));
+    const clip = this.addAudioClipFromAsset(asset.id, track, this.secondsToPixels(startTime), { width, saveHistory: false });
+    await this.uploadAssetToServer(file, asset);
+    if (clip) {
+      clip.assetId = asset.serverId || asset.id;
+      this.renderPlaylist();
+      this.selectClip(clip.id);
+    }
+    this.saveHistory();
+  }
+
+  renderLyricsPad() {
+    if (!this.elements.lyricsPad || !this.elements.lyricsEditor) return;
+    this.elements.lyricsPad.classList.toggle("is-hidden", !this.lyricsPanel.open);
+    this.elements.lyricsPad.classList.toggle("is-minimized", Boolean(this.lyricsPanel.minimized));
+    this.container.querySelector('[data-action="toggle-lyrics"]')?.classList.toggle("is-active", Boolean(this.lyricsPanel.open));
+    if (this.elements.lyricsEditor.innerHTML !== this.projectLyrics) {
+      this.elements.lyricsEditor.innerHTML = this.projectLyrics || "";
+    }
+    this.applyLyricsPanelMetrics();
+    this.updateLyricsCount();
+  }
+
+  toggleLyricsPad() {
+    this.lyricsPanel.open = !this.lyricsPanel.open;
+    if (this.lyricsPanel.open) this.lyricsPanel.minimized = false;
+    this.renderLyricsPad();
+    this.markDirty();
+    if (this.lyricsPanel.open) {
+      window.setTimeout(() => this.elements.lyricsEditor?.focus(), 80);
+    }
+  }
+
+  closeLyricsPad() {
+    this.commitLyricsNow();
+    this.lyricsPanel.open = false;
+    this.renderLyricsPad();
+    this.markDirty();
+  }
+
+  minimizeLyricsPad() {
+    this.commitLyricsNow();
+    this.lyricsPanel.minimized = !this.lyricsPanel.minimized;
+    this.renderLyricsPad();
+    this.markDirty();
+  }
+
+  handleLyricsInput() {
+    this.projectLyrics = this.sanitizeLyricsHtml(this.elements.lyricsEditor?.innerHTML || "");
+    this.updateLyricsCount();
+    clearTimeout(this.lyricsSaveTimer);
+    this.lyricsSaveTimer = setTimeout(() => {
+      this.projectLyrics = this.sanitizeLyricsHtml(this.elements.lyricsEditor?.innerHTML || "");
+      this.markDirty();
+    }, 420);
+  }
+
+  commitLyricsNow() {
+    clearTimeout(this.lyricsSaveTimer);
+    if (!this.elements.lyricsEditor) return;
+    const next = this.sanitizeLyricsHtml(this.elements.lyricsEditor.innerHTML || "");
+    if (next !== this.projectLyrics) {
+      this.projectLyrics = next;
+      this.markDirty();
+    }
+    this.updateLyricsCount();
+  }
+
+  applyLyricsCommand(command, value = null) {
+    if (!this.elements.lyricsEditor) return;
+    this.elements.lyricsEditor.focus();
+    if (command === "formatBlock") {
+      document.execCommand(command, false, value || "p");
+    } else {
+      document.execCommand(command, false, value);
+    }
+    this.handleLyricsInput();
+  }
+
+  updateLyricsCount() {
+    if (!this.elements.lyricsCount) return;
+    const text = (this.elements.lyricsEditor?.innerText || "").trim();
+    const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+    this.elements.lyricsCount.textContent = `${words} ${words === 1 ? "word" : "words"}`;
+  }
+
+  startLyricsDrag(event) {
+    if (!this.elements.lyricsPad || event.target.closest("button")) return;
+    event.preventDefault();
+    this.lyricsPanel.open = true;
+    const pad = this.elements.lyricsPad;
+    const rect = pad.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = rect.left;
+    const originY = rect.top;
+    try { pad.setPointerCapture?.(event.pointerId); } catch (_) {}
+    pad.classList.add("is-dragging");
+    const move = moveEvent => {
+      const nextX = this.clamp(originX + moveEvent.clientX - startX, 8, Math.max(8, window.innerWidth - rect.width - 8));
+      const nextY = this.clamp(originY + moveEvent.clientY - startY, 8, Math.max(8, window.innerHeight - 56));
+      this.lyricsPanel.x = Math.round(nextX);
+      this.lyricsPanel.y = Math.round(nextY);
+      this.applyLyricsPanelMetrics();
+    };
+    const stop = () => {
+      pad.classList.remove("is-dragging");
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.removeEventListener("pointercancel", stop);
+      this.storeLyricsPanelMetrics();
+      this.markDirty();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+    document.addEventListener("pointercancel", stop);
+  }
+
+  applyLyricsPanelMetrics() {
+    const pad = this.elements.lyricsPad;
+    if (!pad) return;
+    const isMobile = window.matchMedia?.("(max-width: 760px)")?.matches;
+    const width = this.clamp(Number(this.lyricsPanel.width || 390), isMobile ? 280 : 320, Math.max(300, window.innerWidth - 16));
+    const height = this.clamp(Number(this.lyricsPanel.height || 460), 170, Math.max(220, window.innerHeight - 16));
+    const defaultX = Math.max(8, window.innerWidth - width - 22);
+    const defaultY = isMobile ? 82 : 96;
+    const x = this.clamp(Number(this.lyricsPanel.x ?? defaultX), 8, Math.max(8, window.innerWidth - width - 8));
+    const y = this.clamp(Number(this.lyricsPanel.y ?? defaultY), 8, Math.max(8, window.innerHeight - 56));
+    pad.style.width = `${width}px`;
+    pad.style.height = this.lyricsPanel.minimized ? "48px" : `${height}px`;
+    pad.style.left = `${x}px`;
+    pad.style.top = `${y}px`;
+  }
+
+  storeLyricsPanelMetrics() {
+    const pad = this.elements.lyricsPad;
+    if (!pad || !this.lyricsPanel.open) return;
+    const rect = pad.getBoundingClientRect();
+    this.lyricsPanel.x = Math.round(rect.left);
+    this.lyricsPanel.y = Math.round(rect.top);
+    if (!this.lyricsPanel.minimized) {
+      this.lyricsPanel.width = Math.round(rect.width);
+      this.lyricsPanel.height = Math.round(rect.height);
+    }
+    this.markDirty();
+  }
+
+  sanitizeLyricsHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html || "";
+    template.content.querySelectorAll("script, style, iframe, object, embed, link, meta").forEach(node => node.remove());
+    template.content.querySelectorAll("*").forEach(node => {
+      [...node.attributes].forEach(attr => {
+        const name = attr.name.toLowerCase();
+        const value = attr.value || "";
+        if (name.startsWith("on") || /javascript:/i.test(value)) node.removeAttribute(attr.name);
+      });
+    });
+    return template.innerHTML;
   }
 
   renderAssets() {
@@ -2743,27 +3507,29 @@ class CherryXMusicStudio {
       return;
     }
     visibleAssets.forEach(asset => {
+      const playable = this.isAudioAsset(asset);
       const item = document.createElement("div");
-      item.className = "cx-asset-item";
-      item.draggable = true;
+      item.className = `cx-asset-item ${playable ? "is-audio" : "is-source"}`;
+      item.draggable = playable;
       item.dataset.assetId = asset.serverId || asset.id;
       item.innerHTML = `
         <div class="cx-asset-icon"><span></span></div>
         <div class="cx-asset-copy">
           <div class="cx-asset-title">${this.escapeHtml(asset.name)}</div>
-          <div class="cx-asset-meta">${this.formatBytes(asset.size)} - ${asset.uploaded ? this.escapeHtml(this.t("uploaded", "uploaded")) : this.escapeHtml(this.t("local", "local"))}</div>
+          <div class="cx-asset-meta">${this.escapeHtml(playable ? this.t("audio", "Audio") : this.t("source_file", "Source"))} - ${this.formatBytes(asset.size)} - ${asset.uploaded ? this.escapeHtml(this.t("uploaded", "uploaded")) : this.escapeHtml(this.t("local", "local"))}</div>
         </div>
         <div class="cx-asset-actions">
-          <button type="button" class="cx-asset-add" title="${this.escapeHtml(this.t("add_to_playlist", "Add to playlist"))}">+</button>
-          <button type="button" class="cx-asset-preview" title="${this.escapeHtml(this.t("preview", "Preview"))}">${this.escapeHtml(this.t("play", "Play"))}</button>
+          ${playable ? `<button type="button" class="cx-asset-add" title="${this.escapeHtml(this.t("add_to_playlist", "Add to playlist"))}" aria-label="${this.escapeHtml(this.t("add_to_playlist", "Add to playlist"))}"></button>` : ""}
+          <button type="button" class="cx-asset-preview" title="${this.escapeHtml(playable ? this.t("preview", "Preview") : this.t("open", "Open"))}" aria-label="${this.escapeHtml(playable ? this.t("preview", "Preview") : this.t("open", "Open"))}"></button>
         </div>
       `;
       item.addEventListener("dragstart", event => {
+        if (!playable) return;
         event.dataTransfer?.setData("text/cx-asset-id", String(asset.serverId || asset.id));
         event.dataTransfer?.setData("text/plain", String(asset.serverId || asset.id));
       });
       item.addEventListener("dblclick", () => {
-        this.addAudioClipFromAsset(asset.serverId || asset.id, 1, this.cellWidth);
+        if (playable) this.addAudioClipFromAsset(asset.serverId || asset.id, 1, this.cellWidth);
       });
       item.querySelector(".cx-asset-add")?.addEventListener("click", event => {
         event.stopPropagation();
@@ -2771,10 +3537,38 @@ class CherryXMusicStudio {
       });
       item.querySelector(".cx-asset-preview")?.addEventListener("click", event => {
         event.stopPropagation();
-        new Audio(asset.url).play().catch(() => {});
+        if (playable) this.toggleAssetPreview(asset, event.currentTarget);
+        else if (asset.url) window.open(asset.url, "_blank", "noopener");
       });
       this.elements.assetList.appendChild(item);
     });
+  }
+
+  toggleAssetPreview(asset, button) {
+    if (!asset?.url) return;
+    if (this.assetPreviewAudio && this.assetPreviewButton === button) {
+      this.stopAssetPreview();
+      return;
+    }
+    this.stopAssetPreview();
+    const audio = new Audio(asset.url);
+    this.assetPreviewAudio = audio;
+    this.assetPreviewButton = button;
+    button.classList.add("is-playing");
+    audio.addEventListener("ended", () => this.stopAssetPreview(), { once: true });
+    audio.play().catch(() => this.stopAssetPreview());
+  }
+
+  stopAssetPreview() {
+    if (this.assetPreviewAudio) {
+      try {
+        this.assetPreviewAudio.pause();
+        this.assetPreviewAudio.currentTime = 0;
+      } catch (_) {}
+    }
+    this.assetPreviewButton?.classList.remove("is-playing");
+    this.assetPreviewAudio = null;
+    this.assetPreviewButton = null;
   }
 
   addChannel() {
@@ -3872,7 +4666,8 @@ class CherryXMusicStudio {
       (
         (Array.isArray(state.patterns) && state.patterns.length) ||
         (Array.isArray(state.clips) && state.clips.length) ||
-        (Array.isArray(state.assets) && state.assets.length)
+        (Array.isArray(state.assets) && state.assets.length) ||
+        Boolean(String(state.lyrics?.html || state.projectLyrics || "").replace(/<[^>]+>/g, "").trim())
       )
     );
   }
@@ -3880,7 +4675,8 @@ class CherryXMusicStudio {
   stateWeight(state) {
     if (!state || typeof state !== "object") return 0;
     const notes = (state.patterns || []).reduce((sum, pattern) => sum + (pattern.notes || []).length + Object.values(pattern.stepsByChannel || {}).flat().filter(Boolean).length, 0);
-    return (state.patterns || []).length + (state.clips || []).length * 3 + (state.assets || []).length * 2 + notes;
+    const lyricWeight = String(state.lyrics?.html || state.projectLyrics || "").replace(/<[^>]+>/g, "").trim() ? 2 : 0;
+    return (state.patterns || []).length + (state.clips || []).length * 3 + (state.assets || []).length * 2 + notes + lyricWeight;
   }
 
   undo() {
@@ -3919,6 +4715,13 @@ class CherryXMusicStudio {
       this.activeView = state.activeView || this.activeView;
       this.arrangeTool = state.arrangeTool || this.arrangeTool;
       this.tool = state.tool || this.tool;
+      this.projectLyrics = this.sanitizeLyricsHtml(state.lyrics?.html || state.projectLyrics || this.projectLyrics || "");
+      this.lyricsPanel = { ...this.lyricsPanel, ...(state.lyricsPanel || {}) };
+      this.activeAudioInputId = state.devices?.audioInputId || this.activeAudioInputId;
+      this.activeMidiInputId = state.devices?.midiInputId || this.activeMidiInputId;
+      this.audioInputRole = state.devices?.audioInputRole || this.audioInputRole;
+      this.monitorInput = Boolean(state.devices?.monitorInput ?? this.monitorInput);
+      this.noiseReduction = Boolean(state.devices?.noiseReduction ?? this.noiseReduction);
       this.noteLengthBeats = Number(state.noteLengthBeats || this.noteLengthBeats);
       this.selectedPatternId = state.selectedPatternId || this.patterns[0]?.id || null;
       this.selectedChannelId = state.selectedChannelId || this.channels[0]?.id || null;
@@ -3994,16 +4797,34 @@ class CherryXMusicStudio {
     if (Array.isArray(state.channels) && state.channels.length) this.channels = state.channels;
     if (Array.isArray(state.patterns) && state.patterns.length) this.patterns = state.patterns;
     if (Array.isArray(state.clips)) this.clips = state.clips;
-    if (Array.isArray(state.assets)) this.assets = state.assets;
+    if (Array.isArray(state.assets)) {
+      this.assets = state.assets.map(asset => ({
+        ...asset,
+        kind: asset.kind || (String(asset.media_type || asset.type || "").startsWith("audio/") ? "audio" : "source"),
+        serverId: asset.serverId || asset.id,
+        url: asset.url || asset.preview_url || "",
+        uploaded: asset.uploaded !== false,
+      }));
+    }
     this.noteLengthBeats = Number(state.noteLengthBeats || this.noteLengthBeats);
+    this.projectLyrics = this.sanitizeLyricsHtml(state.lyrics?.html || state.projectLyrics || "");
+    this.lyricsPanel = { ...this.lyricsPanel, ...(state.lyricsPanel || {}) };
+    this.activeAudioInputId = state.devices?.audioInputId || this.activeAudioInputId;
+    this.activeMidiInputId = state.devices?.midiInputId || this.activeMidiInputId;
+    this.audioInputRole = state.devices?.audioInputRole || this.audioInputRole;
+    this.monitorInput = Boolean(state.devices?.monitorInput ?? this.monitorInput);
+    this.noiseReduction = Boolean(state.devices?.noiseReduction ?? this.noiseReduction);
     if (!this.assets.length && Array.isArray(payload.assets)) {
       this.assets = payload.assets.map(asset => ({
         id: String(asset.id),
         serverId: asset.id,
+        kind: asset.kind || "audio",
         name: asset.name,
         size: asset.size,
         type: asset.media_type,
+        media_type: asset.media_type,
         url: asset.preview_url,
+        duration: Number(asset.duration || 0),
         uploaded: true
       }));
     }
@@ -4030,6 +4851,9 @@ class CherryXMusicStudio {
   }
 
   getState() {
+    if (this.elements.lyricsEditor) {
+      this.projectLyrics = this.sanitizeLyricsHtml(this.elements.lyricsEditor.innerHTML || "");
+    }
     const ratio = this.baseCellWidth / this.cellWidth;
     const clips = this.clips.map(clip => ({
       ...clip,
@@ -4063,6 +4887,18 @@ class CherryXMusicStudio {
         url: asset.uploaded ? asset.url : "",
         uploaded: Boolean(asset.uploaded)
       })),
+      lyrics: {
+        html: this.projectLyrics,
+        text: this.elements.lyricsEditor?.innerText || ""
+      },
+      lyricsPanel: this.lyricsPanel,
+      devices: {
+        audioInputId: this.activeAudioInputId,
+        midiInputId: this.activeMidiInputId,
+        audioInputRole: this.audioInputRole,
+        monitorInput: Boolean(this.monitorInput),
+        noiseReduction: Boolean(this.noiseReduction)
+      },
       selectedPatternId: this.selectedPatternId,
       selectedChannelId: this.selectedChannelId,
       noteLengthBeats: this.noteLengthBeats,

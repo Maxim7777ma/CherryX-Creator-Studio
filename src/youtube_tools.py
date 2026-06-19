@@ -9,6 +9,7 @@ import numpy as np
 from pathlib import Path
 import random
 import re
+import shutil
 import subprocess
 import urllib.error
 import urllib.parse
@@ -20,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 from yt_dlp import YoutubeDL
 
 from . import native_tools
-from .image_tools import clean_base_name
+from .image_tools import clean_base_name, human_size
 from .video_tools import ffmpeg_path, format_duration, has_audio_stream, inspect_video
 
 
@@ -186,11 +187,19 @@ def get_youtube_metadata(url: str, timeout_seconds: int) -> YouTubeMetadata:
     )
 
 
-def download_youtube_video(url: str, output_dir: Path, timeout_seconds: int) -> YouTubeDownload:
+def download_youtube_video(url: str, output_dir: Path, timeout_seconds: int, estimated_size_bytes: int | None = None) -> YouTubeDownload:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_download_space(output_dir, estimated_size_bytes)
     ydl_opts = _youtube_options(output_dir, timeout_seconds)
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as exc:
+        _cleanup_partial_downloads(output_dir)
+        message = str(exc)
+        if "No space left on device" in message or "not enough space" in message.lower():
+            raise RuntimeError(_storage_error_message(output_dir, estimated_size_bytes)) from exc
+        raise
 
     if not info:
         raise RuntimeError("Не удалось получить данные видео")
@@ -219,6 +228,42 @@ def estimate_cut_time(duration_seconds: float, clip_count: int, clip_seconds: in
     multiplier = 1.8 if face_focus else 1.2
     estimate = max(20, int(total_clip_seconds * multiplier))
     return f"about {format_duration(estimate)}"
+
+
+def _ensure_download_space(output_dir: Path, estimated_size_bytes: int | None) -> None:
+    if not estimated_size_bytes:
+        return
+    disk_path = output_dir if output_dir.exists() else output_dir.parent
+    free_bytes = shutil.disk_usage(disk_path).free
+    # yt-dlp often keeps video, audio and merged output at the same time.
+    required = max(900 * 1024 * 1024, int(estimated_size_bytes * 2.35))
+    if free_bytes < required:
+        raise RuntimeError(_storage_error_message(output_dir, estimated_size_bytes, free_bytes, required))
+
+
+def _cleanup_partial_downloads(output_dir: Path) -> None:
+    for pattern in ("*.part", "*.temp.*", "*.ytdl", "*.frag"):
+        for path in output_dir.glob(pattern):
+            try:
+                path.unlink()
+            except OSError:
+                continue
+
+
+def _storage_error_message(
+    output_dir: Path,
+    estimated_size_bytes: int | None = None,
+    free_bytes: int | None = None,
+    required_bytes: int | None = None,
+) -> str:
+    disk_path = output_dir if output_dir.exists() else output_dir.parent
+    free = shutil.disk_usage(disk_path).free if free_bytes is None else free_bytes
+    required = required_bytes or (int(estimated_size_bytes * 2.35) if estimated_size_bytes else 900 * 1024 * 1024)
+    return (
+        "Недостаточно места на диске для YouTube-задачи. "
+        f"Свободно: {human_size(free)}, нужно примерно: {human_size(required)}. "
+        "Освободите место или перенесите STORAGE_DIR на диск с большим объёмом."
+    )
 
 
 def planned_clip_count(duration_seconds: float, max_clips: int, clip_seconds: int) -> int:

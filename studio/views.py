@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import json
 import html
 import mimetypes
+import random
 import re
 import secrets
 import shutil
@@ -17,15 +18,18 @@ import subprocess
 import threading
 import time
 import uuid
+import zipfile
 
 from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.core.files import File
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Count, F, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.html import strip_tags
@@ -33,22 +37,22 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from docx import Document
 from pypdf import PdfReader
 
 from billing.plans import PLANS, get_plan
-from billing.services import active_access_until, prorated_due_cents, transfer_guest_workspace, user_has_active_access
+from billing.services import active_access_until, ensure_telegram_link_token, prorated_due_cents, transfer_guest_workspace, user_has_active_access
 from src.config import get_settings
 from src.image_tools import clean_base_name, human_size
 from src.job_service import job_service as actions
 from src.video_tools import ffmpeg_path, inspect_video
 from src.youtube_tools import SubtitleUnavailableError, normalize_subtitle_language, transcribe_subtitle_cues
-from .forms import AccountSettingsForm, EmailLoginForm, RegisterForm
+from .forms import AccountSettingsForm, CommunityWorkForm, EmailLoginForm, RegisterForm
 from .documentation_content import documentation_content
 from .legal_documents import legal_document_content
 from .localization import LANGUAGE_OPTIONS, app_messages, clean_language, localized_plan, music_messages, repair_mojibake, translate
-from .models import AccountProfile, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
+from .models import AccountProfile, CommunityPurchase, CommunityWork, DesignerAsset, DesignerProject, JobEventRecord, JobOutputRecord, JobRecord, LearningArticle, MagicLoginToken, MusicEditorAsset, MusicEditorProject, VideoEditorAsset, VideoEditorProject, WorkspaceShare
 
 
 settings = get_settings()
@@ -135,6 +139,379 @@ def documentation(request: HttpRequest):
 
 
 @require_GET
+def learn_index(request: HttpRequest):
+    articles = LearningArticle.objects.filter(status=LearningArticle.STATUS_PUBLISHED).order_by("-featured", "-published_at", "-created_at")
+    return render(
+        request,
+        "studio/learn_index.html",
+        {
+            "articles": articles,
+            "featured_article": articles.first(),
+            "seo_title": "CherryX learning articles",
+            "seo_description": "Practical CherryX Creator Studio lessons for video, images, texts, publishing workflow and Telegram Stars payments.",
+        },
+    )
+
+
+@require_GET
+def learn_article(request: HttpRequest, slug: str):
+    article = get_object_or_404(LearningArticle, slug=slug, status=LearningArticle.STATUS_PUBLISHED)
+    return render(
+        request,
+        "studio/learn_article.html",
+        {
+            "article": article,
+            "seo_title": article.seo_title or article.title,
+            "seo_description": article.seo_description or article.excerpt or strip_tags(article.body)[:240],
+        },
+    )
+
+
+def _community_queryset(kind: str):
+    return (
+        CommunityWork.objects.filter(kind=kind, status=CommunityWork.STATUS_PUBLISHED)
+        .select_related("owner")
+        .annotate(total_purchases=Count("purchases"))
+        .order_by("-featured", "-published_at", "-created_at")
+    )
+
+
+def _community_kind_meta(kind: str) -> dict[str, str]:
+    return {
+        CommunityWork.KIND_VIDEO: {
+            "title": "CherryX Video Gallery",
+            "eyebrow": "Video network",
+            "description": "Pinterest-style feed of videos created or shared through CherryX Creator Studio.",
+            "icon": "video",
+        },
+        CommunityWork.KIND_IMAGE: {
+            "title": "CherryX Image Gallery",
+            "eyebrow": "Image network",
+            "description": "A visual feed for covers, designs, previews and images created on the platform or uploaded by users.",
+            "icon": "image",
+        },
+        CommunityWork.KIND_TEXT: {
+            "title": "CherryX Text Library",
+            "eyebrow": "Text network",
+            "description": "Articles, text packs, prompts and written works shared by CherryX users.",
+            "icon": "file-text",
+        },
+    }[kind]
+
+
+def _community_source_kind_from_media(media_type: str, path: str) -> str:
+    value = (media_type or mimetypes.guess_type(path)[0] or "").lower()
+    suffix = Path(path or "").suffix.lower()
+    if value.startswith("video/") or suffix in {".mp4", ".mov", ".webm", ".m4v"}:
+        return CommunityWork.KIND_VIDEO
+    if value.startswith("image/") or suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        return CommunityWork.KIND_IMAGE
+    return CommunityWork.KIND_TEXT
+
+
+def _community_source_for_user(user, source: str, source_id: str) -> dict[str, object] | None:
+    source = (source or "").strip()
+    source_id = (source_id or "").strip()
+    if not user or not getattr(user, "is_authenticated", False) or not source_id:
+        return None
+    if source == "job":
+        record = JobRecord.objects.filter(owner=user, job_id=source_id).prefetch_related("outputs").first()
+        if not record:
+            return None
+        output = record.outputs.first()
+        path = str(output.path) if output else ""
+        kind = _community_source_kind_from_media(output.media_type if output else "", path)
+        return {
+            "source": source,
+            "source_id": source_id,
+            "title": record.title,
+            "excerpt": f"Published from CherryX task {record.job_id}.",
+            "kind": kind,
+            "media_path": path if path and Path(path).exists() else "",
+            "cover_path": path if kind == CommunityWork.KIND_IMAGE and path and Path(path).exists() else "",
+            "source_job": record,
+        }
+    if source == "video_project":
+        project = VideoEditorProject.objects.filter(owner=user, id=source_id).prefetch_related("assets").first()
+        if not project:
+            return None
+        first_video = next((asset for asset in project.assets.all() if str(asset.kind).lower() == "video" and asset.file_path and Path(asset.file_path).exists()), None)
+        first_thumb = next((asset for asset in project.assets.all() if asset.thumbnail_path and Path(asset.thumbnail_path).exists()), None)
+        return {
+            "source": source,
+            "source_id": source_id,
+            "title": project.title,
+            "excerpt": "Published from a CherryX video workspace.",
+            "kind": CommunityWork.KIND_VIDEO,
+            "media_path": first_video.file_path if first_video else "",
+            "cover_path": project.thumbnail_path if project.thumbnail_path and Path(project.thumbnail_path).exists() else (first_thumb.thumbnail_path if first_thumb else ""),
+            "source_video_project": project,
+        }
+    if source == "design_project":
+        project = DesignerProject.objects.filter(owner=user, id=source_id).first()
+        if not project:
+            return None
+        return {
+            "source": source,
+            "source_id": source_id,
+            "title": project.title,
+            "excerpt": "Published from a CherryX design workspace.",
+            "kind": CommunityWork.KIND_IMAGE,
+            "media_path": project.preview_path if project.preview_path and Path(project.preview_path).exists() else "",
+            "cover_path": project.preview_path if project.preview_path and Path(project.preview_path).exists() else "",
+            "source_design_project": project,
+        }
+    if source == "music_project":
+        project = MusicEditorProject.objects.filter(owner=user, id=source_id).first()
+        if not project:
+            return None
+        return {
+            "source": source,
+            "source_id": source_id,
+            "title": project.title,
+            "excerpt": "Published from a CherryX music workspace.",
+            "kind": CommunityWork.KIND_TEXT,
+            "body": "Audio project preview. Add a description, usage notes or lyrics before publishing.",
+            "media_path": "",
+            "cover_path": "",
+        }
+    return None
+
+
+def _copy_source_path_to_field(work: CommunityWork, field_name: str, source_path: str, folder: str) -> None:
+    path = Path(source_path or "")
+    if not path.exists() or not path.is_file():
+        return
+    safe_name = f"{folder}/{uuid.uuid4().hex[:12]}-{path.name[:80]}"
+    field = getattr(work, field_name)
+    with path.open("rb") as source_file:
+        field.save(safe_name, File(source_file), save=False)
+
+
+def _apply_community_source(work: CommunityWork, source_payload: dict[str, object] | None) -> None:
+    if not source_payload:
+        return
+    if source_payload.get("source_job"):
+        work.source_job = source_payload["source_job"]
+    if source_payload.get("source_video_project"):
+        work.source_video_project = source_payload["source_video_project"]
+    if source_payload.get("source_design_project"):
+        work.source_design_project = source_payload["source_design_project"]
+    if not work.media_file and source_payload.get("media_path"):
+        _copy_source_path_to_field(work, "media_file", str(source_payload["media_path"]), "community/private")
+    if not work.cover_image and source_payload.get("cover_path"):
+        _copy_source_path_to_field(work, "cover_image", str(source_payload["cover_path"]), "community/source")
+
+
+def _community_work_can_access(work: CommunityWork, user) -> bool:
+    if not work.is_paid:
+        return True
+    if user and getattr(user, "is_authenticated", False):
+        if work.owner_id == user.id:
+            return True
+        return CommunityPurchase.objects.filter(work=work, buyer=user).exists()
+    return False
+
+
+def _community_preview_field(work: CommunityWork):
+    if work.cover_image:
+        return work.cover_image
+    if work.kind == CommunityWork.KIND_IMAGE and work.media_file:
+        return work.media_file
+    return None
+
+
+def _watermark_community_image(file_field, slug: str) -> bytes:
+    try:
+        file_field.open("rb")
+        with Image.open(file_field) as image:
+            image = ImageOps.exif_transpose(image).convert("RGBA")
+    except FileNotFoundError as exc:
+        raise Http404("Preview not found") from exc
+    finally:
+        try:
+            file_field.close()
+        except Exception:
+            pass
+    image.thumbnail((1400, 1400), Image.Resampling.LANCZOS)
+    overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+    base_size = max(28, min(image.size) // 7)
+    try:
+        font = ImageFont.truetype("arial.ttf", base_size)
+    except OSError:
+        font = ImageFont.load_default()
+    rng = random.Random(f"{slug}:{time.time_ns()}")
+    marks = max(10, (image.width * image.height) // 95_000)
+    for index in range(marks):
+        text = "CX"
+        x = rng.randint(-base_size, max(1, image.width - base_size))
+        y = rng.randint(-base_size, max(1, image.height - base_size))
+        alpha = rng.randint(62, 112)
+        color = (255, 255, 255, alpha) if index % 2 else (37, 99, 235, alpha)
+        draw.text((x, y), text, fill=color, font=font)
+    ribbon = Image.new("RGBA", (image.width, max(42, image.height // 11)), (15, 23, 42, 118))
+    image.alpha_composite(ribbon, (0, max(0, image.height - ribbon.height)))
+    draw = ImageDraw.Draw(image)
+    draw.text((24, max(8, image.height - ribbon.height + 12)), "CX preview - unlock original with CherryX", fill=(255, 255, 255, 220), font=font)
+    image = Image.alpha_composite(image, overlay).convert("RGB")
+    output = BytesIO()
+    image.save(output, format="WEBP", quality=78, method=6)
+    return output.getvalue()
+
+
+@require_GET
+def community_feed(request: HttpRequest, kind: str):
+    if kind not in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE, CommunityWork.KIND_TEXT}:
+        raise Http404("Unknown community feed")
+    meta = _community_kind_meta(kind)
+    works = _community_queryset(kind)
+    return render(
+        request,
+        "studio/community_feed.html",
+        {
+            "kind": kind,
+            "meta": meta,
+            "works": works,
+            "preview_route_name": "studio:community_work_preview",
+            "seo_title": meta["title"],
+            "seo_description": meta["description"],
+        },
+    )
+
+
+@require_GET
+def community_work_detail(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork.objects.select_related("owner"), slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    has_purchase = bool(request.user.is_authenticated and CommunityPurchase.objects.filter(work=work, buyer=request.user).exists())
+    can_access = _community_work_can_access(work, request.user)
+    return render(
+        request,
+        "studio/community_detail.html",
+        {
+            "work": work,
+            "can_access": can_access,
+            "has_purchase": has_purchase,
+            "download_url": reverse("studio:community_work_download", args=[work.slug]) if work.media_file else "",
+            "preview_url": reverse("studio:community_work_preview", args=[work.slug]) if _community_preview_field(work) else "",
+            "seo_title": work.title,
+            "seo_description": work.excerpt or strip_tags(work.body)[:240] or "CherryX public community work.",
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def community_publish(request: HttpRequest):
+    source = request.POST.get("source") if request.method == "POST" else request.GET.get("source")
+    source_id = request.POST.get("source_id") if request.method == "POST" else request.GET.get("id")
+    source_payload = _community_source_for_user(request.user, source or "", source_id or "")
+    source_has_media = bool(source_payload and (source_payload.get("media_path") or source_payload.get("cover_path")))
+    initial = {}
+    if source_payload:
+        initial = {
+            "kind": source_payload.get("kind") or CommunityWork.KIND_TEXT,
+            "title": source_payload.get("title") or "",
+            "excerpt": source_payload.get("excerpt") or "",
+            "body": source_payload.get("body") or "",
+            "access": CommunityWork.ACCESS_FREE,
+            "price_cherryx": 0,
+        }
+    form = CommunityWorkForm(request.POST or None, request.FILES or None, initial=initial, source_has_media=source_has_media)
+    if request.method == "POST" and form.is_valid():
+        work = form.save(commit=False)
+        work.owner = request.user
+        work.status = CommunityWork.STATUS_PUBLISHED
+        _apply_community_source(work, source_payload)
+        work.save()
+        return redirect("studio:community_work_detail", slug=work.slug)
+    return render(
+        request,
+        "studio/community_publish.html",
+        {
+            "form": form,
+            "source_payload": source_payload,
+            "seo_title": "Publish to CherryX network",
+            "seo_description": "Share a free or paid CherryX video, image or text work with the public community feed.",
+        },
+    )
+
+
+@login_required
+@require_POST
+def community_purchase(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork.objects.select_related("owner"), slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    if not work.is_paid or work.owner_id == request.user.id:
+        return redirect("studio:community_work_detail", slug=work.slug)
+    with transaction.atomic():
+        work = CommunityWork.objects.select_for_update().select_related("owner").get(pk=work.pk)
+        purchase, created = CommunityPurchase.objects.get_or_create(
+            work=work,
+            buyer=request.user,
+            defaults={"seller": work.owner, "price_cherryx": work.price_cherryx},
+        )
+        if created:
+            buyer_profile, _ = AccountProfile.objects.select_for_update().get_or_create(user=request.user)
+            if int(buyer_profile.cherryx_balance or 0) < work.price_cherryx:
+                purchase.delete()
+                return redirect(f"{reverse('studio:community_work_detail', args=[work.slug])}?payment=insufficient")
+            buyer_profile.cherryx_balance = int(buyer_profile.cherryx_balance or 0) - work.price_cherryx
+            buyer_profile.save(update_fields=["cherryx_balance", "updated_at"])
+            if work.owner_id:
+                seller_profile, _ = AccountProfile.objects.select_for_update().get_or_create(user=work.owner)
+                seller_profile.cherryx_balance = int(seller_profile.cherryx_balance or 0) + work.price_cherryx
+                seller_profile.save(update_fields=["cherryx_balance", "updated_at"])
+            work.purchase_count = CommunityPurchase.objects.filter(work=work).count()
+            work.save(update_fields=["purchase_count", "updated_at"])
+    return redirect("studio:community_work_detail", slug=work.slug)
+
+
+@require_GET
+def community_work_download(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork, slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    if not work.media_file:
+        raise Http404("File not found")
+    if not _community_work_can_access(work, request.user):
+        if not request.user.is_authenticated:
+            return redirect(f"{reverse('studio:login')}?{urlencode({'next': request.path})}")
+        return redirect(f"{reverse('studio:community_work_detail', args=[work.slug])}?payment=required")
+    try:
+        file_handle = work.media_file.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("File not found") from exc
+    CommunityWork.objects.filter(pk=work.pk).update(download_count=F("download_count") + 1, updated_at=timezone.now())
+    filename = Path(work.media_file.name).name or f"{work.slug}.bin"
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    response = FileResponse(file_handle, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@require_GET
+def community_work_preview(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork, slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    field = _community_preview_field(work)
+    if not field:
+        raise Http404("Preview not found")
+    if work.is_paid and not _community_work_can_access(work, request.user):
+        payload = _watermark_community_image(field, work.slug)
+        response = HttpResponse(payload, content_type="image/webp")
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+    try:
+        file_handle = field.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("Preview not found") from exc
+    content_type = mimetypes.guess_type(field.name)[0] or "application/octet-stream"
+    response = FileResponse(file_handle, content_type=content_type)
+    response["Cache-Control"] = "private, max-age=300"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@require_GET
 def favicon(request: HttpRequest) -> HttpResponse:
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
@@ -179,6 +556,24 @@ def login_view(request: HttpRequest):
         _accept_pending_workspace_shares(form.cleaned_data["user"])
         return redirect(_safe_next_url(request) or reverse("studio:index"))
     return render(request, "studio/auth.html", {**_auth_context(request), "form": form, "mode": "login"})
+
+
+@require_GET
+def magic_login(request: HttpRequest, token: str):
+    guest_key = _guest_key(request)
+    with transaction.atomic():
+        magic_token = MagicLoginToken.objects.select_for_update().select_related("user").filter(token=(token or "").strip()).first()
+        if not magic_token or not magic_token.is_usable:
+            return redirect("studio:login")
+        user = magic_token.user
+        magic_token.used_at = timezone.now()
+        magic_token.save(update_fields=["used_at"])
+    login(request, user)
+    transfer_guest_workspace(guest_key, user)
+    _transfer_guest_video_projects(guest_key, user)
+    _transfer_guest_design_projects(guest_key, user)
+    _accept_pending_workspace_shares(user)
+    return redirect(_safe_next_url(request) or reverse("studio:index"))
 
 
 @require_POST
@@ -266,7 +661,6 @@ def index(request: HttpRequest):
     native_status = actions.native_status()
     has_access = user_has_active_access(request.user)
     language = getattr(request, "interface_language", "en")
-    cherryx_seed = request.user.id if request.user.is_authenticated else len(_guest_key(request))
     return render(
         request,
         "studio/index.html",
@@ -298,7 +692,7 @@ def index(request: HttpRequest):
             "cherryx_pay_url": reverse("studio:cherryx_pay"),
             "video_editor_url": reverse("studio:video_project_list"),
             "music_projects_url": reverse("studio:music_project_list"),
-            "cherryx_balance": 1200 + (cherryx_seed % 7) * 150,
+            "cherryx_balance": _cherryx_balance(request),
             "avatar_url": _avatar_url(request),
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
@@ -390,25 +784,43 @@ def design_project_list(request: HttpRequest):
     )
 
 
+@ensure_csrf_cookie
 @require_GET
 def cherryx_pay(request: HttpRequest):
-    seed = request.user.id if request.user.is_authenticated else len(_guest_key(request))
-    demo_balance = 1200 + (seed % 7) * 150
+    telegram_link_token = ensure_telegram_link_token(request.user) if request.user.is_authenticated else ""
+    profile = getattr(request.user, "studio_profile", None) if request.user.is_authenticated else None
+    language = getattr(request, "interface_language", "en")
     return render(
         request,
         "studio/cherryx_pay.html",
         {
-            "balance": demo_balance,
+            "balance": _cherryx_balance(request),
             "usd_rate": 100,
+            "telegram_link_token": telegram_link_token,
+            "telegram_user_id": getattr(profile, "telegram_user_id", "") if profile else "",
             "display_name": _display_name(request),
             "checkout_url": _checkout_url(request),
             "pricing_url": reverse("billing:pricing"),
+            "plans": [localized_plan(plan, language) for plan in PLANS],
             "accent_color": _accent_color(request),
             "ui_accent_color": _ui_accent_color(request),
             "theme_mode": _theme_mode(request),
             "app_messages": app_messages(getattr(request, "interface_language", "en")),
         },
     )
+
+
+@login_required
+@require_POST
+def telegram_link_token(request: HttpRequest) -> JsonResponse:
+    profile, _ = AccountProfile.objects.get_or_create(user=request.user)
+    profile.telegram_link_token = secrets.token_urlsafe(18)[:32]
+    profile.telegram_link_token_created_at = timezone.now()
+    profile.save(update_fields=["telegram_link_token", "telegram_link_token_created_at", "updated_at"])
+    return JsonResponse({
+        "token": profile.telegram_link_token,
+        "telegram_user_id": profile.telegram_user_id,
+    })
 
 
 @require_GET
@@ -628,15 +1040,25 @@ def preview_design_project_asset(request: HttpRequest, project_id: int, asset_id
 
 
 @require_GET
-def preview_design_project(request: HttpRequest, project_id: int) -> FileResponse:
+def preview_design_project(request: HttpRequest, project_id: int) -> HttpResponse:
     owner_id, guest_key = _workspace_identity(request)
     project = _design_project_queryset(owner_id, guest_key).filter(id=project_id).first()
-    if not project or not project.preview_path:
+    if not project:
         raise Http404("Design preview not found")
-    path = Path(project.preview_path)
-    if not path.exists() or not path.is_file():
-        raise Http404("Design preview not found")
-    return FileResponse(path.open("rb"), as_attachment=False, filename=path.name, content_type="image/jpeg")
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    should_render_live = bool(_state_list(state, "vectors")) or not project.preview_path
+    if should_render_live:
+        rendered = _render_design_project_preview(project)
+        if rendered:
+            return HttpResponse(rendered.getvalue(), content_type="image/jpeg")
+    if project.preview_path:
+        path = Path(project.preview_path)
+        if path.exists() and path.is_file():
+            return FileResponse(path.open("rb"), as_attachment=False, filename=path.name, content_type="image/jpeg")
+    rendered = _render_design_project_preview(project)
+    if rendered:
+        return HttpResponse(rendered.getvalue(), content_type="image/jpeg")
+    raise Http404("Design preview not found")
 
 
 @require_GET
@@ -999,48 +1421,68 @@ def upload_music_project_asset(request: HttpRequest, project_id: int) -> JsonRes
 
     upload = _require_file(request, "file")
 
-    media_type = (
-        upload.content_type
-        or mimetypes.guess_type(upload.name or "")[0]
-        or "application/octet-stream"
-    )
-
-    if not media_type.startswith("audio/"):
-        return _error_json(ValueError("Only audio assets are supported"), 400)
-
     if upload.size > settings.max_video_mb * 1024 * 1024:
-        return _error_json(ValueError(f"Audio limit: {settings.max_video_mb} MB"), 400)
+        return _error_json(ValueError(f"File limit: {settings.max_video_mb} MB"), 400)
 
     asset_dir = _music_project_media_dir(project)
     asset_dir.mkdir(parents=True, exist_ok=True)
 
-    suffix = Path(upload.name or "").suffix[:16] or mimetypes.guess_extension(media_type) or ".mp3"
-    base = clean_base_name(upload.name or "audio", "audio")
+    upload_name = upload.name or "audio"
+    suffix = Path(upload_name).suffix.lower()
+    media_type = upload.content_type or mimetypes.guess_type(upload_name)[0] or "application/octet-stream"
+    imported_assets: list[MusicEditorAsset] = []
+    source_assets: list[MusicEditorAsset] = []
+    skipped: list[str] = []
 
-    path = asset_dir / f"{uuid.uuid4().hex[:12]}_{base}{suffix}"
-
-    with path.open("wb") as destination:
-        for chunk in upload.chunks():
-            destination.write(chunk)
-
-    duration = _get_audio_duration(path)
-
-    asset = MusicEditorAsset.objects.create(
-        project=project,
-        kind="audio",
-        file_path=str(path),
-        media_type=media_type,
-        size=path.stat().st_size,
-        original_name=(upload.name or "audio")[:240],
-        duration=duration,
-    )
+    if suffix == ".zip" or media_type in {"application/zip", "application/x-zip-compressed"}:
+        try:
+            archive_bytes = BytesIO()
+            for chunk in upload.chunks():
+                archive_bytes.write(chunk)
+            archive_bytes.seek(0)
+            with zipfile.ZipFile(archive_bytes) as archive:
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+                    member_path = Path(member.filename)
+                    member_name = member_path.name
+                    if not member_name or member.file_size <= 0:
+                        continue
+                    if member.file_size > settings.max_video_mb * 1024 * 1024:
+                        skipped.append(member.filename)
+                        continue
+                    member_suffix = member_path.suffix.lower()
+                    member_media_type = mimetypes.guess_type(member_name)[0] or "application/octet-stream"
+                    if _music_import_is_audio(member_name, member_media_type):
+                        imported_assets.append(_save_music_import_asset(project, asset_dir, member_name, member_media_type, archive.read(member), "audio"))
+                    elif member_suffix in {".flp", ".mid", ".midi"}:
+                        source_assets.append(_save_music_import_asset(project, asset_dir, member_name, member_media_type, archive.read(member), "source"))
+                    else:
+                        skipped.append(member.filename)
+        except zipfile.BadZipFile:
+            return _error_json(ValueError("ZIP archive is not readable"), 400)
+        if not imported_assets and not source_assets:
+            return _error_json(ValueError("ZIP does not contain supported audio, MIDI or FLP files"), 400)
+    elif _music_import_is_audio(upload_name, media_type):
+        imported_assets.append(_save_music_upload_asset(project, asset_dir, upload, upload_name, media_type, "audio"))
+    elif suffix in {".flp", ".mid", ".midi"}:
+        source_assets.append(_save_music_upload_asset(project, asset_dir, upload, upload_name, media_type, "source"))
+    else:
+        return _error_json(ValueError("Upload audio, FL Studio ZIP stems, MIDI or FLP source files"), 400)
 
     _update_music_project_metadata(project)
     project.storage_bytes = _music_project_storage_bytes(project)
     project.save(update_fields=["storage_bytes", "asset_count", "clip_count", "duration_seconds", "updated_at"])
 
+    assets = imported_assets + source_assets
     return JsonResponse({
-        "asset": _music_asset_payload(asset),
+        "asset": _music_asset_payload(assets[0]) if len(assets) == 1 else None,
+        "assets": [_music_asset_payload(asset) for asset in assets],
+        "import": {
+            "audio_count": len(imported_assets),
+            "source_count": len(source_assets),
+            "skipped": skipped[:20],
+        },
         "project": _music_project_payload(project, owner_id=owner_id, guest_key=guest_key),
     })
 
@@ -1821,7 +2263,7 @@ def _dashboard_page_range(page: int, pages: int) -> list[int | None]:
 def _dashboard_job_queryset(owner_id: int | None, guest_key: str, section: str):
     queryset = _owned_job_records(owner_id, guest_key).prefetch_related("outputs")
     if section == "active":
-        queryset = queryset.filter(status__in=["queued", "running"])
+        queryset = queryset.filter(status__in=["queued", "running", "processing", "paused"])
     elif section == "completed":
         queryset = queryset.filter(status="completed")
     return queryset.order_by("-created_at", "-id")
@@ -2275,10 +2717,36 @@ def cancel_job(request: HttpRequest, job_id: str):
 
 
 @require_POST
+def pause_job(request: HttpRequest, job_id: str):
+    try:
+        owner_id, guest_key = _workspace_identity(request)
+        job = actions.pause_job(job_id, owner_id, guest_key)
+    except Exception as exc:
+        return _error_json(exc)
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return _job_json(job)
+    return redirect("studio:dashboard_detail", section="active")
+
+
+@require_POST
+def resume_job(request: HttpRequest, job_id: str):
+    try:
+        owner_id, guest_key = _workspace_identity(request)
+        job = actions.resume_job(job_id, owner_id, guest_key)
+    except Exception as exc:
+        return _error_json(exc)
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return _job_json(job)
+    return redirect("studio:dashboard_detail", section="active")
+
+
+@require_POST
 def delete_job(request: HttpRequest, job_id: str):
     try:
         owner_id, guest_key = _workspace_identity(request)
-        actions.delete_job_and_media(job_id, owner_id, guest_key)
+        deleted = actions.delete_job_and_media(job_id, owner_id, guest_key)
+        if not deleted:
+            raise Http404("Job not found")
     except Exception as exc:
         return _error_json(exc)
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
@@ -2676,20 +3144,27 @@ def _design_project_payload(project: DesignerProject | None, include_state: bool
         return {}
     state = project.state_json or {}
     assets = _prefetched_assets(project)
-    objects = _state_list(state, "objects") if include_state or not getattr(project, "object_count", 0) else []
-    vectors = _state_list(state, "vectors") if include_state else []
+    objects = _state_list(state, "objects")
+    vectors = _state_list(state, "vectors")
     frames = [item for item in objects if isinstance(item, dict) and item.get("type") == "frame"]
     object_count = len(objects) if objects else int(getattr(project, "object_count", 0) or 0)
+    vector_count = len(vectors)
+    layer_count = object_count + vector_count
+    has_preview_content = bool(project.preview_path or object_count or vector_count)
+    preview_url = ""
+    if has_preview_content:
+        preview_url = f"{reverse('studio:design_project_preview', args=[project.id])}?v={int(project.updated_at.timestamp())}"
     access_role = _resource_access_role(WorkspaceShare.RESOURCE_DESIGN, project, owner_id, guest_key) if owner_id is not None or guest_key else "owner"
     is_owner = access_role == "owner"
     payload: dict[str, object] = {
         "id": project.id,
         "title": project.title,
-        "preview_url": reverse("studio:design_project_preview", args=[project.id]) if project.preview_path else "",
+        "preview_url": preview_url,
         "preview_focus": _design_project_preview_focus(state),
         "object_count": object_count,
         "frame_count": len(frames),
-        "vector_count": len(vectors),
+        "vector_count": vector_count,
+        "layer_count": layer_count,
         "asset_count": int(getattr(project, "asset_count", 0) or len(assets)),
         "storage_bytes": project.storage_bytes,
         "storage_text": human_size(project.storage_bytes),
@@ -2700,16 +3175,17 @@ def _design_project_payload(project: DesignerProject | None, include_state: bool
         "is_owner": is_owner,
         "can_edit": is_owner or access_role == WorkspaceShare.ROLE_EDITOR,
         "can_share": is_owner and owner_id is not None,
+        "publish_url": f"{reverse('studio:community_publish')}?{urlencode({'source': 'design_project', 'id': project.id})}" if is_owner and owner_id is not None else "",
     }
     if include_state:
         payload["state"] = project.state_json or {}
     return payload
 
 
-def _design_project_preview_focus(state: dict[str, object]) -> dict[str, int]:
-    design_width = 9000
-    design_height = 6400
-    candidates: list[tuple[float, float]] = []
+def _design_project_preview_focus(state: dict[str, object]) -> dict[str, float | int]:
+    design_width = 9000.0
+    design_height = 6400.0
+    candidates: list[tuple[float, float, float, float, float, float, float]] = []
 
     def as_float(value: object, default: float = 0) -> float:
         try:
@@ -2718,39 +3194,221 @@ def _design_project_preview_focus(state: dict[str, object]) -> dict[str, int]:
             return default
 
     def clamp_percent(value: float) -> int:
-        return int(round(max(12, min(88, value))))
+        return int(round(max(8, min(92, value))))
+
+    def add_box(min_x: float, min_y: float, max_x: float, max_y: float, weight: float) -> None:
+        width = max_x - min_x
+        height = max_y - min_y
+        if width <= 0 or height <= 0 or weight <= 0:
+            return
+        center_x = min_x + width / 2
+        center_y = min_y + height / 2
+        candidates.append((center_x, center_y, weight, min_x, min_y, max_x, max_y))
+
+    if not isinstance(state, dict):
+        return {"x": 50, "y": 50, "scale": 1.18, "hover_scale": 1.34}
 
     objects = state.get("objects") if isinstance(state.get("objects"), list) else []
     for item in objects:
         if not isinstance(item, dict):
             continue
+        if item.get("hidden") or item.get("isHidden"):
+            continue
         x = as_float(item.get("x"))
         y = as_float(item.get("y"))
-        w = as_float(item.get("w") or item.get("width"))
-        h = as_float(item.get("h") or item.get("height"))
-        candidates.append((x + w / 2, y + h / 2))
+        width = as_float(item.get("w") or item.get("width"), 80)
+        height = as_float(item.get("h") or item.get("height"), 80)
+        item_type = str(item.get("type") or "")
+        area_weight = max(14.0, min(260.0, (max(1.0, width * height) ** 0.5) / 2.0))
+        if item_type == "frame":
+            area_weight *= 0.28
+        elif item_type == "text":
+            text = str(item.get("text") or item.get("content") or "")
+            area_weight *= 1.25 + min(0.65, len(text) / 140)
+        elif item_type in {"image", "photo"} or item.get("src") or item.get("assetId"):
+            area_weight *= 1.35
+        add_box(x, y, x + width, y + height, area_weight)
+
+    for key in ("vectors", "strokes"):
+        strokes = state.get(key) if isinstance(state.get(key), list) else []
+        for stroke in strokes:
+            if not isinstance(stroke, dict):
+                continue
+            points = stroke.get("points") if isinstance(stroke.get("points"), list) else []
+            coords = [(as_float(point.get("x")), as_float(point.get("y"))) for point in points if isinstance(point, dict)]
+            if not coords:
+                continue
+            xs = [point[0] for point in coords]
+            ys = [point[1] for point in coords]
+            width = max(2.0, max(xs) - min(xs))
+            height = max(2.0, max(ys) - min(ys))
+            stroke_weight = max(18.0, min(320.0, len(coords) * 5.0 + ((width * height) ** 0.5) / 7.0))
+            add_box(min(xs), min(ys), max(xs), max(ys), stroke_weight)
 
     if not candidates:
-        for key in ("vectors", "strokes"):
-            strokes = state.get(key) if isinstance(state.get(key), list) else []
-            for stroke in strokes:
-                if not isinstance(stroke, dict):
-                    continue
-                points = stroke.get("points") if isinstance(stroke.get("points"), list) else []
-                coords = [(as_float(point.get("x")), as_float(point.get("y"))) for point in points if isinstance(point, dict)]
-                if coords:
-                    xs = [point[0] for point in coords]
-                    ys = [point[1] for point in coords]
-                    candidates.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2))
+        return {"x": 50, "y": 50, "scale": 1.18, "hover_scale": 1.34}
 
-    if not candidates:
-        return {"x": 50, "y": 50}
+    def distance(left: tuple[float, float, float, float, float, float, float], right: tuple[float, float, float, float, float, float, float]) -> float:
+        return ((left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2) ** 0.5
 
-    x, y = candidates[-1]
+    best = max(
+        candidates,
+        key=lambda candidate: sum(other[2] / (1 + distance(candidate, other) / 900.0) for other in candidates),
+    )
+    cluster = [candidate for candidate in candidates if distance(best, candidate) <= 1800.0] or [best]
+    total_weight = sum(candidate[2] for candidate in cluster) or 1.0
+    x = sum(candidate[0] * candidate[2] for candidate in cluster) / total_weight
+    y = sum(candidate[1] * candidate[2] for candidate in cluster) / total_weight
+    min_x = min(candidate[3] for candidate in cluster)
+    min_y = min(candidate[4] for candidate in cluster)
+    max_x = max(candidate[5] for candidate in cluster)
+    max_y = max(candidate[6] for candidate in cluster)
+    content_ratio = max((max_x - min_x) / design_width, (max_y - min_y) / design_height)
+    if content_ratio < 0.08:
+        scale = 2.35
+    elif content_ratio < 0.16:
+        scale = 1.95
+    elif content_ratio < 0.28:
+        scale = 1.55
+    else:
+        scale = 1.22
+    scale = round(max(1.16, min(2.65, scale)), 2)
+
     return {
         "x": clamp_percent((x / design_width) * 100),
         "y": clamp_percent((y / design_height) * 100),
+        "scale": scale,
+        "hover_scale": round(min(2.9, scale + 0.18), 2),
     }
+
+
+def _render_design_project_preview(project: DesignerProject) -> BytesIO | None:
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    objects = [item for item in _state_list(state, "objects") if isinstance(item, dict) and not item.get("hidden") and not item.get("isHidden")]
+    vectors = [item for item in _state_list(state, "vectors") if isinstance(item, dict) and not item.get("hidden") and isinstance(item.get("points"), list) and item.get("points")]
+    if not objects and not vectors:
+        return None
+
+    def as_float(value: object, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    boxes: list[tuple[float, float, float, float]] = []
+    for item in objects:
+        x = as_float(item.get("x"))
+        y = as_float(item.get("y"))
+        width = max(1.0, as_float(item.get("w") or item.get("width"), 80.0))
+        height = max(1.0, as_float(item.get("h") or item.get("height"), 80.0))
+        boxes.append((x, y, x + width, y + height))
+    for vector in vectors:
+        coords = [(as_float(point.get("x")), as_float(point.get("y"))) for point in vector.get("points", []) if isinstance(point, dict)]
+        if not coords:
+            continue
+        xs = [point[0] for point in coords]
+        ys = [point[1] for point in coords]
+        pad = max(8.0, as_float(vector.get("width"), 5.0) * 2)
+        boxes.append((min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad))
+    if not boxes:
+        return None
+
+    min_x = min(box[0] for box in boxes)
+    min_y = min(box[1] for box in boxes)
+    max_x = max(box[2] for box in boxes)
+    max_y = max(box[3] for box in boxes)
+    content_w = max(1.0, max_x - min_x)
+    content_h = max(1.0, max_y - min_y)
+    pad = max(80.0, min(520.0, max(content_w, content_h) * 0.1))
+    min_x = max(0.0, min_x - pad)
+    min_y = max(0.0, min_y - pad)
+    content_w += pad * 2
+    content_h += pad * 2
+    scale = min(720.0 / content_w, 480.0 / content_h)
+    width = max(240, int(round(content_w * scale)))
+    height = max(160, int(round(content_h * scale)))
+    scale = min(width / content_w, height / content_h)
+
+    def px(value: float) -> int:
+        return int(round((value - min_x) * scale))
+
+    def py(value: float) -> int:
+        return int(round((value - min_y) * scale))
+
+    def color(value: object, fallback: str = "#2563eb", opacity: float = 1.0) -> tuple[int, int, int, int]:
+        raw = str(value or fallback).strip()
+        if raw.lower() == "transparent":
+            return (0, 0, 0, 0)
+        if raw.startswith("#"):
+            raw = raw[1:]
+            if len(raw) == 3:
+                raw = "".join(part * 2 for part in raw)
+            if len(raw) >= 6:
+                try:
+                    return (
+                        int(raw[0:2], 16),
+                        int(raw[2:4], 16),
+                        int(raw[4:6], 16),
+                        int(max(0, min(255, round(255 * opacity)))),
+                    )
+                except ValueError:
+                    pass
+        return color(fallback, "#2563eb", opacity)
+
+    image = Image.new("RGBA", (width, height), (248, 251, 255, 255))
+    draw = ImageDraw.Draw(image, "RGBA")
+    grid = max(12, int(round(48 * scale)))
+    for grid_x in range(0, width, grid):
+        draw.line((grid_x, 0, grid_x, height), fill=(37, 99, 235, 18), width=1)
+    for grid_y in range(0, height, grid):
+        draw.line((0, grid_y, width, grid_y), fill=(37, 99, 235, 18), width=1)
+
+    try:
+        font = ImageFont.truetype("arial.ttf", max(12, int(round(24 * scale))))
+    except Exception:
+        font = ImageFont.load_default()
+
+    for item in objects:
+        opacity = max(0.0, min(1.0, as_float(item.get("opacity"), 1.0)))
+        x = as_float(item.get("x"))
+        y = as_float(item.get("y"))
+        width_value = max(1.0, as_float(item.get("w") or item.get("width"), 80.0))
+        height_value = max(1.0, as_float(item.get("h") or item.get("height"), 80.0))
+        box = (px(x), py(y), px(x + width_value), py(y + height_value))
+        item_type = str(item.get("type") or "")
+        fill = color(item.get("fill"), "#ffffff" if item_type == "frame" else "transparent", opacity)
+        stroke = color(item.get("stroke"), "#2563eb", opacity)
+        stroke_width = max(1, int(round(as_float(item.get("strokeWidth"), 2.0) * scale)))
+        if item_type == "text":
+            if fill[3]:
+                draw.rounded_rectangle(box, radius=max(3, int(round(as_float(item.get("cornerRadius"), 10) * scale))), fill=fill)
+            text = str(item.get("text") or item.get("name") or "Text")[:140]
+            draw.text((box[0] + 8, box[1] + 8), text, fill=stroke, font=font)
+        elif item_type == "shape" and item.get("shape") == "ellipse":
+            draw.ellipse(box, fill=fill, outline=stroke, width=stroke_width)
+        elif item_type == "shape" and item.get("shape") in {"line", "arrow"}:
+            center_y = (box[1] + box[3]) // 2
+            draw.line((box[0] + 6, center_y, box[2] - 6, center_y), fill=stroke, width=max(2, stroke_width))
+        else:
+            radius = max(0, int(round(as_float(item.get("cornerRadius"), 10 if item_type != "frame" else 0) * scale)))
+            draw.rounded_rectangle(box, radius=radius, fill=fill, outline=stroke, width=stroke_width)
+
+    for vector in vectors:
+        points = [(px(as_float(point.get("x"))), py(as_float(point.get("y")))) for point in vector.get("points", []) if isinstance(point, dict)]
+        if not points:
+            continue
+        stroke = color(vector.get("color"), "#2563eb", max(0.0, min(1.0, as_float(vector.get("opacity"), 1.0))))
+        width_px = max(2, int(round(as_float(vector.get("width"), 5.0) * scale)))
+        if len(points) == 1:
+            x, y = points[0]
+            draw.ellipse((x - width_px, y - width_px, x + width_px, y + width_px), fill=stroke)
+        else:
+            draw.line(points, fill=stroke, width=width_px, joint="curve")
+
+    output = BytesIO()
+    image.convert("RGB").save(output, "JPEG", quality=86, optimize=True)
+    output.seek(0)
+    return output
 
 
 def _design_asset_payload(asset: DesignerAsset) -> dict[str, object]:
@@ -3076,6 +3734,7 @@ def _music_project_payload(project: MusicEditorProject | None, include_state: bo
         "is_owner": is_owner,
         "can_edit": is_owner or access_role == WorkspaceShare.ROLE_EDITOR,
         "can_share": is_owner and owner_id is not None,
+        "publish_url": f"{reverse('studio:community_publish')}?{urlencode({'source': 'music_project', 'id': project.id})}" if is_owner and owner_id is not None else "",
     }
     if include_state:
         payload["state"] = project.state_json or {}
@@ -3086,7 +3745,13 @@ def _video_project_payload(project: VideoEditorProject, include_state: bool = Tr
     state = project.state_json or {}
     layers = _state_list(state, "layers") if include_state else []
     assets = _prefetched_assets(project)
-    first_thumb = next((asset for asset in assets if asset.thumbnail_path), None)
+    thumbnail_assets = [asset for asset in assets if asset.thumbnail_path]
+    first_thumb = thumbnail_assets[project.id % len(thumbnail_assets)] if thumbnail_assets else None
+    preview_sources = [
+        reverse("studio:video_project_asset_preview", args=[project.id, asset.id])
+        for asset in assets
+        if asset.kind == "video"
+    ]
     clip_count = int(getattr(project, "clip_count", 0) or 0)
     if include_state or not clip_count:
         clip_count = len(_state_list(state, "clips") or layers)
@@ -3096,6 +3761,7 @@ def _video_project_payload(project: VideoEditorProject, include_state: bool = Tr
         "id": project.id,
         "title": project.title,
         "thumbnail": reverse("studio:video_project_asset_thumbnail", args=[project.id, first_thumb.id]) if first_thumb else (getattr(project, "thumbnail_path", "") or (state.get("thumbnail", "") if isinstance(state, dict) else "")),
+        "preview_sources": preview_sources,
         "aspect": state.get("aspect", "9 / 16") if isinstance(state, dict) else "9 / 16",
         "clip_name": state.get("clipName", "") if isinstance(state, dict) else "",
         "layer_count": clip_count,
@@ -3111,6 +3777,7 @@ def _video_project_payload(project: VideoEditorProject, include_state: bool = Tr
         "is_owner": is_owner,
         "can_edit": is_owner or access_role == WorkspaceShare.ROLE_EDITOR,
         "can_share": is_owner and owner_id is not None,
+        "publish_url": f"{reverse('studio:community_publish')}?{urlencode({'source': 'video_project', 'id': project.id})}" if is_owner and owner_id is not None else "",
     }
     if include_state:
         payload["state"] = project.state_json or {}
@@ -3978,6 +4645,47 @@ def _music_project_storage_bytes(project: MusicEditorProject) -> int:
     return _json_size(project.state_json or {}) + sum(asset.size for asset in project.assets.all())
 
 
+def _music_import_is_audio(name: str, media_type: str = "") -> bool:
+    suffix = Path(name or "").suffix.lower()
+    return (media_type or "").startswith("audio/") or suffix in {".wav", ".mp3", ".ogg", ".oga", ".flac", ".m4a", ".aac", ".aiff", ".aif", ".webm"}
+
+
+def _save_music_import_asset(project: MusicEditorProject, asset_dir: Path, original_name: str, media_type: str, data: bytes, kind: str = "audio") -> MusicEditorAsset:
+    suffix = Path(original_name or "").suffix[:16] or mimetypes.guess_extension(media_type) or (".wav" if kind == "audio" else ".bin")
+    base = clean_base_name(Path(original_name or kind).stem or kind, kind)
+    path = asset_dir / f"{uuid.uuid4().hex[:12]}_{base}{suffix}"
+    path.write_bytes(data)
+    duration = _get_audio_duration(path) if kind == "audio" else 0.0
+    return MusicEditorAsset.objects.create(
+        project=project,
+        kind=kind,
+        file_path=str(path),
+        media_type=media_type or "application/octet-stream",
+        size=path.stat().st_size,
+        original_name=(original_name or kind)[:240],
+        duration=duration,
+    )
+
+
+def _save_music_upload_asset(project: MusicEditorProject, asset_dir: Path, upload, original_name: str, media_type: str, kind: str = "audio") -> MusicEditorAsset:
+    suffix = Path(original_name or "").suffix[:16] or mimetypes.guess_extension(media_type) or (".wav" if kind == "audio" else ".bin")
+    base = clean_base_name(Path(original_name or kind).stem or kind, kind)
+    path = asset_dir / f"{uuid.uuid4().hex[:12]}_{base}{suffix}"
+    with path.open("wb") as destination:
+        for chunk in upload.chunks():
+            destination.write(chunk)
+    duration = _get_audio_duration(path) if kind == "audio" else 0.0
+    return MusicEditorAsset.objects.create(
+        project=project,
+        kind=kind,
+        file_path=str(path),
+        media_type=media_type or "application/octet-stream",
+        size=path.stat().st_size,
+        original_name=(original_name or kind)[:240],
+        duration=duration,
+    )
+
+
 def _owned_job_records(owner_id: int | None, guest_key: str = ""):
     queryset = JobRecord.objects.all()
     if owner_id is not None:
@@ -4210,6 +4918,16 @@ def _display_name(request: HttpRequest) -> str:
     if request.user.is_authenticated:
         return request.user.first_name or request.user.email or "CherryX user"
     return "Guest workspace"
+
+
+def _cherryx_balance(request: HttpRequest) -> int:
+    if request.user.is_authenticated:
+        try:
+            return int(request.user.studio_profile.cherryx_balance or 0)
+        except AccountProfile.DoesNotExist:
+            return 0
+    seed = len(_guest_key(request))
+    return 1200 + (seed % 7) * 150
 
 
 def _avatar_url(request: HttpRequest) -> str:
@@ -4701,6 +5419,8 @@ def _localized_value(key: str, language: str, fallback: str) -> str:
         "server_restarted": {"en": "The server restarted before the task finished.", "ru": "Сервер был перезапущен до завершения задачи.", "uk": "Сервер було перезапущено до завершення задачі.", "fr": "Le serveur a redémarré avant la fin de la tâche.", "de": "Der Server wurde vor Abschluss der Aufgabe neu gestartet.", "es": "El servidor se reinició antes de finalizar la tarea.", "ka": "სერვერი ამოცანის დასრულებამდე გადაიტვირთა.", "hy": "Սերվերը վերագործարկվեց մինչև առաջադրանքի ավարտը։", "it": "Il server si è riavviato prima della fine dell'attività."},
     }
     values["cancelled"] = {"en": "Cancelled", "ru": "Отменено", "uk": "Скасовано", "fr": "Annulé", "de": "Abgebrochen", "es": "Cancelado", "ka": "გაუქმდა", "hy": "Չեղարկված", "it": "Annullato"}
+    values["paused"] = {"en": "Paused", "ru": "На паузе", "uk": "На паузі", "fr": "En pause", "de": "Pausiert", "es": "En pausa", "ka": "Paused", "hy": "Paused", "it": "In pausa"}
+    values["processing"] = {"en": "Processing", "ru": "В обработке", "uk": "В обробці", "fr": "Traitement", "de": "Verarbeitung", "es": "Procesando", "ka": "Processing", "hy": "Processing", "it": "In elaborazione"}
     return values.get(key, {}).get(language, values.get(key, {}).get("en", fallback))
 
 
@@ -6047,7 +6767,10 @@ def _attach_output_urls(job: dict, url_cache: dict[str, dict[str, object]] | Non
     prepared["download_all_url"] = reverse("studio:download_all_outputs", args=[job["id"]])
     prepared["delete_url"] = reverse("studio:delete_job", args=[job["id"]])
     prepared["repeat_url"] = reverse("studio:repeat_job", args=[job["id"]])
+    prepared["pause_url"] = reverse("studio:pause_job", args=[job["id"]])
+    prepared["resume_url"] = reverse("studio:resume_job", args=[job["id"]])
     prepared["cancel_url"] = reverse("studio:cancel_job", args=[job["id"]])
+    prepared["publish_url"] = f"{reverse('studio:community_publish')}?{urlencode({'source': 'job', 'id': job['id']})}"
     outputs = []
     job_id = str(job.get("id") or "")
     cached = (url_cache or {}).get(job_id, {})

@@ -7,6 +7,7 @@ from pathlib import Path
 import asyncio
 import json
 import mimetypes
+import re
 import shutil
 import threading
 import time
@@ -164,6 +165,7 @@ class WebJob:
     params: dict[str, object] = field(default_factory=dict)
     owner_id: int | None = None
     guest_key: str = ""
+    runner: object | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -184,8 +186,16 @@ _jobs: dict[str, WebJob] = {}
 _pending_jobs: deque[tuple[WebJob, object]] = deque()
 _running_job_ids: set[str] = set()
 _running_by_account: dict[str, int] = defaultdict(int)
+_deleted_job_ids: set[str] = set()
 _lock = threading.RLock()
 _executor = ThreadPoolExecutor(max_workers=max(1, settings.job_max_workers))
+ACTIVE_JOB_STATUSES = {"queued", "running", "processing", "paused"}
+INTERRUPTIBLE_JOB_STATUSES = {"queued", "running", "processing"}
+INTERRUPT_REQUEST_STATUSES = {"cancelled", "paused"}
+
+
+class JobCancelled(RuntimeError):
+    pass
 
 
 def is_openai_ready() -> bool:
@@ -339,7 +349,7 @@ def start_youtube_job(
             f"{metadata.title}. {format_duration(metadata.duration_seconds)}. "
             f"{size_text}. {plan_text}. Загрузка: {estimate_download_time(metadata.estimated_size_bytes)}",
         )
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds)
+        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
 
         if profile.is_backstage:
             if not settings.youtube_backstage_enabled:
@@ -455,7 +465,8 @@ def start_video_download_job(url: str, owner_id: int | None = None, guest_key: s
         source_dir = WEB_STORAGE_ROOT / job.id / "source_download"
         output_dir = WEB_OUTPUT_ROOT / job.id / "source_download"
         _update_job(job, 15, "Скачиваю исходное видео")
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds)
+        metadata = get_youtube_metadata(clean_url, settings.youtube_download_timeout_seconds)
+        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
         output_path = download.path
         if output_path.suffix.lower() != ".mp4":
             _update_job(job, 65, "Конвертирую в MP4")
@@ -479,7 +490,8 @@ def start_youtube_cover_job(url: str, owner_id: int | None = None, guest_key: st
         source_dir = WEB_STORAGE_ROOT / job.id / "youtube_cover"
         output_dir = WEB_OUTPUT_ROOT / job.id / "youtube_cover"
         _update_job(job, 15, "Скачиваю видео для обложки")
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds)
+        metadata = get_youtube_metadata(clean_url, settings.youtube_download_timeout_seconds)
+        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
         _update_job(job, 70, "Генерирую PNG-обложку")
         cover = create_business_cover(
             download.path,
@@ -1028,12 +1040,11 @@ def cancel_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
         if active_job and not _access_matches(active_job.owner_id, active_job.guest_key, owner_id, guest_key):
             raise ValueError("Task not found")
         if active_job:
-            if active_job.status == "running":
-                raise RuntimeError("Running tasks cannot be cancelled yet")
-            if active_job.status == "queued":
+            if active_job.status in INTERRUPTIBLE_JOB_STATUSES or active_job.status == "paused":
                 active_job.status = "cancelled"
                 active_job.progress = 100
                 active_job.message = "Cancelled"
+                active_job.error = ""
                 active_job.updated_at = time.time()
                 remaining = [(job, worker) for job, worker in _pending_jobs if job.id != job_id]
                 _pending_jobs.clear()
@@ -1050,9 +1061,7 @@ def cancel_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
         record = _owned_records(JobRecord, owner_id, guest_key).prefetch_related("outputs").filter(job_id=job_id).first()
         if not record:
             raise ValueError("Task not found")
-        if record.status == "running":
-            raise RuntimeError("Running tasks cannot be cancelled yet")
-        if record.status == "queued":
+        if record.status in (INTERRUPTIBLE_JOB_STATUSES | {"paused"}):
             record.status = "cancelled"
             record.progress = 100
             record.message = "Cancelled"
@@ -1064,6 +1073,91 @@ def cancel_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
         raise
     except Exception as exc:
         raise RuntimeError(str(exc) or "Could not cancel task") from exc
+
+
+def pause_job(job_id: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+    with _lock:
+        active_job = _jobs.get(job_id)
+        if active_job and not _access_matches(active_job.owner_id, active_job.guest_key, owner_id, guest_key):
+            raise ValueError("Task not found")
+        if active_job:
+            if active_job.status in INTERRUPTIBLE_JOB_STATUSES:
+                active_job.status = "paused"
+                active_job.progress = max(0, min(99, int(active_job.progress or 0)))
+                active_job.message = "Paused"
+                active_job.error = ""
+                active_job.updated_at = time.time()
+                remaining = [(job, worker) for job, worker in _pending_jobs if job.id != job_id]
+                _pending_jobs.clear()
+                _pending_jobs.extend(remaining)
+                _save_job_record(active_job)
+            return _serialize_job(active_job)
+
+    models = _django_models()
+    if not models:
+        raise ValueError("Task not found")
+    JobRecord, _, JobEventRecord = models
+    try:
+        _close_django_connections()
+        record = _owned_records(JobRecord, owner_id, guest_key).prefetch_related("outputs").filter(job_id=job_id).first()
+        if not record:
+            raise ValueError("Task not found")
+        if record.status in INTERRUPTIBLE_JOB_STATUSES:
+            record.status = "paused"
+            record.progress = max(0, min(99, int(record.progress or 0)))
+            record.message = "Paused"
+            record.error = ""
+            record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
+            JobEventRecord.objects.create(job=record, status="paused", progress=record.progress, message="Paused")
+        return _serialize_job_record(record)
+    except (RuntimeError, ValueError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(str(exc) or "Could not pause task") from exc
+
+
+def resume_job(job_id: str, owner_id: int | None = None, guest_key: str = "") -> dict:
+    with _lock:
+        active_job = _jobs.get(job_id)
+        if active_job and not _access_matches(active_job.owner_id, active_job.guest_key, owner_id, guest_key):
+            raise ValueError("Task not found")
+        if active_job:
+            if active_job.status == "paused":
+                active_job.status = "queued"
+                active_job.progress = 0
+                active_job.message = "Queued"
+                active_job.error = ""
+                active_job.updated_at = time.time()
+                if active_job.runner and not any(job.id == job_id for job, _worker in _pending_jobs):
+                    _pending_jobs.append((active_job, active_job.runner))
+                    _save_job_record(active_job)
+                    _schedule_jobs()
+                    return _serialize_job(active_job)
+                _save_job_record(active_job)
+            return _serialize_job(active_job)
+
+    models = _django_models()
+    if not models:
+        raise ValueError("Task not found")
+    JobRecord, _, JobEventRecord = models
+    try:
+        _close_django_connections()
+        record = _owned_records(JobRecord, owner_id, guest_key).prefetch_related("outputs").filter(job_id=job_id).first()
+        if not record:
+            raise ValueError("Task not found")
+        if record.status != "paused":
+            return _serialize_job_record(record)
+        record.status = "queued"
+        record.progress = 0
+        record.message = "Queued"
+        record.error = ""
+        record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
+        JobEventRecord.objects.create(job=record, status="queued", progress=0, message="Queued")
+        return _rerun_persisted_job(record)
+    except (RuntimeError, ValueError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(str(exc) or "Could not resume task") from exc
 
 
 def get_job(job_id: str, owner_id: int | None = None, guest_key: str = "") -> dict | None:
@@ -1124,9 +1218,9 @@ def get_account_stats(owner_id: int | None = None, guest_key: str = "") -> dict[
         queryset = _owned_records(JobRecord, owner_id, guest_key).order_by()
         job_stats = queryset.aggregate(
             total_jobs=Count("id"),
-            active_jobs=Count("id", filter=Q(status__in=["queued", "running"])),
+            active_jobs=Count("id", filter=Q(status__in=ACTIVE_JOB_STATUSES)),
             completed_jobs=Count("id", filter=Q(status="completed")),
-            failed_jobs=Count("id", filter=Q(status="failed")),
+            failed_jobs=Count("id", filter=Q(status__in=["failed", "cancelled"])),
         )
         output_stats = JobOutputRecord.objects.filter(job__in=queryset).aggregate(
             output_count=Count("id"),
@@ -1196,11 +1290,20 @@ def delete_job_and_media(job_id: str, owner_id: int | None = None, guest_key: st
         active_job = _jobs.get(job_id)
         if active_job and not _access_matches(active_job.owner_id, active_job.guest_key, owner_id, guest_key):
             return False
-        if active_job and active_job.status in {"queued", "running"}:
-            raise RuntimeError("Active tasks can be deleted only after completion")
         if active_job:
+            if active_job.status in ACTIVE_JOB_STATUSES:
+                active_job.status = "cancelled"
+                active_job.progress = 100
+                active_job.message = "Cancelled"
+                active_job.error = ""
+                active_job.updated_at = time.time()
+                remaining = [(job, worker) for job, worker in _pending_jobs if job.id != job_id]
+                _pending_jobs.clear()
+                _pending_jobs.extend(remaining)
+                _save_job_record(active_job)
             output_paths = [output.path for output in active_job.outputs]
             params = dict(active_job.params)
+        _deleted_job_ids.add(job_id)
         _jobs.pop(job_id, None)
 
     models = _django_models()
@@ -1280,7 +1383,7 @@ def mark_interrupted_jobs() -> None:
         close_old_connections()
         with _lock:
             active_ids = list(_jobs.keys())
-        queryset = JobRecord.objects.filter(status__in=["queued", "running"])
+        queryset = JobRecord.objects.filter(status__in=["queued", "running", "processing"])
         if active_ids:
             queryset = queryset.exclude(job_id__in=active_ids)
         queryset.update(
@@ -1385,7 +1488,10 @@ def _submit_job(
         params=params or {},
         owner_id=owner_id,
         guest_key="" if owner_id is not None else guest_key,
+        runner=worker,
     )
+    with _lock:
+        _deleted_job_ids.discard(job.id)
     if run_inline:
         with _lock:
             _jobs[job.id] = job
@@ -1437,7 +1543,14 @@ def _run_job(job: WebJob, worker) -> None:
     _update_status(job, "running", 2, "Стартую задачу")
     try:
         worker(job)
-        _update_status(job, "completed", 100, "Готово")
+        interrupt_status = _job_interrupt_status(job)
+        if interrupt_status:
+            _finish_interrupted_job(job, interrupt_status)
+        else:
+            _update_status(job, "completed", 100, "Готово")
+    except JobCancelled as exc:
+        interrupted = str(exc) if str(exc) in INTERRUPT_REQUEST_STATUSES else _job_interrupt_status(job) or "cancelled"
+        _finish_interrupted_job(job, interrupted)
     except Exception as exc:
         _update_error(job, exc)
     finally:
@@ -1463,7 +1576,37 @@ def _job_account_key(job: WebJob) -> str:
     return f"guest:{job.guest_key or 'anonymous'}"
 
 
+def _job_interrupt_status(job: WebJob) -> str:
+    with _lock:
+        if job.status in INTERRUPT_REQUEST_STATUSES:
+            return job.status
+    models = _django_models()
+    if not models:
+        return ""
+    JobRecord, _, _ = models
+    try:
+        _close_django_connections()
+        record = JobRecord.objects.filter(job_id=job.id, status__in=INTERRUPT_REQUEST_STATUSES).only("status").first()
+        return str(record.status) if record else ""
+    except Exception:
+        return ""
+
+
+def _job_cancel_requested(job: WebJob) -> bool:
+    return bool(_job_interrupt_status(job))
+
+
+def _finish_interrupted_job(job: WebJob, status: str) -> None:
+    if status == "paused":
+        _update_status(job, "paused", max(0, min(99, int(job.progress or 0))), "Paused")
+    else:
+        _update_status(job, "cancelled", 100, "Cancelled")
+
+
 def _update_job(job: WebJob, progress: int, message: str) -> None:
+    interrupt_status = _job_interrupt_status(job)
+    if interrupt_status:
+        raise JobCancelled(interrupt_status)
     with _lock:
         job.progress = max(0, min(99, int(progress)))
         job.message = message
@@ -1472,6 +1615,11 @@ def _update_job(job: WebJob, progress: int, message: str) -> None:
 
 
 def _update_status(job: WebJob, status: str, progress: int, message: str) -> None:
+    interrupt_status = _job_interrupt_status(job)
+    if status in {"running", "completed"} and interrupt_status:
+        status = interrupt_status
+        progress = 100 if interrupt_status == "cancelled" else max(0, min(99, int(job.progress or progress or 0)))
+        message = "Cancelled" if interrupt_status == "cancelled" else "Paused"
     with _lock:
         job.status = status
         job.progress = max(0, min(100, int(progress)))
@@ -1481,6 +1629,10 @@ def _update_status(job: WebJob, status: str, progress: int, message: str) -> Non
 
 
 def _update_error(job: WebJob, exc: Exception) -> None:
+    interrupt_status = _job_interrupt_status(job)
+    if interrupt_status:
+        _finish_interrupted_job(job, interrupt_status)
+        return
     with _lock:
         job.status = "failed"
         job.progress = 100
@@ -1491,6 +1643,9 @@ def _update_error(job: WebJob, exc: Exception) -> None:
 
 
 def _add_output(job: WebJob, path: Path, label: str) -> None:
+    interrupt_status = _job_interrupt_status(job)
+    if interrupt_status:
+        raise JobCancelled(interrupt_status)
     media_type = _media_type_for_path(path)
     output = JobOutput(label=label, path=path, media_type=media_type)
     with _lock:
@@ -1611,6 +1766,9 @@ def _existing_source(value: object) -> Path:
 
 
 def _create_job_record(job: WebJob) -> None:
+    with _lock:
+        if job.id in _deleted_job_ids:
+            return
     models = _django_models()
     if not models:
         return
@@ -1641,6 +1799,9 @@ def _create_job_record(job: WebJob) -> None:
 
 
 def _save_job_record(job: WebJob) -> None:
+    with _lock:
+        if job.id in _deleted_job_ids:
+            return
     models = _django_models()
     if not models:
         return
@@ -1674,6 +1835,9 @@ def _save_job_record(job: WebJob) -> None:
 
 
 def _create_output_record(job: WebJob, output: JobOutput) -> None:
+    with _lock:
+        if job.id in _deleted_job_ids:
+            return
     models = _django_models()
     if not models:
         return
@@ -1873,7 +2037,7 @@ def _ai_meta_payload(params: dict[str, object]) -> dict[str, object]:
 
 
 def _estimate_job_eta(created_at: float, progress: int, status: str) -> tuple[int | None, str]:
-    if status not in {"queued", "running"}:
+    if status not in {"queued", "running", "processing"}:
         return None, ""
     safe_progress = max(0, min(99, int(progress or 0)))
     if safe_progress < 4:
@@ -1896,6 +2060,7 @@ def _format_eta_duration(seconds: int) -> str:
 def _display_text(value: str) -> str:
     if not value:
         return value
+    value = re.sub(r"\x1b\[[0-9;]*m", "", str(value))
     try:
         repaired = value.encode("cp1251").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):
@@ -2007,9 +2172,9 @@ def _stats_payload(jobs: list, output_count: int, total_size: int) -> dict[str, 
     statuses = [getattr(job, "status", "") for job in jobs]
     return {
         "total_jobs": len(jobs),
-        "active_jobs": sum(1 for status in statuses if status in {"queued", "running"}),
+        "active_jobs": sum(1 for status in statuses if status in ACTIVE_JOB_STATUSES),
         "completed_jobs": sum(1 for status in statuses if status == "completed"),
-        "failed_jobs": sum(1 for status in statuses if status == "failed"),
+        "failed_jobs": sum(1 for status in statuses if status in {"failed", "cancelled"}),
         "output_count": output_count,
         "total_output_size": total_size,
         "total_output_size_text": human_size(total_size),

@@ -19,7 +19,7 @@
 
         <div class="checkout-summary" id="checkout-summary">
           <span>{% ui "checkout_plan_details" %}</span>
-          <strong id="summary-title">{{ selected_plan.name }} - {{ selected_plan.price_label }}</strong>
+          <strong id="summary-title">{{ selected_plan.name }} - {{ selected_plan.cherryx_price_label }}</strong>
           <p id="summary-copy">{{ selected_plan.headline }}</p>
           <em id="summary-badge">{{ selected_plan.badge }}</em>
           {% if has_access %}
@@ -93,19 +93,20 @@
                     data-plan="{{ plan.code }}"
                     data-name="{{ plan.name }}"
                     data-badge="{{ plan.badge }}"
-                    data-price="{{ plan.price_display }}"
+                    data-price="{{ plan.cherryx_display }}"
                     data-due-cents="{{ plan.due_cents|default:plan.price_cents }}"
                     data-due="{{ plan.due_display|default:plan.price_display }}"
                     data-credit="{{ plan.credit_display|default:'0$' }}"
                     data-list="{{ plan.list_display|default:plan.price_display }}"
-                    data-price-label="{{ plan.price_label }}"
+                    data-price-label="{{ plan.cherryx_price_label }}"
                     data-headline="{{ plan.headline }}"
                     aria-pressed="{% if plan.code == selected_plan.code %}true{% else %}false{% endif %}"
                   >
                     <span class="plan-copy">
                       <span class="plan-badge">{{ plan.badge }}</span>
                       <strong>{{ plan.name }}</strong>
-                      <em>{{ plan.price_label }}</em>
+                      <em>{{ plan.cherryx_price_label }}</em>
+                      <small>{{ plan.telegram_usd_approx_display }}</small>
                       <small>{% ui "billing_now_due" %}: {{ plan.due_display|default:plan.price_display }}</small>
                     </span>
                   </button>

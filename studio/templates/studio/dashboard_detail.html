@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Stats - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-stats-metric-strip">
-    <script defer src="{% static 'studio/stats_files.js' %}"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-stats-delete-modal">
+    <script defer src="{% static 'studio/stats_files.js' %}?v=20260618-stats-delete-modal"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page stats-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -26,17 +26,17 @@
       <section class="stats-hero">
         <article class="stats-card is-storage">
           <span>{% ui "volume" %}</span>
-          <strong>{{ account_stats.total_output_size_text }}</strong>
-          <small>{% ui "billing_available_more" %} {{ account_stats.storage_available_text }}</small>
-          <i><b style="width: {{ account_stats.storage_percent }}%"></b></i>
+          <strong data-account-stat="total_output_size_text">{{ account_stats.total_output_size_text }}</strong>
+          <small>{% ui "billing_available_more" %} <em data-account-stat="storage_available_text">{{ account_stats.storage_available_text }}</em></small>
+          <i><b data-account-stat-bar="storage_percent" style="width: {{ account_stats.storage_percent }}%"></b></i>
         </article>
         <article class="stats-card is-jobs">
           <span>{% ui "total_jobs" %}</span>
-          <strong>{{ account_stats.total_jobs }}</strong>
+          <strong data-account-stat="total_jobs">{{ account_stats.total_jobs }}</strong>
         </article>
         <article class="stats-card is-files">
           <span>{% ui "files" %}</span>
-          <strong>{{ account_stats.output_count }}</strong>
+          <strong data-account-stat="output_count">{{ account_stats.output_count }}</strong>
         </article>
       </section>
 
@@ -46,5 +46,21 @@
         {% include "studio/dashboard_tasks_section.html" %}
       {% endif %}
     </main>
+    <div class="stats-delete-modal" data-stats-delete-modal hidden>
+      <button class="stats-delete-backdrop" type="button" data-stats-delete-cancel aria-label="{% ui "cancel" %}"></button>
+      <section class="stats-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="stats-delete-title">
+        <span>{% ui "delete" %}</span>
+        <h2 id="stats-delete-title">{% ui "delete_confirmation" %}</h2>
+        <p>{% ui "delete_task_confirm" %}</p>
+        <div class="stats-delete-target">
+          <small>{% ui "tasks" %}</small>
+          <b data-stats-delete-name></b>
+        </div>
+        <footer>
+          <button type="button" data-stats-delete-cancel>{% ui "cancel" %}</button>
+          <button class="is-danger" type="button" data-stats-delete-confirm>{% ui "delete" %}</button>
+        </footer>
+      </section>
+    </div>
   </body>
 </html>

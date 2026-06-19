@@ -11,4 +11,5 @@ urlpatterns = [
     path("pricing/", views.pricing, name="pricing"),
     path("checkout/", views.checkout, name="checkout"),
     path("check-email/", views.check_email, name="check_email"),
+    path("telegram-intent/", views.telegram_intent, name="telegram_intent"),
 ]

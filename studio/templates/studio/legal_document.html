@@ -8,7 +8,7 @@
       {% if document_type == "terms" %}{% ui "merchant_terms_title" %}{% elif document_type == "refund" %}{% ui "merchant_refund_title" %}{% else %}{% ui "merchant_contacts_title" %}{% endif %}
       - CherryX Creator Studio
     </title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-wayforpay-documents-2">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260619-telegram-stars-legal">
   </head>
   <body class="landing-page legal-info-page legal-document-page">
     <header class="landing-nav">
@@ -39,23 +39,37 @@
             {% if document_type == "terms" %}{% ui "merchant_terms_title" %}{% elif document_type == "refund" %}{% ui "merchant_refund_title" %}{% else %}{% ui "merchant_contacts_title" %}{% endif %}
           </h1>
           <p>
-            {% if document_type == "terms" %}{% ui "merchant_terms_copy" %}{% elif document_type == "refund" %}{% ui "merchant_refund_copy" %}{% else %}{% ui "merchant_business_name" %}. {% ui "merchant_remote_copy" %}{% endif %}
+            {% if document_type == "terms" %}{% ui "merchant_terms_copy" %}{% elif document_type == "refund" %}{% ui "merchant_refund_copy" %}{% else %}{% ui "merchant_contacts_summary" %}{% endif %}
           </p>
           <dl>
             <div>
-              <dt>{% ui "legal_provider_label" %}</dt>
-              <dd>{% ui "merchant_business_name" %}</dd>
-            </div>
-            <div>
-              <dt>{% ui "merchant_tax_id" %}</dt>
-              <dd>3795908055</dd>
+              <dt>{% ui "legal_payment_method_label" %}</dt>
+              <dd>{% ui "legal_payment_method_value" %}</dd>
             </div>
             <div>
               <dt>{% ui "legal_service_type_label" %}</dt>
               <dd>{{ legal_doc.meta_service_type }}</dd>
             </div>
+            <div>
+              <dt>{% ui "legal_delivery_label" %}</dt>
+              <dd>{% ui "legal_delivery_value" %}</dd>
+            </div>
           </dl>
         </header>
+
+        <section class="legal-stars-card" aria-labelledby="legal-stars-title">
+          <div>
+            <span class="legal-document-kicker">Telegram Stars</span>
+            <h2 id="legal-stars-title">{% ui "legal_stars_how_title" %}</h2>
+            <p>{% ui "legal_stars_how_copy" %}</p>
+          </div>
+          <ol>
+            <li>{% ui "legal_stars_step_1" %}</li>
+            <li>{% ui "legal_stars_step_2" %}</li>
+            <li>{% ui "legal_stars_step_3" %}</li>
+            <li>{% ui "legal_stars_step_4" %}</li>
+          </ol>
+        </section>
 
         {% for section in legal_doc.sections %}
           <section class="legal-document-section">
@@ -79,11 +93,10 @@
         <section class="legal-document-section">
           <h2>{% ui "legal_provider_contacts_title" %}</h2>
           <ul class="legal-contact-list">
-            <li><strong>{% ui "merchant_business_name" %}</strong></li>
-            <li>{% ui "merchant_tax_id" %}: 3795908055</li>
             <li>Email: <a href="mailto:cherryxdigital@gmail.com">cherryxdigital@gmail.com</a></li>
             <li>{% ui "merchant_phone" %}: <a href="tel:+380963635905">+380 (96) 363-59-05</a></li>
             <li>{% ui "merchant_remote_copy" %}</li>
+            <li>{% ui "legal_support_contacts_note" %}</li>
           </ul>
         </section>
       </article>

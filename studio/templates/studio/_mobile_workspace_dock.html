@@ -1,0 +1,29 @@
+{% load ui_i18n %}
+<nav class="mobile-workspace-dock" aria-label="{% ui "workspace" %}">
+  <a class="{% if active_mobile_nav == 'convert' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=convert" data-icon="refresh-cw">{% ui "converter" %}</a>
+  <a class="{% if active_mobile_nav == 'youtube' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=youtube" data-icon="youtube">YouTube</a>
+  <a class="{% if active_mobile_nav == 'cover' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=cover" data-icon="image">{% ui "covers" %}</a>
+  <a class="{% if active_mobile_nav == 'subtitles' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=subtitles" data-icon="captions">{% ui "subtitles" %}</a>
+  <a class="{% if active_mobile_nav == 'package' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=package" data-icon="package">{% ui "package" %}</a>
+  <a class="{% if active_mobile_nav == 'resume' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=resume" data-icon="file-user">{% ui "resume" %}</a>
+  <a class="{% if active_mobile_nav == 'originality' %}is-active{% endif %}" href="{% url 'studio:index' %}?tool=originality" data-icon="scan-text">{% ui "originality_check" %}</a>
+  <a class="{% if active_mobile_nav == 'video' %}is-active{% endif %}" href="{% url 'studio:video_project_list' %}" data-icon="clapperboard">{% ui "video_editor_nav" %}</a>
+  <a class="{% if active_mobile_nav == 'music' %}is-active{% endif %}" href="{% url 'studio:music_project_list' %}" data-icon="music-2">{% ui "music_editor_nav" %}</a>
+  <a class="{% if active_mobile_nav == 'design' %}is-active{% endif %}" href="{% url 'studio:design_project_list' %}" data-icon="palette">{% ui "design" %}</a>
+  <a class="{% if active_mobile_nav == 'pay' %}is-active{% endif %}" href="{% url 'studio:cherryx_pay' %}" data-icon="coins">CherryX Pay</a>
+</nav>
+<script>
+  (() => {
+    const scrollActiveMobileDock = () => {
+      if (!window.matchMedia("(max-width: 760px)").matches) return;
+      const dock = document.querySelector(".mobile-workspace-dock");
+      const active = dock?.querySelector(".is-active");
+      if (!dock || !active) return;
+      const left = active.offsetLeft - (dock.clientWidth - active.offsetWidth) / 2;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      dock.scrollTo({ left: Math.max(0, left), behavior: reducedMotion ? "auto" : "smooth" });
+    };
+    window.addEventListener("load", () => window.requestAnimationFrame(scrollActiveMobileDock));
+    window.addEventListener("resize", scrollActiveMobileDock, { passive: true });
+  })();
+</script>

@@ -1,0 +1,58 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_publish' %}">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-foundation">
+  </head>
+  <body class="community-page community-publish-page">
+    <header class="community-nav">
+      <a href="{% url 'studio:landing' %}">CherryX</a>
+      <nav>
+        <a href="{% url 'studio:index' %}">Live workspace</a>
+        <a href="{% url 'studio:community_videos' %}">Videos</a>
+        <a href="{% url 'studio:community_images' %}">Images</a>
+        <a href="{% url 'studio:community_texts' %}">Texts</a>
+      </nav>
+    </header>
+    <main class="community-detail-shell">
+      <form class="community-publish-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {% if source_payload %}
+          <input type="hidden" name="source" value="{{ source_payload.source }}">
+          <input type="hidden" name="source_id" value="{{ source_payload.source_id }}">
+        {% endif %}
+        <header>
+          <p>Publish</p>
+          <h1>Share to CherryX network</h1>
+          <span>Publish a public work for free or set a CherryX price. Paid sales are credited to your CherryX balance.</span>
+        </header>
+        {% if source_payload %}
+          <div class="community-source-note">
+            <strong>Source connected</strong>
+            <span>{{ source_payload.title }} · file or preview will be copied automatically when available.</span>
+          </div>
+        {% endif %}
+        {% if form.non_field_errors %}<div class="community-form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="community-form-grid">
+          {% for field in form %}
+            <label class="community-field {% if field.name == 'body' or field.name == 'excerpt' %}is-wide{% endif %}">
+              <span>{{ field.label }}</span>
+              {{ field }}
+              {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<em>{{ error }}</em>{% endfor %}
+            </label>
+          {% endfor %}
+        </div>
+        <footer>
+          <button type="submit">Publish work</button>
+          <a href="{% url 'studio:community_videos' %}">Open network</a>
+        </footer>
+      </form>
+    </main>
+  </body>
+</html>

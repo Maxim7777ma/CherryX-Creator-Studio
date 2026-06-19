@@ -7,13 +7,13 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from urllib.parse import urlencode
 
 from .forms import CheckoutForm
 from .models import CheckoutRecord
 from .plans import PLANS, get_plan
-from .services import activate_access, active_access_until, prorated_due_cents, transfer_guest_workspace, user_has_active_access
+from .services import activate_access, active_access_until, create_telegram_payment_intent, prorated_due_cents, telegram_star_rate_info, transfer_guest_workspace, user_has_active_access
 from studio.localization import localized_plan
 
 
@@ -33,6 +33,7 @@ def pricing(request: HttpRequest):
             "current_plan_code": _current_access_plan_code(request),
             "checkout_return_url": f"{reverse('billing:checkout')}?{urlencode({'next': next_url})}",
             "focused_plan_code": request.GET.get("focus") or "",
+            "telegram_star_rate": telegram_star_rate_info(refresh=False),
         },
     )
 
@@ -82,6 +83,7 @@ def checkout(request: HttpRequest):
             "has_access": user_has_active_access(request.user),
             "active_until": active_access_until(request.user),
             "current_plan_code": _current_access_plan_code(request),
+            "telegram_star_rate": telegram_star_rate_info(refresh=False),
         },
     )
 
@@ -91,6 +93,29 @@ def check_email(request: HttpRequest) -> JsonResponse:
     email = (request.GET.get("email") or "").strip().lower()
     exists = bool(email) and (User.objects.filter(username=email).exists() or User.objects.filter(email=email).exists())
     return JsonResponse({"exists": exists})
+
+
+@require_POST
+def telegram_intent(request: HttpRequest) -> JsonResponse:
+    kind = (request.POST.get("kind") or "").strip().lower()
+    try:
+        if kind == "plan":
+            payload = create_telegram_payment_intent(
+                kind="plan",
+                user=request.user,
+                plan_code=request.POST.get("plan") or "pro",
+            )
+        elif kind == "topup":
+            payload = create_telegram_payment_intent(
+                kind="topup",
+                user=request.user,
+                cherryx_amount=int(request.POST.get("cherryx_amount") or 0),
+            )
+        else:
+            return JsonResponse({"ok": False, "error": "unsupported_kind"}, status=400)
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "invalid_request"}, status=400)
+    return JsonResponse(payload)
 
 
 def _session_guest_key(request: HttpRequest) -> str:

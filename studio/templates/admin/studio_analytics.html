@@ -389,6 +389,20 @@
         {% else %}<div class="cx-empty">Оплат пока нет.</div>{% endif %}
       </div>
     </div>
+
+    <div style="margin-top:16px;">
+      <h2>Telegram payments</h2>
+      {% if selected.recent_telegram_payments %}
+      <div class="cx-list">
+        {% for payment in selected.recent_telegram_payments %}
+        <div class="cx-list-item">
+          <div><b>{{ payment.kind }} / {{ payment.plan_code }}</b><small>{{ payment.stars }} Stars В· {{ payment.cherryx }} CherryX В· {{ payment.paid_at|date:"d.m.Y H:i" }}</small></div>
+          {% if payment.admin_url %}<a class="cx-status" href="{{ payment.admin_url }}">{{ payment.status }}</a>{% else %}<span class="cx-status">{{ payment.status }}</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="cx-empty">Telegram payments not found.</div>{% endif %}
+    </div>
   </section>
   {% elif query %}
   <section class="cx-empty">Пользователь по запросу “{{ query }}” не найден.</section>
@@ -479,6 +493,26 @@
         <div class="cx-empty">Аккаунтов пока нет.</div>
         {% endfor %}
       </div>
+    </article>
+  </section>
+
+  <section class="cx-two">
+    <article class="cx-panel">
+      <h2>Recent Telegram payments</h2>
+      <div class="cx-list">
+        {% for payment in recent_telegram_payments %}
+        <div class="cx-list-item">
+          <div><b>{{ payment.user }}</b><small>{{ payment.kind }} / {{ payment.plan_code }} В· {{ payment.stars }} Stars В· {{ payment.cherryx }} CherryX В· {{ payment.paid_at|date:"d.m.Y H:i" }}</small></div>
+          {% if payment.admin_url %}<a class="cx-status" href="{{ payment.admin_url }}">{{ payment.status }}</a>{% else %}<span class="cx-status">{{ payment.status }}</span>{% endif %}
+        </div>
+        {% empty %}
+        <div class="cx-empty">Telegram payments not found.</div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="cx-panel">
+      <h2>Telegram Stars destination</h2>
+      <div class="cx-empty">Stars приходят на баланс Telegram-бота, который выставил invoice. Здесь показан локальный учет CherryX и intent-статусов.</div>
     </article>
   </section>
 </div>

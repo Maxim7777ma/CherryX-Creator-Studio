@@ -10,16 +10,19 @@ from django.template.response import TemplateResponse
 from django.urls import NoReverseMatch, path, reverse
 from django.utils import timezone
 
-from billing.models import CheckoutRecord, CustomerAccess
+from billing.models import CheckoutRecord, CustomerAccess, TelegramPaymentIntent
 from billing.plans import PLANS, get_plan
 
 from .models import (
     AccountProfile,
+    CommunityPurchase,
+    CommunityWork,
     DesignerAsset,
     DesignerProject,
     JobEventRecord,
     JobOutputRecord,
     JobRecord,
+    LearningArticle,
     MusicEditorAsset,
     MusicEditorProject,
     VideoEditorAsset,
@@ -32,6 +35,10 @@ def _money(cents: int | None, currency: str = "USD") -> str:
     value = int(cents or 0) / 100
     suffix = "$" if currency.upper() == "USD" else f" {currency.upper()}"
     return f"{value:,.2f}{suffix}".replace(",", " ")
+
+
+def _number(value: int | None) -> str:
+    return f"{int(value or 0):,}".replace(",", " ")
 
 
 def _human_bytes(value: int | None) -> str:
@@ -120,6 +127,19 @@ def _user_payload(user):
         }
         for payment in paid_qs.order_by("-paid_at", "-created_at")[:6]
     ]
+    telegram_qs = TelegramPaymentIntent.objects.filter(user=user)
+    recent_telegram_payments = [
+        {
+            "kind": intent.kind,
+            "plan_code": intent.plan_code or "topup",
+            "paid_at": intent.paid_at or intent.created_at,
+            "stars": _number(intent.stars_amount),
+            "cherryx": _number(intent.cherryx_amount),
+            "status": intent.status,
+            "admin_url": _admin_change_url(intent),
+        }
+        for intent in telegram_qs.order_by("-paid_at", "-created_at")[:6]
+    ]
 
     return {
         "object": user,
@@ -135,7 +155,7 @@ def _user_payload(user):
         "language": getattr(profile, "interface_language", "") or "not set",
         "theme": getattr(profile, "theme_mode", "") or "not set",
         "accent": getattr(profile, "accent_color", "") or "#2563eb",
-        "cherryx_balance": 1200 + (user.pk % 7) * 150,
+        "cherryx_balance": int(getattr(profile, "cherryx_balance", 0) or 0),
         "paid_total": _money(paid_total),
         "paid_count": paid_qs.count(),
         "pending_count": pending_qs.count(),
@@ -167,6 +187,7 @@ def _user_payload(user):
         },
         "recent_jobs": list(jobs_qs.order_by("-created_at")[:6]),
         "recent_payments": recent_payments,
+        "recent_telegram_payments": recent_telegram_payments,
     }
 
 
@@ -181,6 +202,9 @@ def admin_analytics_view(request):
 
     paid_qs = CheckoutRecord.objects.filter(status=CheckoutRecord.STATUS_PAID)
     pending_qs = CheckoutRecord.objects.filter(status=CheckoutRecord.STATUS_PENDING)
+    telegram_paid_qs = TelegramPaymentIntent.objects.filter(status__in=[TelegramPaymentIntent.STATUS_PAID, TelegramPaymentIntent.STATUS_NEEDS_EMAIL, TelegramPaymentIntent.STATUS_APPLIED])
+    telegram_applied_qs = TelegramPaymentIntent.objects.filter(status=TelegramPaymentIntent.STATUS_APPLIED)
+    telegram_needs_email_qs = TelegramPaymentIntent.objects.filter(status=TelegramPaymentIntent.STATUS_NEEDS_EMAIL)
     active_access_qs = CustomerAccess.objects.filter(active_until__gt=now)
     all_job_bytes = _safe_sum(JobRecord.objects.all(), "total_output_size")
     all_project_bytes = (
@@ -231,6 +255,19 @@ def admin_analytics_view(request):
         }
         for payment in paid_qs.select_related("user").order_by("-paid_at", "-created_at")[:8]
     ]
+    recent_telegram_payments = [
+        {
+            "user": intent.user.email if intent.user_id and intent.user.email else (intent.user.username if intent.user_id else f"TG {intent.telegram_user_id or '-'}"),
+            "kind": intent.kind,
+            "plan_code": intent.plan_code or "topup",
+            "paid_at": intent.paid_at or intent.created_at,
+            "stars": _number(intent.stars_amount),
+            "cherryx": _number(intent.cherryx_amount),
+            "status": intent.status,
+            "admin_url": _admin_change_url(intent),
+        }
+        for intent in telegram_paid_qs.select_related("user").order_by("-paid_at", "-created_at")[:8]
+    ]
 
     context = {
         **admin.site.each_context(request),
@@ -245,6 +282,10 @@ def admin_analytics_view(request):
             {"label": "30 дней", "value": _money(_safe_sum(paid_qs.filter(paid_at__gte=month_ago), "amount_cents")), "hint": f"{paid_qs.filter(paid_at__gte=month_ago).count()} платежей"},
             {"label": "Ожидают", "value": pending_qs.count(), "hint": f"{_money(_safe_sum(pending_qs, 'amount_cents'))} pending"},
             {"label": "Хранилище", "value": _human_bytes(all_job_bytes + all_project_bytes), "hint": "результаты задач и проекты"},
+            {"label": "Telegram Stars paid", "value": _number(_safe_sum(telegram_paid_qs, "stars_amount")), "hint": f"{telegram_paid_qs.count()} paid Telegram intents"},
+            {"label": "CherryX credited", "value": _number(_safe_sum(telegram_applied_qs.filter(kind=TelegramPaymentIntent.KIND_TOPUP), "cherryx_amount")), "hint": "applied Telegram topups"},
+            {"label": "Telegram payments", "value": telegram_applied_qs.count(), "hint": "applied Telegram intents"},
+            {"label": "Needs email/link", "value": telegram_needs_email_qs.count(), "hint": "paid but not linked yet"},
         ],
         "operations": [
             {"label": "Все задачи", "value": JobRecord.objects.count()},
@@ -260,6 +301,7 @@ def admin_analytics_view(request):
         "top_customers": top_customers,
         "recent_users": User.objects.order_by("-date_joined")[:8],
         "recent_payments": recent_payments,
+        "recent_telegram_payments": recent_telegram_payments,
         "recent_jobs": JobRecord.objects.select_related("owner").order_by("-created_at")[:8],
     }
     return TemplateResponse(request, "admin/studio_analytics.html", context)
@@ -319,6 +361,45 @@ class AccountProfileAdmin(admin.ModelAdmin):
     list_filter = ("interface_language", "theme_mode")
     search_fields = ("user__username", "user__email")
     autocomplete_fields = ("user",)
+
+
+@admin.register(LearningArticle)
+class LearningArticleAdmin(admin.ModelAdmin):
+    list_display = ("title", "status", "featured", "published_at", "updated_at")
+    list_filter = ("status", "featured", "published_at", "created_at")
+    search_fields = ("title", "excerpt", "body", "seo_title", "seo_description")
+    prepopulated_fields = {"slug": ("title",)}
+    fieldsets = (
+        ("Content", {"fields": ("title", "slug", "excerpt", "body", "cover_image")}),
+        ("SEO", {"fields": ("seo_title", "seo_description")}),
+        ("Publishing", {"fields": ("status", "featured", "published_at")}),
+    )
+
+
+@admin.register(CommunityWork)
+class CommunityWorkAdmin(admin.ModelAdmin):
+    list_display = ("title", "kind", "owner", "access", "price_cherryx", "status", "featured", "published_at")
+    list_filter = ("kind", "access", "status", "featured", "published_at", "created_at")
+    search_fields = ("title", "excerpt", "body", "owner__username", "owner__email")
+    autocomplete_fields = ("owner", "source_job", "source_video_project", "source_design_project")
+    prepopulated_fields = {"slug": ("title",)}
+    fieldsets = (
+        ("Publication", {"fields": ("owner", "title", "slug", "kind", "excerpt", "body")}),
+        ("Media", {"fields": ("media_file", "cover_image")}),
+        ("Source", {"fields": ("source_job", "source_video_project", "source_design_project")}),
+        ("CherryX access", {"fields": ("access", "price_cherryx")}),
+        ("Status", {"fields": ("status", "featured", "published_at")}),
+        ("Stats", {"fields": ("download_count", "purchase_count")}),
+    )
+    readonly_fields = ("download_count", "purchase_count")
+
+
+@admin.register(CommunityPurchase)
+class CommunityPurchaseAdmin(admin.ModelAdmin):
+    list_display = ("work", "buyer", "seller", "price_cherryx", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("work__title", "buyer__username", "buyer__email", "seller__username", "seller__email")
+    autocomplete_fields = ("work", "buyer", "seller")
 
 
 @admin.register(VideoEditorProject)

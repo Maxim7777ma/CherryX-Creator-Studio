@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "video_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-project-mobile-filters-v2">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-create-icon">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -68,17 +68,24 @@
               <input type="checkbox" data-project-select value="{{ project.id }}">
               <span></span>
             </label>
-            <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.08), rgba(2,6,23,.72)), url('{{ project.thumbnail }}');{% endif %}">
-              <span>{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
-              <b>{{ project.layer_count }} {% ui "clips" %} &middot; {{ project.track_count }} {% ui "video_tracks_count" %}</b>
+            <a class="video-project-thumb" href="{{ video_editor_url }}?project={{ project.id }}" data-preview-sources="{{ project.preview_sources|join:'|' }}" style="{% if project.thumbnail %}background-image: linear-gradient(180deg, rgba(2,6,23,.06), rgba(2,6,23,.78)), url('{{ project.thumbnail }}');{% endif %}">
+              <video class="video-project-hover-preview" muted playsinline preload="none"></video>
+              <span class="video-project-aspect">{% if not project.is_owner %}{% ui "shared" %} &middot; {{ project.access_role }}{% else %}{{ project.aspect|default:"9 / 16" }}{% endif %}</span>
+              <b class="video-project-count">{{ project.layer_count }} {% ui "clips" %} &middot; {{ project.track_count }} {% ui "video_tracks_count" %}</b>
             </a>
             <div class="video-project-body">
               <strong class="video-project-title" data-project-title-text title="{% ui "double_click_rename" %}">{{ project.title }}</strong>
-              <span>{% if project.clip_name %}{{ project.clip_name }} &middot; {% endif %}{{ project.storage_text }}</span>
+              <span class="video-project-meta">
+                {% if project.clip_name %}<em>{{ project.clip_name }}</em>{% endif %}
+                <em>{{ project.storage_text }}</em>
+              </span>
             </div>
             <div class="video-project-actions">
               <a href="{{ video_editor_url }}?project={{ project.id }}">{% ui "open" %}</a>
-              {% if project.is_owner %}<button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>{% endif %}
+              {% if project.is_owner %}
+                <a href="{{ project.publish_url }}">Publish</a>
+                <button type="button" data-delete-project="{{ project.id }}">{% ui "delete" %}</button>
+              {% endif %}
             </div>
           </article>
         {% endfor %}
@@ -121,7 +128,8 @@
     <script>
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
     </script>
-    <script defer src="{% static 'studio/project_lists.js' %}?v=20260617-project-mobile-filters-v2"></script>
+    {% include "studio/_mobile_workspace_dock.html" with active_mobile_nav="video" %}
+    <script defer src="{% static 'studio/project_lists.js' %}?v=20260618-mobile-create-icon"></script>
   </body>
 </html>
 

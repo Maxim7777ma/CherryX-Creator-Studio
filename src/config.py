@@ -12,8 +12,12 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
+    bot_mode: str
+    bot_admin_ids: set[int]
     subscription_stars: int
     subscription_days: int
+    telegram_stars_to_cherryx: int
+    telegram_stars_plan_code: str
     database_path: Path
     storage_dir: Path
     output_dir: Path
@@ -68,8 +72,12 @@ def get_settings() -> Settings:
 
     return Settings(
         bot_token=token,
+        bot_mode=os.getenv("BOT_MODE", "billing").strip().lower() or "billing",
+        bot_admin_ids=parse_id_set(os.getenv("BOT_ADMIN_IDS", "")),
         subscription_stars=parse_env_int("SUBSCRIPTION_STARS", 100, min_value=1),
         subscription_days=parse_env_int("SUBSCRIPTION_DAYS", 30, min_value=1),
+        telegram_stars_to_cherryx=parse_env_int("TELEGRAM_STARS_TO_CHERRYX", 10, min_value=1),
+        telegram_stars_plan_code=os.getenv("TELEGRAM_STARS_PLAN_CODE", "pro").strip().lower() or "pro",
         database_path=Path(os.getenv("DATABASE_PATH", "data/bot.sqlite3")),
         storage_dir=Path(os.getenv("STORAGE_DIR", "data/files")),
         output_dir=Path(os.getenv("OUTPUT_DIR", "data/output")),

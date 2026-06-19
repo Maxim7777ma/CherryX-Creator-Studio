@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Pay - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-cherryx-pay-mobile">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-dock-active-scroll">
   </head>
   <body class="theme-{{ theme_mode }} detail-page cherryx-pay-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar cherryx-pay-topbar">
@@ -21,7 +21,7 @@
       </div>
     </header>
 
-    <main class="cherryx-pay-shell is-minimal" data-cherryx-pay data-rate="{{ usd_rate }}" data-balance="{{ balance }}">
+    <main class="cherryx-pay-shell is-minimal" data-cherryx-pay data-rate="{{ usd_rate }}" data-balance="{{ balance }}" data-telegram-intent-url="{% url 'billing:telegram_intent' %}">
       <section class="cherryx-pay-summary" aria-label="CherryX wallet summary">
         <article class="cherryx-balance-tile" data-icon="wallet-cards">
           <span>Баланс</span>
@@ -46,6 +46,27 @@
       </section>
 
       <section class="cherryx-pay-grid">
+        <section class="cherryx-pay-panel is-compact cherryx-telegram-panel" data-telegram-link-panel>
+          <header>
+            <span data-icon="send"></span>
+            <div>
+              <strong>Telegram Stars</strong>
+              <small>{% if telegram_user_id %}Telegram подключен: {{ telegram_user_id }}{% else %}Привяжи бот, чтобы Stars зачислялись на этот аккаунт.{% endif %}</small>
+            </div>
+          </header>
+          {% if request.user.is_authenticated %}
+            <div class="cherryx-telegram-link-code">
+              <span>Команда для бота</span>
+              <b>/link {{ telegram_link_token }}</b>
+            </div>
+            <p>Отправь эту команду боту CherryX. После оплаты бот добавит CherryX на баланс и продлит доступ.</p>
+            <button type="button" data-refresh-telegram-link>Новый код</button>
+          {% else %}
+            <p>Войди в аккаунт, чтобы получить код привязки Telegram.</p>
+            <a class="primary-action" href="{% url 'studio:login' %}">Войти</a>
+          {% endif %}
+        </section>
+
         <form class="cherryx-pay-panel is-compact" data-topup-form>
           <header>
             <span data-icon="credit-card"></span>
@@ -68,7 +89,7 @@
             <span>Получишь</span>
             <b><em data-topup-credits>1000</em> CherryX</b>
           </div>
-          <button class="primary-action" type="submit" data-icon="circle-plus">Пополнить баланс</button>
+          <button class="primary-action" type="submit" data-icon="circle-plus">Пополнить через Telegram Stars</button>
           <p data-topup-status></p>
         </form>
 
@@ -98,12 +119,25 @@
       </section>
 
       <section class="cherryx-plan-grid" aria-label="CherryX access packages">
+        {% for plan in plans %}
+        <article class="{% if plan.code == 'pro' %}is-featured{% endif %}">
+          <span>{{ plan.badge }}</span>
+          <b>{{ plan.name }}</b>
+          <strong>{{ plan.cherryx_display }}</strong>
+          <small>{{ plan.telegram_usd_approx_display }} · {{ plan.period_days }} days · {{ plan.storage_text }}</small>
+          <button type="button" data-pay-action data-plan-code="{{ plan.code }}" data-title="Оплатить {{ plan.name }}" data-cost="{{ plan.telegram_stars_amount }}" data-kind="Пакет доступа">Оплатить Stars</button>
+          <a href="/billing/checkout/?plan={{ plan.code }}">Checkout {{ plan.telegram_usd_approx_display }}</a>
+        </article>
+        {% endfor %}
+      </section>
+
+      <section class="cherryx-plan-grid" aria-label="Legacy CherryX access packages" hidden>
         <article>
           <span>Для теста</span>
           <b>Старт</b>
           <strong>100 CherryX</strong>
           <small>3 дня · 512 MB · полный поток скачивания</small>
-          <button type="button" data-pay-action data-title="Оплатить Старт" data-cost="100" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <button type="button" data-pay-action data-plan-code="free" data-title="Оплатить Старт" data-cost="100" data-kind="Пакет доступа">Оплатить Stars</button>
           <a href="/billing/checkout/?plan=free">Checkout $1</a>
         </article>
         <article>
@@ -111,7 +145,7 @@
           <b>Starter</b>
           <strong>900 CherryX</strong>
           <small>7 дней · 2 GB · история задач и повтор запусков</small>
-          <button type="button" data-pay-action data-title="Оплатить Starter" data-cost="900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <button type="button" data-pay-action data-plan-code="starter" data-title="Оплатить Starter" data-cost="900" data-kind="Пакет доступа">Оплатить Stars</button>
           <a href="/billing/checkout/?plan=starter">Checkout $9</a>
         </article>
         <article class="is-featured">
@@ -119,7 +153,7 @@
           <b>Creator Pro</b>
           <strong>1900 CherryX</strong>
           <small>30 дней · 20 GB · Shorts, обложки, субтитры, ZIP, PDF</small>
-          <button type="button" data-pay-action data-title="Оплатить Creator Pro" data-cost="1900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <button type="button" data-pay-action data-plan-code="pro" data-title="Оплатить Creator Pro" data-cost="1900" data-kind="Пакет доступа">Оплатить Stars</button>
           <a href="/billing/checkout/?plan=pro">Checkout $19</a>
         </article>
         <article>
@@ -127,7 +161,7 @@
           <b>Studio</b>
           <strong>4900 CherryX</strong>
           <small>90 дней · 100 GB · клиентские проекты и архив</small>
-          <button type="button" data-pay-action data-title="Оплатить Studio" data-cost="4900" data-kind="Пакет доступа">Оплатить CherryX</button>
+          <button type="button" data-pay-action data-plan-code="studio" data-title="Оплатить Studio" data-cost="4900" data-kind="Пакет доступа">Оплатить Stars</button>
           <a href="/billing/checkout/?plan=studio">Checkout $49</a>
         </article>
       </section>
@@ -190,6 +224,10 @@
         const modal = document.querySelector("[data-confirm-modal]");
         if (!root || !modal) return;
 
+        const csrfToken = () => {
+          const match = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+          return match ? decodeURIComponent(match[1]) : "";
+        };
         const rate = Number(root.dataset.rate || 100);
         let balance = Number(root.dataset.balance || 0);
         let confirmCallback = null;
@@ -203,6 +241,8 @@
         const confirmBody = modal.querySelector("[data-confirm-body]");
         const confirmAmount = modal.querySelector("[data-confirm-amount]");
         const confirmSubmit = modal.querySelector("[data-confirm-submit]");
+        const refreshTelegramLink = document.querySelector("[data-refresh-telegram-link]");
+        const telegramLinkCode = document.querySelector(".cherryx-telegram-link-code b");
         const format = (value) => Math.round(value).toLocaleString("ru-RU");
         const setBalance = (value) => {
           balance = Math.max(0, Math.round(value));
@@ -226,6 +266,37 @@
           const usd = Math.max(0, Number(topupInput.value || 0));
           creditsNode.textContent = format(usd * rate);
         };
+        const openTelegramIntent = async (params) => {
+          const response = await fetch(root.dataset.telegramIntentUrl, {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "X-CSRFToken": csrfToken(),
+            },
+            body: new URLSearchParams(params),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok || !data.link) throw new Error(data.error || "telegram_intent_failed");
+          window.location.href = data.link;
+        };
+
+        refreshTelegramLink?.addEventListener("click", async () => {
+          refreshTelegramLink.disabled = true;
+          try {
+            const response = await fetch("{% url 'studio:telegram_link_token' %}", {
+              method: "POST",
+              headers: {
+                "Accept": "application/json",
+                "X-CSRFToken": csrfToken(),
+              },
+            });
+            if (!response.ok) throw new Error("telegram link token failed");
+            const data = await response.json();
+            if (telegramLinkCode && data.token) telegramLinkCode.textContent = `/link ${data.token}`;
+          } finally {
+            refreshTelegramLink.disabled = false;
+          }
+        });
 
         modal.querySelectorAll("[data-confirm-close]").forEach((button) => button.addEventListener("click", closeConfirm));
         confirmSubmit.addEventListener("click", () => {
@@ -243,6 +314,31 @@
         });
         topupInput.addEventListener("input", updateTopup);
         updateTopup();
+
+        topupForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (!topupForm.reportValidity()) return;
+          const usd = Math.max(0, Number(topupInput.value || 0));
+          const credits = Math.round(usd * rate);
+          try {
+            await openTelegramIntent({ kind: "topup", cherryx_amount: String(credits) });
+          } catch (error) {
+            root.querySelector("[data-topup-status]").textContent = "Telegram Stars payment is temporarily unavailable.";
+          }
+        }, true);
+
+        root.querySelectorAll("[data-pay-action][data-plan-code]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            try {
+              await openTelegramIntent({ kind: "plan", plan: button.dataset.planCode || "pro" });
+            } catch (error) {
+              button.textContent = "Telegram unavailable";
+            }
+          }, true);
+        });
 
         topupForm.addEventListener("submit", (event) => {
           event.preventDefault();
@@ -319,5 +415,6 @@
         });
       })();
     </script>
+    {% include "studio/_mobile_workspace_dock.html" with active_mobile_nav="pay" %}
   </body>
 </html>
