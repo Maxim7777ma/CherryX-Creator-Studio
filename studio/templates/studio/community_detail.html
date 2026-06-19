@@ -8,15 +8,16 @@
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_work_detail' work.slug %}">
     {% if preview_url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ preview_url }}">{% endif %}
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-foundation">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-active-icons">
   </head>
   <body class="community-page community-detail-page community-{{ work.kind }}">
     <header class="community-nav">
-      <a href="{% if work.kind == "video" %}{% url 'studio:community_videos' %}{% elif work.kind == "image" %}{% url 'studio:community_images' %}{% else %}{% url 'studio:community_texts' %}{% endif %}">Community</a>
+      <a href="{% if work.kind == "video" %}{% url 'studio:community_videos' %}{% elif work.kind == "image" %}{% url 'studio:community_images' %}{% elif work.kind == "music" %}{% url 'studio:community_music' %}{% else %}{% url 'studio:community_texts' %}{% endif %}">Community</a>
       <nav>
-        <a href="{% url 'studio:index' %}">Live workspace</a>
-        <a href="{% url 'studio:learn_index' %}">Articles</a>
-        <a href="{% url 'studio:community_publish' %}">Publish</a>
+        <a href="{% url 'studio:index' %}" data-icon="workspace">Live workspace</a>
+        <a href="{% url 'studio:learn_index' %}" data-icon="book-open">Articles</a>
+        <a href="{% if work.kind == "video" %}{% url 'studio:community_videos' %}{% elif work.kind == "image" %}{% url 'studio:community_images' %}{% elif work.kind == "music" %}{% url 'studio:community_music' %}{% else %}{% url 'studio:community_texts' %}{% endif %}" data-icon="{% if work.kind == "video" %}video{% elif work.kind == "image" %}image{% elif work.kind == "music" %}music-2{% else %}captions{% endif %}">Market</a>
+        <a href="{% url 'studio:community_publish' %}" data-icon="upload-cloud">Publish</a>
       </nav>
     </header>
     <main class="community-detail-shell">
@@ -36,6 +37,16 @@
             {% else %}
               <span class="community-locked-preview" data-kind="{{ work.kind }}">Image locked</span>
             {% endif %}
+          {% elif work.kind == "music" %}
+            {% if can_access and download_url %}
+              <div class="community-audio-preview">
+                <i data-icon="music-2"></i>
+                <strong>{{ work.title }}</strong>
+                <audio controls src="{{ download_url }}"></audio>
+              </div>
+            {% else %}
+              <span class="community-locked-preview" data-kind="{{ work.kind }}">Music locked</span>
+            {% endif %}
           {% elif preview_url %}
             <img src="{{ preview_url }}" alt="">
           {% endif %}
@@ -51,6 +62,9 @@
               {% if can_access %}
                 <span>Access unlocked.</span>
                 {% if download_url %}<a href="{{ download_url }}">Download file</a>{% endif %}
+                {% if work.kind == "music" and work.source_music_project %}
+                  <a href="{% url 'studio:community_open_music_project' work.slug %}">Open in music editor</a>
+                {% endif %}
               {% elif request.user.is_authenticated %}
                 {% if request.GET.payment == "insufficient" %}
                   <span class="is-error">Not enough CherryX. Top up balance first.</span>
@@ -68,6 +82,9 @@
               <strong>Free</strong>
               <span>Shared publicly by the creator.</span>
               {% if download_url %}<a href="{{ download_url }}">Download file</a>{% endif %}
+              {% if work.kind == "music" and work.source_music_project %}
+                <a href="{% url 'studio:community_open_music_project' work.slug %}">Open in music editor</a>
+              {% endif %}
             {% endif %}
           </div>
         </section>

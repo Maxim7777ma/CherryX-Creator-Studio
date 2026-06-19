@@ -381,12 +381,12 @@ class CommunityWorkAdmin(admin.ModelAdmin):
     list_display = ("title", "kind", "owner", "access", "price_cherryx", "status", "featured", "published_at")
     list_filter = ("kind", "access", "status", "featured", "published_at", "created_at")
     search_fields = ("title", "excerpt", "body", "owner__username", "owner__email")
-    autocomplete_fields = ("owner", "source_job", "source_video_project", "source_design_project")
+    autocomplete_fields = ("owner", "source_job", "source_video_project", "source_design_project", "source_music_project")
     prepopulated_fields = {"slug": ("title",)}
     fieldsets = (
         ("Publication", {"fields": ("owner", "title", "slug", "kind", "excerpt", "body")}),
         ("Media", {"fields": ("media_file", "cover_image")}),
-        ("Source", {"fields": ("source_job", "source_video_project", "source_design_project")}),
+        ("Source", {"fields": ("source_job", "source_video_project", "source_design_project", "source_music_project")}),
         ("CherryX access", {"fields": ("access", "price_cherryx")}),
         ("Status", {"fields": ("status", "featured", "published_at")}),
         ("Stats", {"fields": ("download_count", "purchase_count")}),

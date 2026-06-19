@@ -381,7 +381,8 @@ class CommunityWork(models.Model):
     KIND_VIDEO = "video"
     KIND_IMAGE = "image"
     KIND_TEXT = "text"
-    KIND_CHOICES = [(KIND_VIDEO, "Video"), (KIND_IMAGE, "Image"), (KIND_TEXT, "Text")]
+    KIND_MUSIC = "music"
+    KIND_CHOICES = [(KIND_VIDEO, "Video"), (KIND_IMAGE, "Image"), (KIND_TEXT, "Text"), (KIND_MUSIC, "Music")]
     ACCESS_FREE = "free"
     ACCESS_PAID = "paid"
     ACCESS_CHOICES = [(ACCESS_FREE, "Free"), (ACCESS_PAID, "Paid with CherryX")]
@@ -400,6 +401,7 @@ class CommunityWork(models.Model):
     source_job = models.ForeignKey(JobRecord, related_name="published_works", null=True, blank=True, on_delete=models.SET_NULL)
     source_video_project = models.ForeignKey(VideoEditorProject, related_name="published_works", null=True, blank=True, on_delete=models.SET_NULL)
     source_design_project = models.ForeignKey(DesignerProject, related_name="published_works", null=True, blank=True, on_delete=models.SET_NULL)
+    source_music_project = models.ForeignKey(MusicEditorProject, related_name="published_works", null=True, blank=True, on_delete=models.SET_NULL)
     access = models.CharField(max_length=16, choices=ACCESS_CHOICES, default=ACCESS_FREE, db_index=True)
     price_cherryx = models.PositiveIntegerField(default=0)
     download_count = models.PositiveIntegerField(default=0)
@@ -421,6 +423,12 @@ class CommunityWork(models.Model):
     @property
     def is_paid(self) -> bool:
         return self.access == self.ACCESS_PAID and self.price_cherryx > 0
+
+    @property
+    def price_usd_display(self) -> str:
+        from billing.services import cherryx_to_usd_display_approx
+
+        return cherryx_to_usd_display_approx(int(self.price_cherryx or 0))
 
     def save(self, *args, **kwargs) -> None:
         if not self.slug:

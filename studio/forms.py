@@ -174,6 +174,12 @@ class AccountSettingsForm(forms.Form):
 
 
 class CommunityWorkForm(forms.ModelForm):
+    rights_confirm = forms.BooleanField(
+        required=True,
+        label="I confirm that I have the rights to publish this work.",
+        error_messages={"required": "Confirm that you have the rights to publish this work."},
+    )
+
     class Meta:
         model = CommunityWork
         fields = ("kind", "title", "excerpt", "body", "media_file", "cover_image", "access", "price_cherryx")
@@ -192,7 +198,7 @@ class CommunityWorkForm(forms.ModelForm):
         source_has_media = bool(getattr(self, "source_has_media", False))
         if access == CommunityWork.ACCESS_PAID and price <= 0:
             self.add_error("price_cherryx", "Set a CherryX price for paid works.")
-        if kind in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE} and not media_file and not source_has_media:
+        if kind in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE, CommunityWork.KIND_MUSIC} and not media_file and not source_has_media:
             self.add_error("media_file", "Upload a media file for this work type.")
         if kind == CommunityWork.KIND_TEXT and not body:
             self.add_error("body", "Add text content for text works.")

@@ -236,6 +236,7 @@ class SiteSmokeTests(TransactionTestCase):
                 "body": "Ready text pack.",
                 "access": CommunityWork.ACCESS_FREE,
                 "price_cherryx": 0,
+                "rights_confirm": "on",
             },
         )
 
@@ -273,6 +274,7 @@ class SiteSmokeTests(TransactionTestCase):
                         "body": "",
                         "access": CommunityWork.ACCESS_FREE,
                         "price_cherryx": 0,
+                        "rights_confirm": "on",
                     },
                 )
 
@@ -280,6 +282,59 @@ class SiteSmokeTests(TransactionTestCase):
             published_from_job = CommunityWork.objects.get(title="Published generated cover")
             self.assertEqual(published_from_job.source_job, job)
             self.assertTrue(published_from_job.media_file.name.endswith(".webp"))
+
+    def test_music_market_can_clone_unlocked_project_to_buyer_workspace(self) -> None:
+        seller = get_user_model().objects.create_user(username="music-seller@example.com", email="music-seller@example.com", password="pass12345")
+        buyer = get_user_model().objects.create_user(username="music-buyer@example.com", email="music-buyer@example.com", password="pass12345")
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_audio = root / "beat.mp3"
+            source_audio.write_bytes(b"fake audio for clone smoke")
+            with mock.patch("studio.views._music_project_media_dir", side_effect=lambda project: root / "music-projects" / str(project.id)):
+                project = MusicEditorProject.objects.create(
+                    owner=seller,
+                    title="Editable beat",
+                    state_json={
+                        "assets": [{"id": "local-1", "serverId": 1, "name": "beat.mp3", "uploaded": True}],
+                        "clips": [{"assetId": 1, "type": "audio"}],
+                    },
+                    asset_count=1,
+                    clip_count=1,
+                )
+                asset = MusicEditorAsset.objects.create(
+                    project=project,
+                    kind="audio",
+                    file_path=str(source_audio),
+                    media_type="audio/mpeg",
+                    size=source_audio.stat().st_size,
+                    original_name="beat.mp3",
+                )
+                project.state_json["assets"][0]["serverId"] = asset.id
+                project.state_json["clips"][0]["assetId"] = asset.id
+                project.save(update_fields=["state_json", "updated_at"])
+                work = CommunityWork.objects.create(
+                    owner=seller,
+                    title="Editable beat pack",
+                    kind=CommunityWork.KIND_MUSIC,
+                    source_music_project=project,
+                    access=CommunityWork.ACCESS_FREE,
+                    status=CommunityWork.STATUS_PUBLISHED,
+                )
+
+                feed = self.client.get(reverse("studio:community_music"))
+                self.assertEqual(feed.status_code, 200)
+                self.assertContains(feed, "Editable beat pack")
+
+                self.client.force_login(buyer)
+                response = self.client.get(reverse("studio:community_open_music_project", args=[work.slug]))
+
+                self.assertEqual(response.status_code, 302)
+                cloned = MusicEditorProject.objects.exclude(pk=project.pk).get(owner=buyer)
+                cloned_asset = cloned.assets.get()
+                self.assertIn(f"project={cloned.id}", response.url)
+                self.assertEqual(cloned.state_json["clips"][0]["assetId"], cloned_asset.id)
+                self.assertEqual(cloned.state_json["assets"][0]["serverId"], cloned_asset.id)
+                self.assertTrue(Path(cloned_asset.file_path).exists())
 
     def test_designer_page_exposes_mobile_palette_and_drawer_hooks(self) -> None:
         response = self.client.get(reverse("studio:designer"))

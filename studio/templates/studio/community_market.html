@@ -1,4 +1,4 @@
-{% load static ui_i18n %}
+{% load static %}
 <!doctype html>
 <html lang="{{ interface_language }}">
   <head>
@@ -6,28 +6,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ seo_title }} - CherryX Creator Studio</title>
     <meta name="description" content="{{ seo_description }}">
-    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-active-icons">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_market' %}">
+    <meta property="og:title" content="{{ seo_title }} - CherryX Creator Studio">
+    <meta property="og:description" content="{{ seo_description }}">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-market">
   </head>
-  <body class="community-page community-{{ kind }}">
+  <body class="community-page community-market-page">
     <header class="community-nav">
       <a class="section-home-link" href="{% url 'studio:landing' %}" data-icon="home" aria-label="CherryX home"></a>
       <nav>
         <a href="{% url 'studio:index' %}" data-icon="workspace">Live workspace</a>
         <a href="{% url 'studio:learn_index' %}" data-icon="book-open">Articles</a>
-        <a class="{% if kind == 'video' %}is-active{% endif %}" href="{% url 'studio:community_videos' %}" data-icon="video" {% if kind == 'video' %}aria-current="page"{% endif %}>Videos</a>
-        <a class="{% if kind == 'image' %}is-active{% endif %}" href="{% url 'studio:community_images' %}" data-icon="image" {% if kind == 'image' %}aria-current="page"{% endif %}>Images</a>
-        <a class="{% if kind == 'music' %}is-active{% endif %}" href="{% url 'studio:community_music' %}" data-icon="music-2" {% if kind == 'music' %}aria-current="page"{% endif %}>Music</a>
-        <a class="{% if kind == 'text' %}is-active{% endif %}" href="{% url 'studio:community_texts' %}" data-icon="captions" {% if kind == 'text' %}aria-current="page"{% endif %}>Texts</a>
+        <a href="{% url 'studio:community_videos' %}" data-icon="video">Videos</a>
+        <a href="{% url 'studio:community_images' %}" data-icon="image">Images</a>
+        <a href="{% url 'studio:community_music' %}" data-icon="music-2">Music</a>
+        <a href="{% url 'studio:community_texts' %}" data-icon="captions">Texts</a>
         <a href="{% url 'studio:community_publish' %}" data-icon="upload-cloud">Publish</a>
       </nav>
     </header>
     <main class="community-shell">
-      <section class="community-hero">
-        <p>{{ meta.eyebrow }}</p>
-        <h1>{{ meta.title }}</h1>
-        <span>{{ meta.description }}</span>
-        <a class="community-hero-action" href="{% url 'studio:community_publish' %}">Share your work</a>
+      <section class="community-hero community-market-hero">
+        <p>Marketplace</p>
+        <h1>CherryX market</h1>
+        <span>Explore public videos, images, text packs and learning articles. Paid works unlock with CherryX and protected previews keep originals private.</span>
+        <div class="community-market-tabs">
+          <a class="is-active" href="{% url 'studio:community_market' %}">All</a>
+          <a href="{% url 'studio:community_videos' %}">Videos</a>
+          <a href="{% url 'studio:community_images' %}">Images</a>
+          <a href="{% url 'studio:community_music' %}">Music</a>
+          <a href="{% url 'studio:community_texts' %}">Texts</a>
+          <a href="{% url 'studio:learn_index' %}">Articles</a>
+        </div>
       </section>
       <form class="community-filter-bar" method="get">
         <label class="community-search-field">
@@ -61,7 +70,7 @@
         </label>
         <button type="submit">Apply</button>
       </form>
-      <section class="community-masonry" aria-label="{{ meta.title }}">
+      <section class="community-masonry" aria-label="CherryX marketplace works">
         {% for work in works %}
           <a class="community-card" href="{% url 'studio:community_work_detail' work.slug %}">
             <span class="community-card-kind" data-kind="{{ work.kind }}">{{ work.get_kind_display }}</span>
@@ -81,11 +90,28 @@
           </a>
         {% empty %}
           <article class="community-empty">
-            <strong>No public works yet</strong>
-            <p>Publish works from admin now; the account share flow can use the same model next.</p>
+            <strong>No matching works yet</strong>
+            <p>Try another filter or publish the first public work.</p>
           </article>
         {% endfor %}
       </section>
+      {% if articles %}
+        <section class="community-article-strip">
+          <header>
+            <p>Learning</p>
+            <h2>Articles and launch lessons</h2>
+          </header>
+          <div>
+            {% for article in articles %}
+              <a href="{% url 'studio:learn_article' article.slug %}">
+                {% if article.cover_image %}<img src="{{ article.cover_image.url }}" alt="">{% endif %}
+                <strong>{{ article.title }}</strong>
+                {% if article.excerpt %}<span>{{ article.excerpt }}</span>{% endif %}
+              </a>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
     </main>
   </body>
 </html>

@@ -7,20 +7,23 @@
     <title>{{ seo_title }} - CherryX Creator Studio</title>
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_publish' %}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-foundation">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-upload-row">
   </head>
   <body class="community-page community-publish-page">
     <header class="community-nav">
-      <a href="{% url 'studio:landing' %}">CherryX</a>
+      <a class="section-home-link" href="{% url 'studio:landing' %}" data-icon="home" aria-label="CherryX home"></a>
       <nav>
-        <a href="{% url 'studio:index' %}">Live workspace</a>
-        <a href="{% url 'studio:community_videos' %}">Videos</a>
-        <a href="{% url 'studio:community_images' %}">Images</a>
-        <a href="{% url 'studio:community_texts' %}">Texts</a>
+        <a href="{% url 'studio:index' %}" data-icon="workspace">Live workspace</a>
+        <a href="{% url 'studio:learn_index' %}" data-icon="book-open">Articles</a>
+        <a href="{% url 'studio:community_videos' %}" data-icon="video">Videos</a>
+        <a href="{% url 'studio:community_images' %}" data-icon="image">Images</a>
+        <a href="{% url 'studio:community_music' %}" data-icon="music-2">Music</a>
+        <a href="{% url 'studio:community_texts' %}" data-icon="captions">Texts</a>
+        <a class="is-active" href="{% url 'studio:community_publish' %}" data-icon="upload-cloud" aria-current="page">Publish</a>
       </nav>
     </header>
     <main class="community-detail-shell">
-      <form class="community-publish-form" method="post" enctype="multipart/form-data">
+      <form class="community-publish-form is-custom" method="post" enctype="multipart/form-data" data-publish-form data-usd-rate="{{ cherryx_usd_rate }}" data-stars-rate="{{ telegram_stars_rate }}">
         {% csrf_token %}
         {% if source_payload %}
           <input type="hidden" name="source" value="{{ source_payload.source }}">
@@ -34,25 +37,95 @@
         {% if source_payload %}
           <div class="community-source-note">
             <strong>Source connected</strong>
-            <span>{{ source_payload.title }} · file or preview will be copied automatically when available.</span>
+            <span>{{ source_payload.title }} - file or preview will be copied automatically when available.</span>
           </div>
         {% endif %}
         {% if form.non_field_errors %}<div class="community-form-errors">{{ form.non_field_errors }}</div>{% endif %}
-        <div class="community-form-grid">
-          {% for field in form %}
-            <label class="community-field {% if field.name == 'body' or field.name == 'excerpt' %}is-wide{% endif %}">
-              <span>{{ field.label }}</span>
-              {{ field }}
-              {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
-              {% for error in field.errors %}<em>{{ error }}</em>{% endfor %}
+
+        <section class="publish-compose">
+          <div class="publish-main-fields">
+            <label class="community-field is-wide">
+              <span>Title</span>
+              <input type="text" name="title" maxlength="180" value="{{ form.title.value|default_if_none:'' }}" placeholder="Name your work" required>
+              {% for error in form.title.errors %}<em>{{ error }}</em>{% endfor %}
             </label>
-          {% endfor %}
-        </div>
+            <label class="community-field is-wide">
+              <span>Short description</span>
+              <textarea name="excerpt" rows="3" placeholder="What will buyers or viewers get?">{{ form.excerpt.value|default_if_none:'' }}</textarea>
+              {% for error in form.excerpt.errors %}<em>{{ error }}</em>{% endfor %}
+            </label>
+            <label class="community-field is-wide">
+              <span>Text body</span>
+              <textarea name="body" rows="8" placeholder="For text works, articles, prompts, license notes or details.">{{ form.body.value|default_if_none:'' }}</textarea>
+              {% for error in form.body.errors %}<em>{{ error }}</em>{% endfor %}
+            </label>
+          </div>
+
+          <aside class="publish-side-fields">
+            <div class="custom-select" data-custom-select>
+              <span>Category</span>
+              <input type="hidden" name="kind" value="{{ form.kind.value|default:'video' }}" data-custom-select-input>
+              <button type="button" data-custom-select-button>Video</button>
+              <div class="custom-select-menu" hidden>
+                <button type="button" data-value="video" data-label="Video">Video</button>
+                <button type="button" data-value="image" data-label="Image">Image</button>
+                <button type="button" data-value="music" data-label="Music">Music</button>
+                <button type="button" data-value="text" data-label="Text">Text</button>
+              </div>
+              {% for error in form.kind.errors %}<em>{{ error }}</em>{% endfor %}
+            </div>
+
+            <div class="custom-file-zone" data-file-zone>
+              <input id="media-file-input" type="file" name="media_file" hidden data-file-input>
+              <label for="media-file-input" data-icon="upload-cloud">
+                <strong>Upload main file</strong>
+                <span>Video, image or downloadable source. Paid originals stay protected.</span>
+                <small data-file-name>No file selected</small>
+              </label>
+              {% for error in form.media_file.errors %}<em>{{ error }}</em>{% endfor %}
+            </div>
+
+            <div class="custom-file-zone" data-file-zone>
+              <input id="cover-image-input" type="file" name="cover_image" accept="image/*" hidden data-file-input>
+              <label for="cover-image-input" data-icon="image">
+                <strong>Upload cover</strong>
+                <span>Optional WebP preview card image.</span>
+                <small data-file-name>No cover selected</small>
+              </label>
+              {% for error in form.cover_image.errors %}<em>{{ error }}</em>{% endfor %}
+            </div>
+
+            <div class="publish-preview" data-publish-preview>
+              <span data-preview-empty>Preview appears after selecting a file or cover</span>
+            </div>
+          </aside>
+        </section>
+
+        <section class="publish-commerce">
+          <div class="access-switch" data-access-switch>
+            <input type="hidden" name="access" value="{{ form.access.value|default:'free' }}" data-access-input>
+            <button type="button" data-value="free">Free</button>
+            <button type="button" data-value="paid">Paid</button>
+          </div>
+          <label class="community-field price-field">
+            <span>Price CherryX</span>
+            <input type="number" name="price_cherryx" min="0" step="1" value="{{ form.price_cherryx.value|default:'0' }}" data-price-input>
+            <small><b data-price-usd>$0.00</b><span data-price-stars>~0 Stars</span><span>100 CherryX = $1.00 · Stars use the current Telegram rate.</span></small>
+            {% for error in form.price_cherryx.errors %}<em>{{ error }}</em>{% endfor %}
+          </label>
+          <label class="rights-check">
+            <input type="checkbox" name="rights_confirm" value="on" {% if form.rights_confirm.value %}checked{% endif %}>
+            <span>I have the rights to publish and sell this work.</span>
+            {% for error in form.rights_confirm.errors %}<em>{{ error }}</em>{% endfor %}
+          </label>
+        </section>
+
         <footer>
           <button type="submit">Publish work</button>
-          <a href="{% url 'studio:community_videos' %}">Open network</a>
+          <a href="{% url 'studio:community_market' %}">Open marketplace</a>
         </footer>
       </form>
     </main>
+    <script src="{% static 'studio/community_publish.js' %}?v=20260619-community-price-rate" defer></script>
   </body>
 </html>

@@ -8,17 +8,19 @@
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:learn_article' article.slug %}">
     {% if article.cover_image %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ article.cover_image.url }}">{% endif %}
-    <link rel="stylesheet" href="{% static 'studio/learn.css' %}?v=20260619-community-foundation">
+    <link rel="stylesheet" href="{% static 'studio/learn.css' %}?v=20260619-learn-book-icon">
   </head>
   <body class="learn-page">
     <header class="learn-nav">
       <a href="{% url 'studio:learn_index' %}">Learning</a>
       <nav>
-        <a href="{% url 'studio:index' %}">Live workspace</a>
-        <a href="{% url 'studio:community_videos' %}">Videos</a>
-        <a href="{% url 'studio:community_images' %}">Images</a>
-        <a href="{% url 'studio:community_texts' %}">Texts</a>
-        <a href="{% url 'studio:community_publish' %}">Publish</a>
+        <a href="{% url 'studio:index' %}" data-icon="workspace">Live workspace</a>
+        <a class="is-active" href="{% url 'studio:learn_index' %}" data-icon="book-open" aria-current="page">Articles</a>
+        <a href="{% url 'studio:community_videos' %}" data-icon="video">Videos</a>
+        <a href="{% url 'studio:community_images' %}" data-icon="image">Images</a>
+        <a href="{% url 'studio:community_music' %}" data-icon="music-2">Music</a>
+        <a href="{% url 'studio:community_texts' %}" data-icon="captions">Texts</a>
+        <a href="{% url 'studio:community_publish' %}" data-icon="upload-cloud">Publish</a>
       </nav>
     </header>
     <main class="article-shell">

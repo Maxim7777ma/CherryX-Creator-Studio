@@ -192,6 +192,14 @@ def telegram_stars_to_usd_cents_approx(stars_amount: int) -> int:
     return int(cents.to_integral_value(rounding=ROUND_HALF_UP))
 
 
+def cherryx_to_usd_cents_approx(cherryx_amount: int) -> int:
+    return max(0, int(cherryx_amount or 0))
+
+
+def cherryx_to_usd_display_approx(cherryx_amount: int) -> str:
+    return money_display_from_cents(cherryx_to_usd_cents_approx(cherryx_amount))
+
+
 def money_display_from_cents(cents: int) -> str:
     cents = int(cents or 0)
     return f"{cents // 100}$" if cents % 100 == 0 else f"{cents / 100:.2f}$"
@@ -801,6 +809,8 @@ __all__ = [
     "telegram_star_usd_cents",
     "telegram_stars_rate",
     "telegram_stars_to_usd_cents_approx",
+    "cherryx_to_usd_cents_approx",
+    "cherryx_to_usd_display_approx",
     "telegram_topup_cherryx_from_stars",
     "sync_telegram_star_rate",
     "usd_cents_to_telegram_stars",

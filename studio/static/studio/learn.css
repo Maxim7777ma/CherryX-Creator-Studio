@@ -37,6 +37,27 @@ body.learn-page {
   text-decoration: none;
 }
 
+.learn-nav > .section-home-link {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--blue);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.learn-nav > .section-home-link::before {
+  content: "";
+  width: 19px;
+  height: 19px;
+  background: currentColor;
+  mask: url("https://api.iconify.design/lucide/house.svg") center / contain no-repeat;
+  -webkit-mask: url("https://api.iconify.design/lucide/house.svg") center / contain no-repeat;
+}
+
 .learn-nav nav {
   display: flex;
   flex-wrap: wrap;
@@ -44,12 +65,62 @@ body.learn-page {
 }
 
 .learn-nav nav a {
+  display: inline-grid;
+  grid-template-columns: 16px max-content;
+  align-items: center;
+  gap: 7px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 9px 12px;
   background: rgba(255, 255, 255, 0.72);
   color: #334155;
   font-size: 13px;
+}
+
+.learn-nav nav a::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: var(--learn-icon) center / contain no-repeat;
+  -webkit-mask: var(--learn-icon) center / contain no-repeat;
+}
+
+.learn-nav nav a[data-icon="workspace"] {
+  --learn-icon: url("https://api.iconify.design/lucide/panels-top-left.svg");
+}
+
+.learn-nav nav a[data-icon="book-open"] {
+  --learn-icon: url("https://api.iconify.design/lucide/book-open.svg");
+}
+
+.learn-nav nav a[data-icon="video"] {
+  --learn-icon: url("https://api.iconify.design/lucide/video.svg");
+}
+
+.learn-nav nav a[data-icon="image"] {
+  --learn-icon: url("https://api.iconify.design/lucide/image.svg");
+}
+
+.learn-nav nav a[data-icon="music-2"] {
+  --learn-icon: url("https://api.iconify.design/lucide/music-2.svg");
+}
+
+.learn-nav nav a[data-icon="captions"] {
+  --learn-icon: url("https://api.iconify.design/lucide/captions.svg");
+}
+
+.learn-nav nav a[data-icon="upload-cloud"] {
+  --learn-icon: url("https://api.iconify.design/lucide/upload-cloud.svg");
+}
+
+.learn-nav nav a.is-active,
+.learn-nav nav a[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--blue) 58%, var(--line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--blue) 88%, #ffffff), var(--blue));
+  color: #ffffff;
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--blue) 24%, transparent);
 }
 
 .learn-shell,

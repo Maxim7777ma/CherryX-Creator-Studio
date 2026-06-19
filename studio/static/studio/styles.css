@@ -14511,7 +14511,7 @@ body.job-detail-page .detail-topbar .language-switcher {
 
 .console-orbit {
   position: absolute;
-  inset: 58px 18px auto auto;
+  inset: 76px 18px auto auto;
   display: flex;
   gap: 8px;
   pointer-events: none;

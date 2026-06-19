@@ -42,7 +42,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from billing.plans import PLANS, get_plan
-from billing.services import active_access_until, ensure_telegram_link_token, prorated_due_cents, transfer_guest_workspace, user_has_active_access
+from billing.services import active_access_until, cherryx_to_usd_display_approx, cherryx_to_usd_cents_approx, ensure_telegram_link_token, prorated_due_cents, telegram_stars_rate, transfer_guest_workspace, user_has_active_access
 from src.config import get_settings
 from src.image_tools import clean_base_name, human_size
 from src.job_service import job_service as actions
@@ -167,13 +167,59 @@ def learn_article(request: HttpRequest, slug: str):
     )
 
 
-def _community_queryset(kind: str):
+def _community_base_queryset():
     return (
-        CommunityWork.objects.filter(kind=kind, status=CommunityWork.STATUS_PUBLISHED)
+        CommunityWork.objects.filter(status=CommunityWork.STATUS_PUBLISHED)
         .select_related("owner")
         .annotate(total_purchases=Count("purchases"))
-        .order_by("-featured", "-published_at", "-created_at")
     )
+
+
+def _community_apply_filters(queryset, request: HttpRequest):
+    query = (request.GET.get("q") or "").strip()
+    access = (request.GET.get("access") or "").strip()
+    sort = (request.GET.get("sort") or "new").strip()
+    min_price = (request.GET.get("min_price") or "").strip()
+    max_price = (request.GET.get("max_price") or "").strip()
+
+    if query:
+        queryset = queryset.filter(
+            Q(title__icontains=query)
+            | Q(excerpt__icontains=query)
+            | Q(body__icontains=query)
+            | Q(owner__first_name__icontains=query)
+            | Q(owner__username__icontains=query)
+            | Q(owner__email__icontains=query)
+        )
+    if access in {CommunityWork.ACCESS_FREE, CommunityWork.ACCESS_PAID}:
+        queryset = queryset.filter(access=access)
+    if min_price.isdigit():
+        queryset = queryset.filter(price_cherryx__gte=int(min_price))
+    if max_price.isdigit():
+        queryset = queryset.filter(price_cherryx__lte=int(max_price))
+
+    orderings = {
+        "popular": ("-featured", "-total_purchases", "-download_count", "-published_at", "-created_at"),
+        "price_low": ("price_cherryx", "-featured", "-published_at", "-created_at"),
+        "price_high": ("-price_cherryx", "-featured", "-published_at", "-created_at"),
+        "new": ("-featured", "-published_at", "-created_at"),
+    }
+    queryset = queryset.order_by(*orderings.get(sort, orderings["new"]))
+    filters = {
+        "q": query,
+        "access": access,
+        "sort": sort if sort in orderings else "new",
+        "min_price": min_price,
+        "max_price": max_price,
+    }
+    return queryset, filters
+
+
+def _community_queryset(kind: str, request: HttpRequest | None = None):
+    queryset = _community_base_queryset().filter(kind=kind)
+    if request is None:
+        return queryset.order_by("-featured", "-published_at", "-created_at")
+    return _community_apply_filters(queryset, request)
 
 
 def _community_kind_meta(kind: str) -> dict[str, str]:
@@ -196,7 +242,41 @@ def _community_kind_meta(kind: str) -> dict[str, str]:
             "description": "Articles, text packs, prompts and written works shared by CherryX users.",
             "icon": "file-text",
         },
+        CommunityWork.KIND_MUSIC: {
+            "title": "CherryX Music Market",
+            "eyebrow": "Music network",
+            "description": "Beats, finished tracks and editable CherryX music projects shared by creators.",
+            "icon": "music-2",
+        },
     }[kind]
+
+
+def _community_usd_display(cherryx_amount: int) -> str:
+    return cherryx_to_usd_display_approx(int(cherryx_amount or 0))
+
+
+def _community_usd_rate_per_cherryx() -> str:
+    return f"{cherryx_to_usd_cents_approx(1) / 100:.6f}"
+
+
+@require_GET
+def community_market(request: HttpRequest):
+    works, filters = _community_apply_filters(_community_base_queryset(), request)
+    featured = works[:18]
+    articles = LearningArticle.objects.filter(status=LearningArticle.STATUS_PUBLISHED).order_by("-featured", "-published_at", "-created_at")[:6]
+    return render(
+        request,
+        "studio/community_market.html",
+        {
+            "kind": "market",
+            "works": featured,
+            "articles": articles,
+            "filters": filters,
+            "cherryx_usd_rate": _community_usd_rate_per_cherryx(),
+            "seo_title": "CherryX Marketplace",
+            "seo_description": "Explore CherryX videos, images, texts and learning articles with free and paid CherryX downloads.",
+        },
+    )
 
 
 def _community_source_kind_from_media(media_type: str, path: str) -> str:
@@ -262,18 +342,20 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
             "source_design_project": project,
         }
     if source == "music_project":
-        project = MusicEditorProject.objects.filter(owner=user, id=source_id).first()
+        project = MusicEditorProject.objects.filter(owner=user, id=source_id).prefetch_related("assets").first()
         if not project:
             return None
+        first_audio = next((asset for asset in project.assets.all() if asset.kind == "audio" and asset.file_path and Path(asset.file_path).exists()), None)
         return {
             "source": source,
             "source_id": source_id,
             "title": project.title,
             "excerpt": "Published from a CherryX music workspace.",
-            "kind": CommunityWork.KIND_TEXT,
-            "body": "Audio project preview. Add a description, usage notes or lyrics before publishing.",
-            "media_path": "",
+            "kind": CommunityWork.KIND_MUSIC,
+            "body": "Beat, track or editable CherryX music project. Add usage notes, BPM, license terms or lyrics before publishing.",
+            "media_path": first_audio.file_path if first_audio else "",
             "cover_path": "",
+            "source_music_project": project,
         }
     return None
 
@@ -297,6 +379,8 @@ def _apply_community_source(work: CommunityWork, source_payload: dict[str, objec
         work.source_video_project = source_payload["source_video_project"]
     if source_payload.get("source_design_project"):
         work.source_design_project = source_payload["source_design_project"]
+    if source_payload.get("source_music_project"):
+        work.source_music_project = source_payload["source_music_project"]
     if not work.media_file and source_payload.get("media_path"):
         _copy_source_path_to_field(work, "media_file", str(source_payload["media_path"]), "community/private")
     if not work.cover_image and source_payload.get("cover_path"):
@@ -362,10 +446,10 @@ def _watermark_community_image(file_field, slug: str) -> bytes:
 
 @require_GET
 def community_feed(request: HttpRequest, kind: str):
-    if kind not in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE, CommunityWork.KIND_TEXT}:
+    if kind not in {CommunityWork.KIND_VIDEO, CommunityWork.KIND_IMAGE, CommunityWork.KIND_TEXT, CommunityWork.KIND_MUSIC}:
         raise Http404("Unknown community feed")
     meta = _community_kind_meta(kind)
-    works = _community_queryset(kind)
+    works, filters = _community_queryset(kind, request)
     return render(
         request,
         "studio/community_feed.html",
@@ -373,6 +457,8 @@ def community_feed(request: HttpRequest, kind: str):
             "kind": kind,
             "meta": meta,
             "works": works,
+            "filters": filters,
+            "cherryx_usd_rate": _community_usd_rate_per_cherryx(),
             "preview_route_name": "studio:community_work_preview",
             "seo_title": meta["title"],
             "seo_description": meta["description"],
@@ -406,7 +492,7 @@ def community_publish(request: HttpRequest):
     source = request.POST.get("source") if request.method == "POST" else request.GET.get("source")
     source_id = request.POST.get("source_id") if request.method == "POST" else request.GET.get("id")
     source_payload = _community_source_for_user(request.user, source or "", source_id or "")
-    source_has_media = bool(source_payload and (source_payload.get("media_path") or source_payload.get("cover_path")))
+    source_has_media = bool(source_payload and (source_payload.get("media_path") or source_payload.get("cover_path") or source_payload.get("source_music_project")))
     initial = {}
     if source_payload:
         initial = {
@@ -431,8 +517,11 @@ def community_publish(request: HttpRequest):
         {
             "form": form,
             "source_payload": source_payload,
+            "cherryx_usd_rate": _community_usd_rate_per_cherryx(),
+            "telegram_stars_rate": telegram_stars_rate(),
+            "cherryx_unit_usd": _community_usd_display(1),
             "seo_title": "Publish to CherryX network",
-            "seo_description": "Share a free or paid CherryX video, image or text work with the public community feed.",
+            "seo_description": "Share a free or paid CherryX video, image, music or text work with the public community feed.",
         },
     )
 
@@ -464,6 +553,77 @@ def community_purchase(request: HttpRequest, slug: str):
             work.purchase_count = CommunityPurchase.objects.filter(work=work).count()
             work.save(update_fields=["purchase_count", "updated_at"])
     return redirect("studio:community_work_detail", slug=work.slug)
+
+
+def _clone_music_project_for_user(source: MusicEditorProject, user, title: str) -> MusicEditorProject:
+    target = MusicEditorProject.objects.create(
+        owner=user,
+        guest_key="",
+        title=_clean_project_title(f"{title} - CherryX copy"),
+        state_json={},
+        clip_count=source.clip_count,
+        duration_seconds=source.duration_seconds,
+        last_export_status=source.last_export_status,
+    )
+    target_dir = _music_project_media_dir(target)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    asset_id_map: dict[str, int] = {}
+    for asset in source.assets.all():
+        source_path = Path(asset.file_path)
+        if not source_path.exists() or not source_path.is_file():
+            continue
+        target_path = target_dir / f"{uuid.uuid4().hex[:12]}_{source_path.name[:96]}"
+        shutil.copy2(source_path, target_path)
+        new_asset = MusicEditorAsset.objects.create(
+            project=target,
+            kind=asset.kind,
+            file_path=str(target_path),
+            media_type=asset.media_type,
+            size=target_path.stat().st_size,
+            original_name=asset.original_name,
+            duration=asset.duration,
+        )
+        asset_id_map[str(asset.id)] = new_asset.id
+    state = json.loads(json.dumps(source.state_json or {}))
+    if isinstance(state, dict):
+        for asset_state in state.get("assets", []) if isinstance(state.get("assets"), list) else []:
+            old_id = str(asset_state.get("serverId") or asset_state.get("id") or "")
+            new_id = asset_id_map.get(old_id)
+            if new_id:
+                asset_state["serverId"] = new_id
+                asset_state["url"] = reverse("studio:music_project_asset_preview", args=[target.id, new_id])
+                if str(asset_state.get("id") or "").isdigit():
+                    asset_state["id"] = new_id
+        for clip in state.get("clips", []) if isinstance(state.get("clips"), list) else []:
+            old_id = str(clip.get("assetId") or "")
+            new_id = asset_id_map.get(old_id)
+            if new_id:
+                clip["assetId"] = new_id
+    target.state_json = state if isinstance(state, dict) else {}
+    _update_music_project_metadata(target)
+    target.storage_bytes = _music_project_storage_bytes(target)
+    target.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "last_export_status", "updated_at"])
+    return target
+
+
+@login_required
+@require_GET
+def community_open_music_project(request: HttpRequest, slug: str):
+    work = get_object_or_404(
+        CommunityWork.objects.select_related("source_music_project").prefetch_related("source_music_project__assets"),
+        slug=slug,
+        status=CommunityWork.STATUS_PUBLISHED,
+        kind=CommunityWork.KIND_MUSIC,
+    )
+    if not work.source_music_project:
+        raise Http404("Music project not found")
+    if not _community_work_can_access(work, request.user):
+        return redirect(f"{reverse('studio:community_work_detail', args=[work.slug])}?payment=required")
+    source = work.source_music_project
+    if source.owner_id == request.user.id:
+        return redirect(f"{reverse('studio:music_editor')}?{urlencode({'project': source.id})}")
+    target = _clone_music_project_for_user(source, request.user, work.title)
+    return redirect(f"{reverse('studio:music_editor')}?{urlencode({'project': target.id})}")
 
 
 @require_GET

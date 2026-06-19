@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
     <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260618-mobile-dock-stable">
-    <link rel="stylesheet" href="{% static 'studio/landing_public.css' %}?v=20260619-community-links">
+    <link rel="stylesheet" href="{% static 'studio/landing_public.css' %}?v=20260619-console-links">
   </head>
   <body class="landing-page">
     <header class="landing-nav">
@@ -47,12 +47,16 @@
       <section class="landing-console" aria-label="Studio modules">
         <div class="console-top">
           <span></span><span></span><span></span>
-          <strong><a href="{% url 'studio:index' %}">Live workspace</a></strong>
+          <nav class="console-top-links" aria-label="CherryX public links">
+            <a href="{% url 'studio:index' %}">{% ui "live_workspace_label" %}</a>
+            <a href="{% url 'studio:learn_index' %}">{% ui "learning_label" %}</a>
+          </nav>
         </div>
         <div class="console-orbit">
-          <a href="{% url 'studio:community_videos' %}" aria-label="Video gallery"><i data-icon="video"></i></a>
-          <a href="{% url 'studio:community_images' %}" aria-label="Image gallery"><i data-icon="image"></i></a>
-          <a href="{% url 'studio:community_texts' %}" aria-label="Text library"><i data-icon="captions"></i></a>
+          <a href="{% url 'studio:community_videos' %}" aria-label="{% ui "community_videos_label" %}" title="{% ui "community_videos_label" %}"><i data-icon="video"></i></a>
+          <a href="{% url 'studio:community_images' %}" aria-label="{% ui "community_images_label" %}" title="{% ui "community_images_label" %}"><i data-icon="image"></i></a>
+          <a href="{% url 'studio:community_music' %}" aria-label="Music market" title="Music market"><i data-icon="music-2"></i></a>
+          <a href="{% url 'studio:community_texts' %}" aria-label="{% ui "community_texts_label" %}" title="{% ui "community_texts_label" %}"><i data-icon="captions"></i></a>
         </div>
         <div class="console-grid">
           <article data-icon="wand-2">
@@ -81,14 +85,8 @@
       <a href="{% url 'studio:video_editor' %}" data-icon="video">
         <span>Editor</span>
       </a>
-      <a href="{% url 'studio:community_videos' %}" data-icon="play-square">
-        <span>Videos</span>
-      </a>
-      <a href="{% url 'studio:community_images' %}" data-icon="image">
-        <span>Gallery</span>
-      </a>
-      <a href="{% url 'studio:learn_index' %}" data-icon="book-open">
-        <span>Learn</span>
+      <a href="{% url 'studio:community_market' %}" data-icon="store">
+        <span>{% ui "community_market_label" %}</span>
       </a>
       <a href="{% url 'studio:index' %}?tool=cover" data-icon="image">
         <span>Covers</span>
