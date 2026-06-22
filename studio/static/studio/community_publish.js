@@ -123,11 +123,15 @@
   const showPreview = (file) => {
     if (!preview || !file) return;
     preview.innerHTML = "";
+    preview.classList.add("has-local-preview");
     if (file.type.startsWith("image/")) {
       const image = document.createElement("img");
       image.src = URL.createObjectURL(file);
       image.alt = "";
       preview.append(image);
+      const note = document.createElement("small");
+      note.textContent = "Selected cover preview. This image will be used on the marketplace card.";
+      preview.append(note);
       return;
     }
     if (file.type.startsWith("video/")) {
@@ -136,10 +140,13 @@
       video.muted = true;
       video.controls = true;
       preview.append(video);
+      const note = document.createElement("small");
+      note.textContent = "Selected video preview. If you do not upload a cover, CherryX will create one from this material.";
+      preview.append(note);
       return;
     }
     const fallback = document.createElement("span");
-    fallback.textContent = file.name;
+    fallback.textContent = `Selected file: ${file.name}`;
     preview.append(fallback);
   };
 
@@ -151,6 +158,18 @@
       name.textContent = file ? file.name : "No file selected";
       zone.classList.toggle("has-file", Boolean(file));
       if (file) showPreview(file);
+    });
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("is-dragging");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("is-dragging"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("is-dragging");
+      if (!input || !event.dataTransfer?.files?.length) return;
+      input.files = event.dataTransfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 
@@ -164,4 +183,12 @@
   };
   priceInput?.addEventListener("input", syncPrice);
   syncPrice();
+
+  form.addEventListener("submit", () => {
+    const button = form.querySelector("[data-publish-submit]");
+    if (!button) return;
+    button.classList.add("is-loading");
+    button.disabled = true;
+    button.textContent = "Publishing...";
+  });
 })();

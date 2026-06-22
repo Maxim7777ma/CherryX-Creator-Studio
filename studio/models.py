@@ -29,6 +29,17 @@ def _make_unique_slug(model: type[models.Model], value: str, pk: int | None = No
     return slug
 
 
+def _make_unique_ascii_slug(model: type[models.Model], value: str, pk: int | None = None) -> str:
+    base = slugify(value or "", allow_unicode=False).strip("-") or f"work-{secrets.token_urlsafe(6)}"
+    slug = base[:80]
+    index = 2
+    while model.objects.filter(slug=slug).exclude(pk=pk).exists():
+        suffix = f"-{index}"
+        slug = f"{base[:80 - len(suffix)]}{suffix}"
+        index += 1
+    return slug
+
+
 def _convert_image_field_to_webp(instance, field_name: str, target_folder: str) -> None:
     image_field = getattr(instance, field_name)
     if not image_field or str(image_field.name).lower().endswith(".webp"):
@@ -536,7 +547,7 @@ class CommunityWork(models.Model):
 
     def save(self, *args, **kwargs) -> None:
         if not self.slug:
-            self.slug = _make_unique_slug(CommunityWork, self.title, self.pk)
+            self.slug = _make_unique_ascii_slug(CommunityWork, self.title, self.pk)
         if self.access == self.ACCESS_FREE:
             self.price_cherryx = 0
         if self.status == self.STATUS_PUBLISHED and not self.published_at:

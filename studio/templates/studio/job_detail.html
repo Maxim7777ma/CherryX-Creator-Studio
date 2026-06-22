@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260617-job-result-mobile-v4">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page job-detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -242,6 +242,9 @@
                           <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
                         {% endif %}
                       {% elif has_access %}
+                        {% if output.preview_kind != "download" %}
+                          <a class="output-link compact" href="{{ output.preview_url }}" target="_blank" rel="noreferrer">{% ui "open" %}</a>
+                        {% endif %}
                         <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
                       {% else %}
                         <a class="output-link compact" href="{{ checkout_url }}">Checkout</a>
@@ -287,6 +290,9 @@
                         <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
                       {% endif %}
                     {% elif has_access %}
+                      {% if output.preview_kind != "download" %}
+                        <a class="output-link compact" href="{{ output.preview_url }}" target="_blank" rel="noreferrer">{% ui "open" %}</a>
+                      {% endif %}
                       <a class="output-link compact" href="{{ output.url }}" download>{% ui "download" %}</a>
                     {% else %}
                       <a class="output-link compact" href="{{ checkout_url }}">Checkout</a>
@@ -377,9 +383,20 @@
           const label = html(output.label || output.name || "");
           const name = html(output.name || "");
           const size = html(output.size_text || "");
-          const action = isOriginality ? labels.open : (hasAccess ? labels.download : labels.checkout);
-          const actionHref = isOriginality ? output.preview_url : (hasAccess ? output.url : "{{ checkout_url|escapejs }}");
-          const downloadAttr = !isOriginality && hasAccess ? " download" : "";
+          const previewable = output.preview_kind && output.preview_kind !== "download";
+          const actionButtons = () => {
+            const editButtons = `
+              ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">{% ui "edit_design" %}</button>` : ""}
+              ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">{% ui "edit_video" %}</button>` : ""}
+            `;
+            if (isOriginality) {
+              return `${editButtons}<a class="output-link compact" href="${html(output.preview_url)}" target="_blank" rel="noreferrer">${html(labels.open)}</a>${hasAccess ? `<a class="output-link compact" href="${html(output.url)}" download>${html(labels.download)}</a>` : ""}`;
+            }
+            if (!hasAccess) {
+              return `${editButtons}<a class="output-link compact" href="{{ checkout_url|escapejs }}">${html(labels.checkout)}</a>`;
+            }
+            return `${editButtons}${previewable ? `<a class="output-link compact" href="${html(output.preview_url)}" target="_blank" rel="noreferrer">${html(labels.open)}</a>` : ""}<a class="output-link compact" href="${html(output.url)}" download>${html(labels.download)}</a>`;
+          };
             let body = `<div class="preview-missing">{% ui "preview_unavailable" %}</div>`;
           if (!output.exists) {
             body = `<div class="preview-missing">{% ui "file_missing" %}</div>`;
@@ -412,16 +429,12 @@
                   <p>${name} &middot; ${size}</p>
                 </div>
                 <div class="output-actions">
-                  ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">{% ui "edit_design" %}</button>` : ""}
-                  ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">{% ui "edit_video" %}</button>` : ""}
-                  <a class="output-link compact" href="${html(actionHref)}"${downloadAttr}>${html(action)}</a>
+                  ${actionButtons()}
                 </div>
               </div>
               ${body}
               <div class="output-mobile-actions">
-                ${output.can_edit_design ? `<button class="output-link compact" type="button" data-edit-design-url="${html(output.edit_design_url)}">{% ui "edit_design" %}</button>` : ""}
-                ${output.can_edit_video ? `<button class="output-link compact" type="button" data-edit-video-url="${html(output.edit_video_url)}">{% ui "edit_video" %}</button>` : ""}
-                <a class="output-link compact" href="${html(actionHref)}"${downloadAttr}>${html(action)}</a>
+                ${actionButtons()}
               </div>
             </article>
           `;

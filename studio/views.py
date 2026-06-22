@@ -5,9 +5,10 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import json
 import html
+import math
 import mimetypes
 import random
 import re
@@ -24,6 +25,7 @@ from django.contrib.auth import get_user_model, login, logout, update_session_au
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.files import File
+from django.core.files.base import ContentFile
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import transaction
@@ -46,6 +48,7 @@ from billing.services import active_access_until, cherryx_to_usd_display_approx,
 from src.config import get_settings
 from src.image_tools import clean_base_name, human_size
 from src.job_service import job_service as actions
+from src import openai_ai
 from src.video_tools import ffmpeg_path, inspect_video
 from src.youtube_tools import SubtitleUnavailableError, normalize_subtitle_language, transcribe_subtitle_cues
 from .forms import AccountSettingsForm, CommunityWorkForm, EmailLoginForm, RegisterForm
@@ -64,6 +67,13 @@ _video_export_processes: dict[str, subprocess.Popen] = {}
 RESUME_FIELDS = [
     "name",
     "position",
+    "resume_mode",
+    "target_role",
+    "target_scope",
+    "work_format",
+    "value_offer",
+    "vacancy_text",
+    "cover_letter",
     "contact",
     "links",
     "summary",
@@ -290,6 +300,17 @@ def _community_source_kind_from_media(media_type: str, path: str) -> str:
     return CommunityWork.KIND_TEXT
 
 
+def _community_clean_source_title(value: str) -> str:
+    title = str(value or "").strip()
+    title = re.sub(r"^(?:edit[:_\-\s]+)+", "", title, flags=re.IGNORECASE).strip()
+    title = re.sub(r"_[0-9]{3,4}p(?:_[a-f0-9]{8,})?$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"_[a-f0-9]{12,}$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"_short_\d+(?:_\d+)?$", "", title, flags=re.IGNORECASE)
+    title = title.replace("_", " ")
+    title = re.sub(r"\s+", " ", title).strip(" -_")
+    return title[:180] or str(value or "").strip()[:180] or "CherryX work"
+
+
 def _community_source_for_user(user, source: str, source_id: str) -> dict[str, object] | None:
     source = (source or "").strip()
     source_id = (source_id or "").strip()
@@ -305,7 +326,7 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
         return {
             "source": source,
             "source_id": source_id,
-            "title": record.title,
+            "title": _community_clean_source_title(record.title),
             "excerpt": f"Published from CherryX task {record.job_id}.",
             "kind": kind,
             "media_path": path if path and Path(path).exists() else "",
@@ -321,7 +342,7 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
         return {
             "source": source,
             "source_id": source_id,
-            "title": project.title,
+            "title": _community_clean_source_title(project.title),
             "excerpt": "Published from a CherryX video workspace.",
             "kind": CommunityWork.KIND_VIDEO,
             "media_path": first_video.file_path if first_video else "",
@@ -335,7 +356,7 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
         return {
             "source": source,
             "source_id": source_id,
-            "title": project.title,
+            "title": _community_clean_source_title(project.title),
             "excerpt": "Published from a CherryX design workspace.",
             "kind": CommunityWork.KIND_IMAGE,
             "media_path": project.preview_path if project.preview_path and Path(project.preview_path).exists() else "",
@@ -350,7 +371,7 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
         return {
             "source": source,
             "source_id": source_id,
-            "title": project.title,
+            "title": _community_clean_source_title(project.title),
             "excerpt": "Published from a CherryX music workspace.",
             "kind": CommunityWork.KIND_MUSIC,
             "body": "Beat, track or editable CherryX music project. Add usage notes, BPM, license terms or lyrics before publishing.",
@@ -361,11 +382,79 @@ def _community_source_for_user(user, source: str, source_id: str) -> dict[str, o
     return None
 
 
-def _copy_source_path_to_field(work: CommunityWork, field_name: str, source_path: str, folder: str) -> None:
+def _media_url_for_path(path_text: str) -> str:
+    if not path_text:
+        return ""
+    try:
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        path = Path(path_text).resolve()
+        relative = path.relative_to(media_root)
+    except Exception:
+        return ""
+    media_url = str(getattr(settings, "MEDIA_URL", "/media/") or "/media/")
+    if not media_url.startswith("/"):
+        media_url = f"/{media_url}"
+    if not media_url.endswith("/"):
+        media_url = f"{media_url}/"
+    return f"{media_url}{quote(relative.as_posix(), safe='/')}"
+
+
+def _community_source_publish_info(source_payload: dict[str, object] | None) -> dict[str, object]:
+    if not source_payload:
+        return {
+            "connected": False,
+            "title": "",
+            "source_label": "Manual upload",
+            "media_ready": False,
+            "cover_ready": False,
+            "media_url": "",
+            "cover_url": "",
+            "kind": "",
+            "steps": [
+                {"label": "Choose category", "state": "active"},
+                {"label": "Upload media or text", "state": "pending"},
+                {"label": "Add preview", "state": "pending"},
+                {"label": "Publish from account", "state": "pending"},
+            ],
+        }
+    source_labels = {
+        "job": "Workspace task",
+        "video_project": "Video editor project",
+        "design_project": "Design project",
+        "music_project": "Music project",
+    }
+    media_path = str(source_payload.get("media_path") or "")
+    cover_path = str(source_payload.get("cover_path") or "")
+    media_ready = bool(media_path)
+    cover_ready = bool(cover_path)
+    source = str(source_payload.get("source") or "")
+    source_id = str(source_payload.get("source_id") or "")
+    source_preview_url = f"{reverse('studio:community_publish_source_preview')}?{urlencode({'source': source, 'id': source_id})}" if source and source_id and (cover_ready or media_ready) else ""
+    return {
+        "connected": True,
+        "title": str(source_payload.get("title") or ""),
+        "source_label": source_labels.get(str(source_payload.get("source") or ""), "Connected source"),
+        "media_ready": media_ready,
+        "cover_ready": cover_ready,
+        "media_url": _media_url_for_path(media_path),
+        "cover_url": _media_url_for_path(cover_path) or source_preview_url,
+        "source_preview_url": source_preview_url,
+        "kind": str(source_payload.get("kind") or ""),
+        "steps": [
+            {"label": "Account selected", "state": "done"},
+            {"label": "Source attached", "state": "done"},
+            {"label": "Media will copy automatically" if media_ready else "Upload main media", "state": "done" if media_ready else "active"},
+            {"label": "Preview ready" if cover_ready else "Upload or generate preview", "state": "done" if cover_ready else "active"},
+            {"label": "Confirm rights and publish", "state": "pending"},
+        ],
+    }
+
+
+def _copy_source_path_to_field(work: CommunityWork, field_name: str, source_path: str, _folder: str) -> None:
     path = Path(source_path or "")
     if not path.exists() or not path.is_file():
         return
-    safe_name = f"{folder}/{uuid.uuid4().hex[:12]}-{path.name[:80]}"
+    safe_name = f"{uuid.uuid4().hex[:12]}-{path.name[:80]}"
     field = getattr(work, field_name)
     with path.open("rb") as source_file:
         field.save(safe_name, File(source_file), save=False)
@@ -388,6 +477,214 @@ def _apply_community_source(work: CommunityWork, source_payload: dict[str, objec
         _copy_source_path_to_field(work, "cover_image", str(source_payload["cover_path"]), "community/source")
 
 
+def _community_cover_bytes_from_image(file_field) -> bytes:
+    source = getattr(file_field, "path", None) or file_field
+    try:
+        if not source:
+            return b""
+        if source is file_field:
+            file_field.open("rb")
+        with Image.open(source) as image:
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            image.thumbnail((1400, 1400), Image.Resampling.LANCZOS)
+            output = BytesIO()
+            image.save(output, format="WEBP", quality=86, method=6)
+            return output.getvalue()
+    finally:
+        try:
+            if source is file_field:
+                file_field.close()
+        except Exception:
+            pass
+
+
+def _community_cover_bytes_from_video(path: Path) -> bytes:
+    if not path.exists() or not path.is_file():
+        return b""
+    frame_dir = settings.storage_dir / "community_preview_frames"
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    frame_path = frame_dir / f"{uuid.uuid4().hex}.jpg"
+    attempts = (
+        ["-ss", "0.5", "-i", str(path)],
+        ["-i", str(path)],
+    )
+    try:
+        for input_args in attempts:
+            completed = subprocess.run(
+                [
+                    str(ffmpeg_path()),
+                    "-y",
+                    *input_args,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "thumbnail,scale=1280:-2:force_original_aspect_ratio=decrease",
+                    str(frame_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=min(30, int(getattr(settings, "video_timeout_seconds", 30) or 30)),
+            )
+            if completed.returncode == 0 and frame_path.exists() and frame_path.stat().st_size:
+                with Image.open(frame_path) as image:
+                    image = ImageOps.exif_transpose(image).convert("RGB")
+                    output = BytesIO()
+                    image.save(output, format="WEBP", quality=84, method=6)
+                    return output.getvalue()
+        return b""
+    finally:
+        frame_path.unlink(missing_ok=True)
+
+
+def _community_placeholder_preview(kind: str, title: str) -> bytes:
+    palette = {
+        CommunityWork.KIND_MUSIC: ((26, 20, 62), (124, 58, 237), "MUSIC"),
+        CommunityWork.KIND_TEXT: ((120, 53, 15), (245, 158, 11), "TEXT"),
+        CommunityWork.KIND_VIDEO: ((15, 23, 42), (37, 99, 235), "VIDEO"),
+        CommunityWork.KIND_IMAGE: ((20, 83, 45), (22, 163, 74), "IMAGE"),
+    }
+    bg, accent, label = palette.get(kind, palette[CommunityWork.KIND_VIDEO])
+    image = Image.new("RGB", (1280, 720), bg)
+    overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+    draw.ellipse((820, -120, 1420, 480), fill=(*accent, 96))
+    draw.ellipse((-160, 400, 420, 980), fill=(255, 255, 255, 34))
+    image = Image.alpha_composite(image.convert("RGBA"), overlay)
+    draw = ImageDraw.Draw(image)
+    try:
+        title_font = ImageFont.truetype("arial.ttf", 62)
+        label_font = ImageFont.truetype("arial.ttf", 28)
+    except OSError:
+        title_font = ImageFont.load_default()
+        label_font = ImageFont.load_default()
+    draw.rounded_rectangle((70, 64, 260, 112), radius=24, fill=(*accent, 235))
+    draw.text((92, 76), label, fill=(255, 255, 255, 255), font=label_font)
+    words = str(title or "CherryX preview").split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        probe = f"{current} {word}".strip()
+        if len(probe) > 28 and current:
+            lines.append(current)
+            current = word
+        else:
+            current = probe
+    if current:
+        lines.append(current)
+    y = 250
+    for line in lines[:4]:
+        draw.text((76, y), line, fill=(255, 255, 255, 244), font=title_font)
+        y += 70
+    output = BytesIO()
+    image.convert("RGB").save(output, format="WEBP", quality=86, method=6)
+    return output.getvalue()
+
+
+def _community_protected_preview_dir() -> Path:
+    path = settings.storage_dir / "community_protected_previews"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _community_protected_video_path(work: CommunityWork) -> Path:
+    source = Path(work.media_file.path)
+    output = _community_protected_preview_dir() / f"{work.slug}-{int(source.stat().st_mtime)}-preview.mp4"
+    if output.exists() and output.stat().st_size:
+        return output
+    vf = (
+        "scale='min(720,iw)':-2:force_original_aspect_ratio=decrease,"
+        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=#0f172a,"
+        "drawtext=text='CHERRYX PREVIEW':x=(w-text_w)/2:y=(h-text_h)/2:"
+        "fontsize=54:fontcolor=white@0.36:box=1:boxcolor=black@0.18:boxborderw=18,"
+        "drawtext=text='Unlock clean original after payment':x=34:y=h-92:"
+        "fontsize=28:fontcolor=white@0.92:box=1:boxcolor=black@0.45:boxborderw=12"
+    )
+    completed = subprocess.run(
+        [
+            str(ffmpeg_path()),
+            "-y",
+            "-t",
+            "24",
+            "-i",
+            str(source),
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "30",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=min(60, int(getattr(settings, "video_timeout_seconds", 60) or 60)),
+    )
+    if completed.returncode != 0 or not output.exists() or not output.stat().st_size:
+        output.unlink(missing_ok=True)
+        raise Http404("Protected preview unavailable")
+    return output
+
+
+def _community_protected_audio_path(work: CommunityWork) -> Path:
+    source = Path(work.media_file.path)
+    output = _community_protected_preview_dir() / f"{work.slug}-{int(source.stat().st_mtime)}-preview.mp3"
+    if output.exists() and output.stat().st_size:
+        return output
+    completed = subprocess.run(
+        [
+            str(ffmpeg_path()),
+            "-y",
+            "-t",
+            "30",
+            "-i",
+            str(source),
+            "-af",
+            "volume=0.72,afade=t=out:st=27:d=3",
+            "-vn",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "96k",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    if completed.returncode != 0 or not output.exists() or not output.stat().st_size:
+        output.unlink(missing_ok=True)
+        raise Http404("Protected preview unavailable")
+    return output
+
+
+def _ensure_community_cover_from_media(work: CommunityWork) -> bool:
+    if work.cover_image or not work.media_file:
+        return False
+    try:
+        if work.kind == CommunityWork.KIND_IMAGE:
+            payload = _community_cover_bytes_from_image(work.media_file)
+        elif work.kind == CommunityWork.KIND_VIDEO:
+            payload = _community_cover_bytes_from_video(Path(work.media_file.path))
+        else:
+            payload = b""
+    except Exception:
+        payload = b""
+    if not payload:
+        return False
+    safe_slug = work.slug or f"work-{work.pk or uuid.uuid4().hex[:8]}"
+    work.cover_image.save(f"community/source/{safe_slug}-auto-preview.webp", ContentFile(payload), save=False)
+    work.save(update_fields=["cover_image", "updated_at"])
+    return True
+
+
 def _community_work_can_access(work: CommunityWork, user) -> bool:
     if not work.is_paid:
         return True
@@ -396,6 +693,23 @@ def _community_work_can_access(work: CommunityWork, user) -> bool:
             return True
         return CommunityPurchase.objects.filter(work=work, buyer=user).exists()
     return False
+
+
+def _community_work_has_purchase_access(work: CommunityWork, user) -> bool:
+    if not work.is_paid:
+        return True
+    if user and getattr(user, "is_authenticated", False):
+        return CommunityPurchase.objects.filter(work=work, buyer=user).exists()
+    return False
+
+
+def _community_platform_fee(price: int) -> int:
+    return max(1, math.ceil(max(0, int(price or 0)) * 0.01)) if int(price or 0) > 0 else 0
+
+
+def _community_purchase_total(price: int) -> int:
+    base = max(0, int(price or 0))
+    return base + _community_platform_fee(base)
 
 
 def _community_preview_field(work: CommunityWork):
@@ -471,14 +785,34 @@ def community_feed(request: HttpRequest, kind: str):
 def community_work_detail(request: HttpRequest, slug: str):
     work = get_object_or_404(CommunityWork.objects.select_related("owner"), slug=slug, status=CommunityWork.STATUS_PUBLISHED)
     has_purchase = bool(request.user.is_authenticated and CommunityPurchase.objects.filter(work=work, buyer=request.user).exists())
+    is_owner = bool(request.user.is_authenticated and work.owner_id == request.user.id)
     can_access = _community_work_can_access(work, request.user)
+    can_view_original = _community_work_has_purchase_access(work, request.user)
+    platform_fee = _community_platform_fee(work.price_cherryx) if work.is_paid else 0
+    purchase_total = _community_purchase_total(work.price_cherryx) if work.is_paid else 0
+    same_kind = CommunityWork.objects.filter(status=CommunityWork.STATUS_PUBLISHED, kind=work.kind).exclude(pk=work.pk).select_related("owner")[:10]
+    fallback = CommunityWork.objects.filter(status=CommunityWork.STATUS_PUBLISHED).exclude(pk=work.pk).exclude(kind=work.kind).select_related("owner")[:10]
+    related_works = list(same_kind)
+    seen_related = {item.pk for item in related_works}
+    for item in fallback:
+        if item.pk not in seen_related:
+            related_works.append(item)
+        if len(related_works) >= 14:
+            break
     return render(
         request,
         "studio/community_detail.html",
         {
             "work": work,
+            "related_works": related_works,
             "can_access": can_access,
+            "can_view_original": can_view_original,
+            "is_owner": is_owner,
             "has_purchase": has_purchase,
+            "balance_cherryx": _cherryx_balance(request),
+            "platform_fee": platform_fee,
+            "purchase_total": purchase_total,
+            "protected_preview_url": reverse("studio:community_work_protected_preview", args=[work.slug]) if work.is_paid and work.media_file else "",
             "download_url": reverse("studio:community_work_download", args=[work.slug]) if work.media_file else "",
             "preview_url": reverse("studio:community_work_preview", args=[work.slug]) if _community_preview_field(work) else "",
             "seo_title": work.title,
@@ -511,13 +845,21 @@ def community_publish(request: HttpRequest):
         work.status = CommunityWork.STATUS_PUBLISHED
         _apply_community_source(work, source_payload)
         work.save()
+        _ensure_community_cover_from_media(work)
         return redirect("studio:community_work_detail", slug=work.slug)
+    publish_account = {
+        "name": request.user.get_full_name() or request.user.get_username() or request.user.email,
+        "email": request.user.email,
+        "avatar_url": _avatar_url(request),
+    }
     return render(
         request,
         "studio/community_publish.html",
         {
             "form": form,
             "source_payload": source_payload,
+            "source_publish_info": _community_source_publish_info(source_payload),
+            "publish_account": publish_account,
             "cherryx_usd_rate": _community_usd_rate_per_cherryx(),
             "telegram_stars_rate": telegram_stars_rate(),
             "cherryx_unit_usd": _community_usd_display(1),
@@ -525,6 +867,42 @@ def community_publish(request: HttpRequest):
             "seo_description": "Share a free or paid CherryX video, image, music or text work with the public community feed.",
         },
     )
+
+
+@login_required
+@require_GET
+def community_publish_source_preview(request: HttpRequest):
+    source_payload = _community_source_for_user(request.user, request.GET.get("source") or "", request.GET.get("id") or "")
+    if not source_payload:
+        raise Http404("Source not found")
+    kind = str(source_payload.get("kind") or "")
+    title = str(source_payload.get("title") or "CherryX preview")
+    cover_path = Path(str(source_payload.get("cover_path") or ""))
+    media_path = Path(str(source_payload.get("media_path") or ""))
+    if cover_path.exists() and cover_path.is_file():
+        content_type = mimetypes.guess_type(cover_path.name)[0] or "image/webp"
+        response = FileResponse(cover_path.open("rb"), as_attachment=False, filename=cover_path.name, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=120"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+    if kind == CommunityWork.KIND_IMAGE and media_path.exists() and media_path.is_file():
+        content_type = mimetypes.guess_type(media_path.name)[0] or "image/webp"
+        response = FileResponse(media_path.open("rb"), as_attachment=False, filename=media_path.name, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=120"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+    if kind == CommunityWork.KIND_VIDEO and media_path.exists() and media_path.is_file():
+        payload = _community_cover_bytes_from_video(media_path)
+        if payload:
+            response = HttpResponse(payload, content_type="image/webp")
+            response["Cache-Control"] = "private, max-age=120"
+            response["X-Content-Type-Options"] = "nosniff"
+            return response
+    payload = _community_placeholder_preview(kind, title)
+    response = HttpResponse(payload, content_type="image/webp")
+    response["Cache-Control"] = "private, max-age=120"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @login_required
@@ -541,11 +919,12 @@ def community_purchase(request: HttpRequest, slug: str):
             defaults={"seller": work.owner, "price_cherryx": work.price_cherryx},
         )
         if created:
+            purchase_total = _community_purchase_total(work.price_cherryx)
             buyer_profile, _ = AccountProfile.objects.select_for_update().get_or_create(user=request.user)
-            if int(buyer_profile.cherryx_balance or 0) < work.price_cherryx:
+            if int(buyer_profile.cherryx_balance or 0) < purchase_total:
                 purchase.delete()
                 return redirect(f"{reverse('studio:community_work_detail', args=[work.slug])}?payment=insufficient")
-            buyer_profile.cherryx_balance = int(buyer_profile.cherryx_balance or 0) - work.price_cherryx
+            buyer_profile.cherryx_balance = int(buyer_profile.cherryx_balance or 0) - purchase_total
             buyer_profile.save(update_fields=["cherryx_balance", "updated_at"])
             if work.owner_id:
                 seller_profile, _ = AccountProfile.objects.select_for_update().get_or_create(user=work.owner)
@@ -632,7 +1011,7 @@ def community_work_download(request: HttpRequest, slug: str):
     work = get_object_or_404(CommunityWork, slug=slug, status=CommunityWork.STATUS_PUBLISHED)
     if not work.media_file:
         raise Http404("File not found")
-    if not _community_work_can_access(work, request.user):
+    if work.is_paid and not _community_work_has_purchase_access(work, request.user):
         if not request.user.is_authenticated:
             return redirect(f"{reverse('studio:login')}?{urlencode({'next': request.path})}")
         return redirect(f"{reverse('studio:community_work_detail', args=[work.slug])}?payment=required")
@@ -655,7 +1034,7 @@ def community_work_preview(request: HttpRequest, slug: str):
     field = _community_preview_field(work)
     if not field:
         raise Http404("Preview not found")
-    if work.is_paid and not _community_work_can_access(work, request.user):
+    if work.is_paid and not _community_work_has_purchase_access(work, request.user):
         payload = _watermark_community_image(field, work.slug)
         response = HttpResponse(payload, content_type="image/webp")
         response["Cache-Control"] = "no-store, private"
@@ -670,6 +1049,32 @@ def community_work_preview(request: HttpRequest, slug: str):
     response["Cache-Control"] = "private, max-age=300"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@require_GET
+def community_work_protected_preview(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork, slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    if not work.is_paid:
+        if work.media_file:
+            return redirect("studio:community_work_download", slug=work.slug)
+        return redirect("studio:community_work_preview", slug=work.slug)
+    if _community_work_has_purchase_access(work, request.user):
+        if work.media_file:
+            return redirect("studio:community_work_download", slug=work.slug)
+        return redirect("studio:community_work_preview", slug=work.slug)
+    if work.kind == CommunityWork.KIND_VIDEO and work.media_file:
+        path = _community_protected_video_path(work)
+        response = _range_file_response(request, path, "video/mp4", path.name)
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+    if work.kind == CommunityWork.KIND_MUSIC and work.media_file:
+        path = _community_protected_audio_path(work)
+        response = FileResponse(path.open("rb"), as_attachment=False, filename=path.name, content_type="audio/mpeg")
+        response["Cache-Control"] = "no-store, private"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+    return redirect("studio:community_work_preview", slug=work.slug)
 
 
 @require_GET
@@ -861,6 +1266,7 @@ def index(request: HttpRequest):
             "subscription_meter": _subscription_meter(request),
             "subscription_panel": _subscription_panel(request, account_stats, language),
             "app_messages": app_messages(language),
+            "resume_prefill": _resume_prefill(request),
         },
     )
 
@@ -2690,10 +3096,58 @@ def start_resume(request: HttpRequest) -> JsonResponse:
         photo = request.FILES.get("photo")
         if photo:
             data["photo_path"] = str(_save_upload(photo, "resume_photo"))
+            data["photo_crop"] = request.POST.get("photo_crop", "").strip()
+        elif request.POST.get("use_account_avatar") == "1" and request.user.is_authenticated:
+            try:
+                avatar_path = request.user.studio_profile.avatar_path
+                if avatar_path and Path(avatar_path).exists():
+                    data["photo_path"] = avatar_path
+            except AccountProfile.DoesNotExist:
+                pass
         job = actions.start_resume_job(data, request.POST.get("template", "1"), owner_id, guest_key)
         return _job_json(job)
     except Exception as exc:
         return _error_json(exc)
+
+
+@require_POST
+def resume_ai_rewrite(request: HttpRequest) -> JsonResponse:
+    language = getattr(request, "interface_language", "en")
+    payload = _resume_ai_payload(request, language)
+    try:
+        result = openai_ai.rewrite_resume_block(payload)
+        if not result.get("text"):
+            raise ValueError("OpenAI returned empty text")
+        return JsonResponse({"ok": True, "used_ai": True, **result})
+    except Exception as exc:
+        result = _local_resume_rewrite(payload)
+        return JsonResponse({"ok": True, "used_ai": False, "fallback_reason": str(exc)[:300], **result})
+
+
+@require_POST
+def resume_ai_match(request: HttpRequest) -> JsonResponse:
+    language = getattr(request, "interface_language", "en")
+    payload = _resume_ai_payload(request, language)
+    try:
+        result = openai_ai.analyze_resume_match(payload)
+        return JsonResponse({"ok": True, "used_ai": True, **result})
+    except Exception as exc:
+        result = _local_resume_match(payload)
+        return JsonResponse({"ok": True, "used_ai": False, "fallback_reason": str(exc)[:300], **result})
+
+
+@require_POST
+def resume_ai_cover_letter(request: HttpRequest) -> JsonResponse:
+    language = getattr(request, "interface_language", "en")
+    payload = _resume_ai_payload(request, language)
+    try:
+        result = openai_ai.generate_resume_cover_letter(payload)
+        if not result.get("letter"):
+            raise ValueError("OpenAI returned empty letter")
+        return JsonResponse({"ok": True, "used_ai": True, **result})
+    except Exception as exc:
+        result = _local_resume_cover_letter(payload)
+        return JsonResponse({"ok": True, "used_ai": False, "fallback_reason": str(exc)[:300], **result})
 
 
 @require_POST
@@ -3724,6 +4178,13 @@ def _copy_output_to_design_asset(project: DesignerProject, source: Path, origina
 def _create_video_project_from_output(request: HttpRequest, record: JobRecord, output, job: dict) -> VideoEditorProject:
     owner_id, guest_key = _workspace_identity(request)
     output_path = Path(output.path)
+    edit_source = _short_video_edit_metadata(output_path)
+    asset_source = Path(str(edit_source.get("source_path") or "")) if edit_source else output_path
+    if not asset_source.exists() or not asset_source.is_file():
+        fallback_source = Path(str(edit_source.get("fallback_source_path") or "")) if edit_source else output_path
+        asset_source = fallback_source if fallback_source.exists() and fallback_source.is_file() else output_path
+        if asset_source == output_path:
+            edit_source = {}
     title = _clean_project_title(f"Edit: {Path(output_path).stem}")
     project = VideoEditorProject.objects.create(
         owner=request.user if request.user.is_authenticated else None,
@@ -3731,16 +4192,29 @@ def _create_video_project_from_output(request: HttpRequest, record: JobRecord, o
         title=title,
         state_json={},
     )
-    asset = _copy_output_to_video_asset(project, output_path, output_path.name)
+    asset = _copy_output_to_video_asset(project, asset_source, output_path.name)
     duration = asset.duration or _safe_video_duration(Path(asset.file_path))
     if duration and not asset.duration:
         asset.duration = duration
         asset.save(update_fields=["duration"])
-    project.state_json = _video_editor_state_from_asset(project, asset, title, duration, record, job)
+    project.state_json = _video_editor_state_from_asset(project, asset, title, duration, record, job, edit_source)
     _update_video_project_metadata(project)
     project.storage_bytes = _video_project_storage_bytes(project)
     project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
     return project
+
+
+def _short_video_edit_metadata(output_path: Path) -> dict[str, object]:
+    meta_path = output_path.with_suffix(".edit.json")
+    if not meta_path.exists() or not meta_path.is_file():
+        return {}
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict) or data.get("kind") != "youtube_short_source":
+        return {}
+    return data
 
 
 def _copy_output_to_video_asset(project: VideoEditorProject, source: Path, original_name: str) -> VideoEditorAsset:
@@ -3763,12 +4237,35 @@ def _copy_output_to_video_asset(project: VideoEditorProject, source: Path, origi
     )
 
 
-def _video_editor_state_from_asset(project: VideoEditorProject, asset: VideoEditorAsset, title: str, duration: float, record: JobRecord, job: dict) -> dict[str, object]:
+def _video_editor_state_from_asset(
+    project: VideoEditorProject,
+    asset: VideoEditorAsset,
+    title: str,
+    duration: float,
+    record: JobRecord,
+    job: dict,
+    edit_source: dict[str, object] | None = None,
+) -> dict[str, object]:
     safe_duration = max(0.25, float(duration or asset.duration or 12))
+    edit_source = edit_source or {}
+    try:
+        source_start = max(0.0, float(edit_source.get("source_start") or 0))
+    except (TypeError, ValueError):
+        source_start = 0.0
+    if source_start >= safe_duration:
+        source_start = 0.0
+    try:
+        clip_duration = float(edit_source.get("clip_duration") or 0)
+    except (TypeError, ValueError):
+        clip_duration = 0
+    clip_duration = max(0.25, clip_duration or safe_duration)
+    if source_start + clip_duration > safe_duration and source_start < safe_duration:
+        clip_duration = max(0.25, safe_duration - source_start)
+    source_end = source_start + clip_duration
     return {
         "title": title,
         "clipName": asset.original_name or title,
-        "aspect": "9 / 16",
+        "aspect": str(edit_source.get("aspect") or "9 / 16"),
         "background": "#020617",
         "backgroundMode": "solid",
         "backgroundValue": "#020617",
@@ -3785,9 +4282,9 @@ def _video_editor_state_from_asset(project: VideoEditorProject, asset: VideoEdit
                 "trackId": "video-main",
                 "assetId": asset.id,
                 "start": 0,
-                "duration": safe_duration,
-                "sourceStart": 0,
-                "sourceEnd": safe_duration,
+                "duration": clip_duration,
+                "sourceStart": source_start,
+                "sourceEnd": source_end,
                 "x": 50,
                 "y": 50,
                 "scale": 100,
@@ -4219,19 +4716,27 @@ def _video_export_duration(state: dict[str, object]) -> float:
 def _video_clip_base_filter(clip: dict[str, object], width: int, height: int) -> str:
     style = clip.get("style") if isinstance(clip.get("style"), dict) else {}
     fit = str(style.get("fit") or "contain")
+    x_pct = max(0.0, min(1.0, float(clip.get("x") or 50) / 100))
+    y_pct = max(0.0, min(1.0, float(clip.get("y") or 50) / 100))
     if fit in {"cover", "crop"}:
         zoom = max(1.0, min(3.0, float(clip.get("scale") or 100) / 100))
         target_width = max(width, int(round(width * zoom)))
         target_height = max(height, int(round(height * zoom)))
         target_width += target_width % 2
         target_height += target_height % 2
-        x_pct = max(0.0, min(1.0, float(clip.get("x") or 50) / 100))
-        y_pct = max(0.0, min(1.0, float(clip.get("y") or 50) / 100))
         return (
             f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height}:(iw-ow)*{x_pct:.6f}:(ih-oh)*{y_pct:.6f},setsar=1"
         )
-    return f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+    zoom = max(0.08, min(1.0, float(clip.get("scale") or 100) / 100))
+    target_width = max(2, int(round(width * zoom)))
+    target_height = max(2, int(round(height * zoom)))
+    target_width += target_width % 2
+    target_height += target_height % 2
+    return (
+        f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)*{x_pct:.6f}:(oh-ih)*{y_pct:.6f}:color=black,setsar=1"
+    )
 
 
 def _render_video_project_from_clip(clip: dict[str, object], assets: dict[int, VideoEditorAsset], state: dict[str, object], output: Path, width: int, height: int, duration: float) -> None:
@@ -5146,6 +5651,28 @@ def _display_name(request: HttpRequest) -> str:
     return "Guest workspace"
 
 
+def _resume_prefill(request: HttpRequest) -> dict[str, object]:
+    if not request.user.is_authenticated:
+        return {"is_guest": True, "name": "", "email": "", "avatar_url": _avatar_url(request), "can_use_avatar": False}
+    user = request.user
+    display = user.get_full_name() or user.first_name or ""
+    if not display and user.email:
+        display = user.email.split("@", 1)[0].replace(".", " ").replace("_", " ").title()
+    can_use_avatar = False
+    try:
+        avatar_path = user.studio_profile.avatar_path
+        can_use_avatar = bool(avatar_path and Path(avatar_path).exists())
+    except AccountProfile.DoesNotExist:
+        pass
+    return {
+        "is_guest": False,
+        "name": display,
+        "email": user.email or "",
+        "avatar_url": _avatar_url(request),
+        "can_use_avatar": can_use_avatar,
+    }
+
+
 def _cherryx_balance(request: HttpRequest) -> int:
     if request.user.is_authenticated:
         try:
@@ -5777,6 +6304,95 @@ def _localize_events(events: list[dict], language: str) -> list[dict]:
     return localized
 
 
+def _resume_ai_payload(request: HttpRequest, language: str) -> dict[str, object]:
+    fields = {field: request.POST.get(field, "").strip() for field in RESUME_FIELDS}
+    resume_text = "\n".join(
+        value
+        for key, value in fields.items()
+        if key not in {"vacancy_text", "cover_letter"} and value
+    )
+    return {
+        **fields,
+        "field": request.POST.get("field", "").strip(),
+        "mode": request.POST.get("mode", "stronger").strip(),
+        "text": request.POST.get("text", "").strip(),
+        "vacancy": request.POST.get("vacancy_text", "").strip(),
+        "resume": resume_text,
+        "language": language,
+    }
+
+
+def _resume_tokens(text: str) -> list[str]:
+    stop = {
+        "and", "the", "for", "with", "you", "your", "are", "this", "that", "from", "will", "have", "has", "our",
+        "для", "или", "как", "что", "это", "при", "на", "по", "над", "под", "про", "без", "або", "що", "цей",
+    }
+    words = re.findall(r"[\w+#.-]{3,}", str(text or "").lower(), flags=re.UNICODE)
+    return [word for word in words if word not in stop and not word.isdigit()]
+
+
+def _local_resume_rewrite(payload: dict[str, object]) -> dict[str, object]:
+    text = str(payload.get("text") or "").strip()
+    mode = str(payload.get("mode") or "stronger")
+    field = str(payload.get("field") or "")
+    if mode == "shorter":
+        result = "\n".join(line.strip() for line in text.splitlines() if line.strip())[:900]
+    elif mode == "english":
+        result = text if re.search(r"[A-Za-z]", text) else "Product-minded specialist focused on clear execution, measurable outcomes and practical teamwork."
+    elif mode == "formal":
+        result = f"{text}\nFocus: structured communication, ownership, measurable delivery and clear business value.".strip()
+    else:
+        prefix = "- " if field in {"experience", "achievements"} else ""
+        result = f"{text}\n{prefix}Strengthened outcomes through clearer priorities, practical execution and measurable improvements.".strip()
+    return {"text": result[:7000], "notes": ["Local fallback used", "Add real metrics where possible"], "model": "local"}
+
+
+def _local_resume_match(payload: dict[str, object]) -> dict[str, object]:
+    vacancy_words = list(dict.fromkeys(_resume_tokens(str(payload.get("vacancy") or ""))))[:28]
+    resume_set = set(_resume_tokens(str(payload.get("resume") or "")))
+    matched = [word for word in vacancy_words if word in resume_set]
+    missing = [word for word in vacancy_words if word not in resume_set]
+    base = round((len(matched) / len(vacancy_words)) * 70) if vacancy_words else 0
+    resume = str(payload.get("resume") or "")
+    bonus = 0
+    bonus += 6 if str(payload.get("name") or "").strip() else 0
+    bonus += 6 if str(payload.get("contact") or "").strip() else 0
+    bonus += 8 if len(_resume_tokens(str(payload.get("summary") or ""))) >= 12 else 0
+    bonus += 8 if re.search(r"\d", resume) else 0
+    bonus += 8 if len(_resume_tokens(str(payload.get("skills") or ""))) >= 5 else 0
+    suggestions = []
+    if missing:
+        suggestions.append("Add true missing keywords to summary, skills or experience.")
+    if not re.search(r"\d", resume):
+        suggestions.append("Add measurable results: %, count, budget, team size or deadline.")
+    if len(_resume_tokens(str(payload.get("summary") or ""))) < 12:
+        suggestions.append("Make summary more specific: role, domain, strength, outcome.")
+    return {
+        "score": max(0, min(100, base + bonus)),
+        "matched_keywords": matched[:16],
+        "missing_keywords": missing[:16],
+        "suggestions": suggestions[:8],
+        "summary": "Local keyword and ATS checklist analysis.",
+        "model": "local",
+    }
+
+
+def _local_resume_cover_letter(payload: dict[str, object]) -> dict[str, object]:
+    name = str(payload.get("name") or "").strip() or "Candidate"
+    role = str(payload.get("target_role") or payload.get("position") or "").strip() or "this role"
+    value = str(payload.get("value_offer") or payload.get("summary") or "").strip() or "I can bring structured execution, clear communication and measurable results."
+    skills = str(payload.get("skills") or "").strip() or "relevant tools, teamwork and delivery discipline"
+    return {
+        "subject": f"Application for {role}",
+        "letter": (
+            f"Hello,\n\nI am interested in the {role} position. {value}\n\n"
+            f"My relevant strengths include {skills}. I would be glad to discuss how my experience can help your team move faster and produce stronger results.\n\n"
+            f"Best regards,\n{name}"
+        )[:6000],
+        "model": "local",
+    }
+
+
 def _extract_originality_upload(upload, language: str) -> str:
     suffix = Path(upload.name or "").suffix.lower()
     data = b"".join(upload.chunks())
@@ -5854,7 +6470,7 @@ def _clean_originality_text(text: str) -> str:
 
 
 def _repair_extracted_text(text: str) -> str:
-    text = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _repair_mojibake_cyrillic(str(text or "")).replace("\r\n", "\n").replace("\r", "\n")
     raw_lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
     lines = [line for line in raw_lines if line and not re.fullmatch(r"[-–—_ ]*\d{1,4}[-–—_ ]*", line)]
     if not lines:
@@ -5887,6 +6503,28 @@ def _repair_extracted_text(text: str) -> str:
     repaired = "\n\n".join(_dedupe_repeated_short_lines(paragraphs))
     repaired = re.sub(r"\s+([,;:!?])", r"\1", repaired).strip()
     return _repair_pdf_spacing_artifacts(repaired)
+
+
+def _repair_mojibake_cyrillic(text: str) -> str:
+    text = str(text or "")
+    candidates = [text]
+    for encoding in ("cp1251", "latin-1", "cp1252"):
+        try:
+            repaired = text.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        if repaired.strip():
+            candidates.append(repaired)
+    return max(candidates, key=_cyrillic_text_quality)
+
+
+def _cyrillic_text_quality(text: str) -> int:
+    text = str(text or "")
+    cyrillic = len(re.findall(r"[А-Яа-яЁёІіЇїЄєҐґ]", text))
+    common_lower = len(re.findall(r"[а-яёіїєґ]", text))
+    mojibake_pairs = len(re.findall(r"[РС][\u00a0-\u00bf\u0400-\u045f\u2010-\u203a\u20ac\u2116]", text))
+    replacements = text.count("\ufffd") + text.count("?")
+    return cyrillic + common_lower * 2 - mojibake_pairs * 8 - replacements * 12
 
 
 def _normalize_pdf_line(line: str) -> str:
@@ -7022,7 +7660,56 @@ def _attach_output_urls(job: dict, url_cache: dict[str, dict[str, object]] | Non
             item["video_project_url"] = f"{reverse('studio:video_editor')}?{urlencode({'project': video_project_id})}" if video_project_id else ""
         outputs.append(item)
     prepared["outputs"] = outputs
+    prepared["thumbnail"] = _job_thumbnail_payload(prepared)
     return prepared
+
+
+def _job_thumbnail_kind_from_output(output: dict) -> str:
+    media_type = str(output.get("media_type") or "").lower()
+    name = str(output.get("name") or output.get("label") or "").lower()
+    if media_type.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        return "image"
+    if media_type.startswith("video/") or name.endswith((".mp4", ".webm", ".mov", ".m4v", ".mkv")):
+        return "video"
+    if media_type.startswith("audio/") or name.endswith((".mp3", ".wav", ".m4a", ".ogg", ".flac")):
+        return "audio"
+    if media_type == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if media_type.startswith("text/") or name.endswith((".txt", ".ass", ".srt", ".json", ".csv", ".md")):
+        return "text"
+    if name.endswith((".zip", ".rar", ".7z")):
+        return "archive"
+    return "file"
+
+
+def _job_thumbnail_kind_from_job(job: dict) -> str:
+    kind = str(job.get("kind") or "").lower()
+    title = str(job.get("title") or "").lower()
+    if "cover" in kind or "image" in kind or "convert" in kind and any(ext in title for ext in (".png", ".jpg", ".jpeg", ".webp", ".jfif")):
+        return "image"
+    if "youtube" in kind or "video" in kind or "short" in title:
+        return "video"
+    if "music" in kind or "audio" in kind:
+        return "audio"
+    if "subtitle" in kind or "originality" in kind:
+        return "text"
+    if "package" in kind:
+        return "archive"
+    return "file"
+
+
+def _job_thumbnail_payload(job: dict) -> dict[str, object]:
+    outputs = list(job.get("outputs") or [])
+    output = next((item for item in outputs if _job_thumbnail_kind_from_output(item) == "image"), None) or (outputs[0] if outputs else None)
+    if output:
+        thumb_kind = _job_thumbnail_kind_from_output(output)
+        return {
+            "kind": thumb_kind,
+            "url": output.get("preview_url") if thumb_kind == "image" else "",
+            "label": str(output.get("label") or output.get("name") or thumb_kind).split(".")[-1][:8].upper(),
+        }
+    thumb_kind = _job_thumbnail_kind_from_job(job)
+    return {"kind": thumb_kind, "url": "", "label": thumb_kind.upper()}
 
 
 def _job_url_cache(job_ids: list[str]) -> dict[str, dict[str, object]]:

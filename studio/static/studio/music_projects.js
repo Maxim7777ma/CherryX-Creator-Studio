@@ -1,39 +1,5 @@
 (() => {
-  document.querySelectorAll(".language-switcher").forEach((switcher) => {
-    const button = switcher.querySelector(".language-current");
-    if (!button) return;
-    const positionMenu = () => {
-      const rect = button.getBoundingClientRect();
-      const safeGap = 14;
-      const menuWidth = 230;
-      const right = Math.max(safeGap, window.innerWidth - rect.right);
-      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
-      switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
-      switcher.style.setProperty(
-        "--language-menu-right",
-        `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
-      );
-    };
-    switcher.addEventListener("click", (event) => event.stopPropagation());
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const open = switcher.classList.toggle("is-open");
-      button.setAttribute("aria-expanded", open ? "true" : "false");
-      if (open) positionMenu();
-    });
-    window.addEventListener("resize", () => {
-      if (switcher.classList.contains("is-open")) positionMenu();
-    });
-    window.addEventListener("scroll", () => {
-      if (switcher.classList.contains("is-open")) positionMenu();
-    }, { passive: true });
-    document.addEventListener("click", (event) => {
-      if (!switcher.contains(event.target)) {
-        switcher.classList.remove("is-open");
-        button.setAttribute("aria-expanded", "false");
-      }
-    });
-  });
+  // Language switching is handled by the shared portal script in _language_switcher.html.
 
   const root = document.querySelector("[data-music-projects]");
   if (!root) return;

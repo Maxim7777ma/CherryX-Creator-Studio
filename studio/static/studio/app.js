@@ -102,6 +102,7 @@ document.querySelectorAll(".job-form").forEach((form) => {
 });
 
 function setupLanguageSwitchers() {
+  if (window.CXLanguageSwitcherReady) return;
   document.querySelectorAll(".language-switcher").forEach((switcher) => {
     if (switcher.dataset.languageSwitcherBound === "1") return;
     const button = switcher.querySelector(".language-current");
@@ -528,7 +529,14 @@ function setupCustomSelects() {
     const choose = (button) => {
       input.value = button.dataset.customSelectValue || "";
       buttons.forEach((item) => item.classList.toggle("is-selected", item === button));
-      current.innerHTML = `<b>${escapeHtml((button.querySelector("b") || button).textContent.trim())}</b><small>YouTube</small>`;
+      const label = (button.querySelector("b") || button).textContent.trim();
+      const hint = button.dataset.selectHint || button.querySelector("small")?.textContent?.trim() || "YouTube";
+      if (button.dataset.modeIcon) {
+        current.dataset.modeIcon = button.dataset.modeIcon;
+      } else {
+        delete current.dataset.modeIcon;
+      }
+      current.innerHTML = `<b>${escapeHtml(label)}</b><small>${escapeHtml(hint)}</small>`;
       close();
     };
 
@@ -835,26 +843,959 @@ function setupResumeWizards() {
   document.querySelectorAll("[data-wizard-form]").forEach((form) => {
     const steps = [...form.querySelectorAll(".resume-step")];
     const buttons = [...form.querySelectorAll("[data-step-target]")];
+    const stepper = form.querySelector(".resume-steps");
     const prev = form.querySelector("[data-step-prev]");
     const next = form.querySelector("[data-step-next]");
-    let index = Number(localStorage.getItem(RESUME_STEP_KEY) || 0);
+    const urlStep = Number(new URLSearchParams(window.location.search).get("resume_step"));
+    let index = Number.isFinite(urlStep) ? urlStep : Number(localStorage.getItem(RESUME_STEP_KEY) || 0);
 
-    const show = (target) => {
+    const show = (target, options = {}) => {
       index = Math.max(0, Math.min(steps.length - 1, target));
       localStorage.setItem(RESUME_STEP_KEY, String(index));
       steps.forEach((step, stepIndex) => step.classList.toggle("is-active", stepIndex === index));
       buttons.forEach((button) => button.classList.toggle("is-active", Number(button.dataset.stepTarget) === index));
       if (prev) prev.disabled = index === 0;
       if (next) next.hidden = index === steps.length - 1;
+      const activeButton = buttons.find((button) => Number(button.dataset.stepTarget) === index);
+      if (stepper && activeButton) {
+        syncActiveResumeStepper(form);
+      }
+      if (options.scrollTop) {
+        scrollResumeWizardTop(form);
+      }
     };
 
     buttons.forEach((button) => {
-      button.addEventListener("click", () => show(Number(button.dataset.stepTarget || 0)));
+      button.addEventListener("click", () => show(Number(button.dataset.stepTarget || 0), { scrollTop: true }));
     });
-    if (prev) prev.addEventListener("click", () => show(index - 1));
-    if (next) next.addEventListener("click", () => show(index + 1));
+    if (prev) prev.addEventListener("click", () => show(index - 1, { scrollTop: true }));
+    if (next) next.addEventListener("click", () => show(index + 1, { scrollTop: true }));
+    setupResumeStepScroller(stepper);
     setupTemplatePicker(form);
+    setupResumeCoach(form);
+    setupResumePhotoCrop(form);
+    setupResumeAccountAssist(form);
+    setupResumeAiCoach(form);
+    setupResumeModes(form);
+    setupResumeRewriteTools(form);
+    setupResumeMatcher(form);
+    setupResumeLivePreview(form);
+    setupResumeAutogrow(form);
+    setupResumeTargetIdeas(form);
+    setupResumeContentIdeas(form);
     show(index);
+  });
+}
+
+function scrollResumeWizardTop(form) {
+  const panel = form.closest(".tool-panel") || form;
+  const topbar = document.querySelector(".studio-topbar");
+  const topbarHeight = topbar ? topbar.getBoundingClientRect().height : 0;
+  const offset = Math.max(10, topbarHeight + 8);
+  const targetY = Math.max(0, panel.getBoundingClientRect().top + window.scrollY - offset);
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: targetY, behavior: reducedMotion ? "auto" : "smooth" });
+  });
+}
+
+function syncActiveResumeStepper(scope = document) {
+  const forms = scope.matches?.("[data-wizard-form]") ? [scope] : [...scope.querySelectorAll("[data-wizard-form]")];
+  forms.forEach((form) => {
+    const stepper = form.querySelector(".resume-steps");
+    const activeButton = stepper?.querySelector("[data-step-target].is-active");
+    if (!stepper || !activeButton) return;
+    const run = () => scrollResumeStepIntoView(stepper, activeButton);
+    window.requestAnimationFrame(() => {
+      run();
+      window.requestAnimationFrame(run);
+      window.setTimeout(run, 120);
+    });
+  });
+}
+
+function scrollResumeStepIntoView(stepper, activeButton) {
+  const maxLeft = Math.max(0, stepper.scrollWidth - stepper.clientWidth);
+  if (!maxLeft) return;
+  const buttonCenter = activeButton.offsetLeft + (activeButton.offsetWidth / 2);
+  const nextLeft = buttonCenter - (stepper.clientWidth / 2);
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  stepper.scrollTo({
+    left: Math.max(0, Math.min(maxLeft, nextLeft)),
+    behavior: reducedMotion ? "auto" : "smooth",
+  });
+}
+
+function setupResumeStepScroller(stepper) {
+  if (!stepper || stepper.dataset.stepScrollerBound === "1") return;
+  stepper.dataset.stepScrollerBound = "1";
+  stepper.addEventListener("wheel", (event) => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    if (stepper.scrollWidth <= stepper.clientWidth) return;
+    event.preventDefault();
+    stepper.scrollLeft += event.deltaY;
+  }, { passive: false });
+
+  let dragStartX = 0;
+  let dragStartLeft = 0;
+  let dragging = false;
+  stepper.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.target.closest?.("[data-step-target]")) return;
+    dragging = true;
+    dragStartX = event.clientX;
+    dragStartLeft = stepper.scrollLeft;
+    stepper.classList.add("is-dragging");
+    stepper.setPointerCapture?.(event.pointerId);
+  });
+  stepper.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    stepper.scrollLeft = dragStartLeft - (event.clientX - dragStartX);
+  });
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    stepper.classList.remove("is-dragging");
+    stepper.releasePointerCapture?.(event.pointerId);
+  };
+  stepper.addEventListener("pointerup", stopDrag);
+  stepper.addEventListener("pointercancel", stopDrag);
+  stepper.addEventListener("pointerleave", stopDrag);
+}
+
+function loadJsonScript(id) {
+  const script = document.getElementById(id);
+  if (!script) return {};
+  try {
+    return JSON.parse(script.textContent || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function setupResumeCoach(form) {
+  const scoreBar = form.querySelector("[data-resume-score] span");
+  const scoreText = form.querySelector("[data-resume-score-text]");
+  const fields = ["name", "position", "contact", "summary", "experience", "skills"]
+    .map((name) => form.querySelector(`[name="${name}"]`))
+    .filter(Boolean);
+  const update = () => {
+    if (!scoreBar || !scoreText) return;
+    const weights = { name: 18, position: 18, contact: 14, summary: 18, experience: 20, skills: 12 };
+    const score = fields.reduce((total, field) => {
+      const value = String(field.value || "").trim();
+      if (!value) return total;
+      const name = field.getAttribute("name") || "";
+      const base = weights[name] || 10;
+      const bonus = value.length > 80 ? 4 : value.length > 28 ? 2 : 0;
+      return total + base + bonus;
+    }, 0);
+    const percent = Math.max(0, Math.min(100, score));
+    scoreBar.style.width = `${percent}%`;
+    const ready = i18n.resume_score_ready || "Resume readiness";
+    const empty = i18n.resume_score_empty || "Fill profile fields to see readiness.";
+    scoreText.textContent = percent ? `${ready}: ${percent}%` : empty;
+  };
+  form.querySelectorAll("[data-fill-field]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = form.querySelector(`[name="${button.dataset.fillField}"]`);
+      if (!field) return;
+      const text = button.dataset.fillText || "";
+      field.value = field.value.trim() ? `${field.value.trim()}\n${text}` : text;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.focus();
+    });
+  });
+  fields.forEach((field) => field.addEventListener("input", update));
+  update();
+}
+
+function setupResumeAccountAssist(form) {
+  const prefill = loadJsonScript("resume-prefill");
+  const fillButton = form.querySelector("[data-resume-fill-account]");
+  const avatarButton = form.querySelector("[data-resume-use-account-avatar]");
+  const avatarInput = form.querySelector("[data-use-account-avatar]");
+  const avatarOption = form.querySelector("[data-account-avatar-option]");
+  if (fillButton) {
+    fillButton.addEventListener("click", () => {
+      const name = form.querySelector('[name="name"]');
+      const contact = form.querySelector('[name="contact"]');
+      if (name && prefill.name && !name.value.trim()) name.value = prefill.name;
+      if (contact && prefill.email && !contact.value.includes(prefill.email)) {
+        contact.value = contact.value.trim() ? `${contact.value.trim()}, ${prefill.email}` : prefill.email;
+      }
+      [name, contact].filter(Boolean).forEach((field) => field.dispatchEvent(new Event("input", { bubbles: true })));
+    });
+  }
+  if (avatarButton && avatarInput) {
+    avatarButton.addEventListener("click", () => {
+      const active = avatarInput.value !== "1";
+      avatarInput.value = active ? "1" : "0";
+      avatarButton.classList.toggle("is-active", active);
+      if (avatarOption) avatarOption.classList.toggle("is-selected", active);
+      avatarButton.textContent = active ? (i18n.resume_avatar_selected || "Selected") : (i18n.resume_use_avatar || "Use avatar");
+    });
+  }
+}
+
+function setupResumeAiCoach(form) {
+  const panel = form.querySelector("[data-resume-ai-strip]");
+  const copy = form.querySelector("[data-resume-ai-copy]");
+  const actions = form.querySelector("[data-resume-ai-actions]");
+  if (!panel || !copy || !actions) return;
+  const smartFields = [...form.querySelectorAll("input[name], textarea[name]")].filter((field) => !["hidden", "file"].includes(field.type));
+  const labels = {
+    name: "Name",
+    position: "Position",
+    target_role: "Target role",
+    target_scope: "Industry",
+    work_format: "Work format",
+    value_offer: "Main value",
+    summary: "Summary",
+    experience: "Experience",
+    education: "Education",
+    skills: "Skills",
+    achievements: "Achievements",
+    additional: "Additional",
+    vacancy_text: "Vacancy",
+    cover_letter: "Cover letter",
+  };
+  const examples = {
+    position: "Product Designer / Python Developer",
+    target_role: "Middle Product Designer",
+    target_scope: "SaaS, creator tools, marketplaces",
+    work_format: "Remote or hybrid, full-time",
+    value_offer: "I help teams turn unclear ideas into launched products with clear priorities, fast execution and measurable outcomes.",
+    summary: "Product-minded specialist who connects user needs, business goals and delivery discipline. I build clear workflows, coordinate launches and keep results measurable.",
+    experience: "- Improved delivery speed by 30% through clearer priorities.\n- Coordinated design, engineering and content tasks.\n- Launched workflows from idea to release.",
+    education: "Course / degree - Institution, 2024\nRelevant focus: product thinking, analytics, communication and practical delivery.",
+    skills: "Product strategy, UX, Figma, Python, Django, analytics, content systems, team coordination",
+    achievements: "- Launched a product workflow from zero to release.\n- Reduced manual routine and improved team speed.\n- Built reusable content and automation systems.",
+    additional: "Languages: English B1, Ukrainian/Russian native. Open to remote work, relocation discussions and project contracts.",
+    cover_letter: "Hello,\n\nI am interested in this role because it matches my experience in building clear workflows, coordinating delivery and turning ideas into measurable results.\n\nI would be glad to discuss how I can help your team move faster and ship stronger work.",
+  };
+  const render = (field) => {
+    const name = field?.getAttribute("name") || "";
+    const value = String(field?.value || "").trim();
+    const words = value ? value.split(/\s+/).length : 0;
+    const hasNumber = /\d/.test(value);
+    const suggestions = [];
+    let message = i18n.resume_ai_idle || "Focus a field and I will suggest how to make it stronger.";
+    if (!field || !labels[name]) {
+      copy.textContent = message;
+      actions.innerHTML = "";
+      return;
+    }
+    if (!value) {
+      message = `${labels[name]}: ${i18n.resume_ai_empty || "start with one clear phrase, then refine it."}`;
+      if (examples[name]) suggestions.push({ label: i18n.resume_ai_use_example || "Use smart example", mode: "set", text: examples[name] });
+    } else if (["summary", "value_offer"].includes(name) && words < 14) {
+      message = i18n.resume_ai_summary_short || "Good start. Add domain, strongest skill and one measurable outcome.";
+      suggestions.push({ label: i18n.resume_ai_add_outcome || "Add outcome", mode: "append", text: "Result: faster delivery, clearer priorities and measurable launch quality." });
+    } else if (["experience", "achievements"].includes(name) && !hasNumber) {
+      message = i18n.resume_ai_need_numbers || "Looks readable. Add numbers so it feels more credible.";
+      suggestions.push({ label: i18n.resume_ai_add_numbers || "Add metric line", mode: "append", text: "- Improved speed, quality or conversion by 20-30% through clearer process ownership." });
+    } else if (name === "skills" && !value.includes(",")) {
+      message = i18n.resume_ai_skills_commas || "Skills scan better as short comma-separated keywords.";
+      suggestions.push({ label: i18n.resume_ai_format_skills || "Format skills", mode: "set", text: value.split(/\s+/).filter(Boolean).join(", ") });
+    } else {
+      message = i18n.resume_ai_good || "This field is usable. Keep it specific and avoid generic claims.";
+      if (examples[name]) suggestions.push({ label: i18n.resume_ai_add_variant || "Add stronger variant", mode: "append", text: examples[name] });
+    }
+    copy.textContent = message;
+    actions.innerHTML = "";
+    suggestions.slice(0, 3).forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = item.label;
+      button.addEventListener("click", () => {
+        field.value = item.mode === "set" ? item.text : field.value.trim() ? `${field.value.trim()}\n${item.text}` : item.text;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.focus();
+        render(field);
+      });
+      actions.appendChild(button);
+    });
+  };
+  smartFields.forEach((field) => {
+    field.addEventListener("focus", () => render(field));
+    field.addEventListener("input", () => render(field));
+  });
+  render(null);
+}
+
+function setupResumeModes(form) {
+  const picker = form.querySelector("[data-resume-mode-picker]");
+  const input = form.querySelector("[data-resume-mode-input]");
+  if (!picker || !input) return;
+  const presets = {
+    it: {
+      position: "Python / Django Developer",
+      target_scope: "SaaS, automation, backend systems",
+      skills: "Python, Django, REST API, PostgreSQL, automation, Git, Docker",
+      value_offer: "I build reliable backend workflows, automate routine processes and keep delivery measurable.",
+    },
+    design: {
+      position: "Product Designer",
+      target_scope: "SaaS, mobile apps, creator tools",
+      skills: "UX research, Figma, prototyping, design systems, usability testing, product thinking",
+      value_offer: "I turn unclear product ideas into clean interfaces, fast prototypes and usable design systems.",
+    },
+    marketing: {
+      position: "Digital Marketing Specialist",
+      target_scope: "Performance marketing, content, growth",
+      skills: "SEO, paid ads, analytics, content strategy, funnels, A/B testing, CRM",
+      value_offer: "I connect content, analytics and acquisition channels to grow measurable business results.",
+    },
+    management: {
+      position: "Project / Product Manager",
+      target_scope: "Digital products, operations, launch workflows",
+      skills: "Roadmapping, prioritization, analytics, stakeholder management, team coordination",
+      value_offer: "I help teams move from unclear ideas to shipped products with priorities, ownership and metrics.",
+    },
+    student: {
+      position: "Junior Specialist / Intern",
+      target_scope: "Entry-level role, learning team, practical projects",
+      skills: "Fast learning, communication, research, documentation, basic analytics, teamwork",
+      value_offer: "I bring fast learning, disciplined execution and strong motivation to grow through real projects.",
+    },
+    executive: {
+      position: "Technical / Product Lead",
+      target_scope: "Strategy, operations, product launch, team leadership",
+      skills: "Leadership, strategy, delivery management, hiring, analytics, product operations",
+      value_offer: "I align product, engineering and business priorities to launch stronger systems and teams.",
+    },
+    data: {
+      position: "Data Analyst / BI Specialist",
+      target_scope: "Analytics, dashboards, product metrics, decision support",
+      skills: "SQL, Python, dashboards, BI, product analytics, reporting, data storytelling",
+      value_offer: "I turn raw data into clear dashboards, practical insights and decisions teams can act on.",
+    },
+    sales: {
+      position: "Sales / Business Development Specialist",
+      target_scope: "B2B sales, partnerships, customer growth, pipeline",
+      skills: "Lead generation, CRM, negotiations, discovery calls, pipeline management, account growth",
+      value_offer: "I help teams build pipeline, understand customer needs and convert conversations into revenue.",
+    },
+    content: {
+      position: "Content / Social Media Specialist",
+      target_scope: "Content strategy, short-form media, brand communication",
+      skills: "Copywriting, content planning, social media, analytics, storytelling, editorial systems",
+      value_offer: "I turn product ideas into clear content systems, stronger messages and measurable audience growth.",
+    },
+  };
+  Object.keys(presets.it).forEach((name) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    if (field) {
+      field.addEventListener("input", (event) => {
+        if (event.isTrusted) field.dataset.modeManaged = "0";
+      });
+    }
+  });
+  picker.querySelectorAll("[data-resume-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.resumeMode || "";
+      const preset = presets[mode] || {};
+      input.value = button.querySelector("strong")?.textContent.trim() || button.textContent.trim();
+      picker.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
+      Object.entries(preset).forEach(([name, value]) => {
+        const field = form.querySelector(`[name="${name}"]`);
+        if (field && (!String(field.value || "").trim() || field.dataset.modeManaged === "1")) {
+          field.value = value;
+          field.dataset.modeManaged = "1";
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+    });
+  });
+}
+
+function setupResumeAutogrow(form) {
+  const grow = (field) => {
+    field.style.height = "auto";
+    field.style.height = `${Math.max(44, field.scrollHeight)}px`;
+  };
+  form.querySelectorAll("textarea[data-autogrow]").forEach((field) => {
+    field.addEventListener("input", () => grow(field));
+    grow(field);
+  });
+}
+
+function topResumePhrases(text, limit = 6) {
+  const words = resumeTokens(text);
+  const counts = new Map();
+  words.forEach((word) => counts.set(word, (counts.get(word) || 0) + 1));
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .map(([word]) => word)
+    .filter((word) => !/^\d+$/.test(word))
+    .slice(0, limit);
+}
+
+function setupResumeTargetIdeas(form) {
+  const box = form.querySelector("[data-resume-target-ideas]");
+  const list = box?.querySelector("div");
+  if (!box || !list) return;
+  const fields = ["target_role", "target_scope", "work_format", "value_offer", "vacancy_text", "summary", "skills"]
+    .map((name) => form.querySelector(`[name="${name}"]`))
+    .filter(Boolean);
+  const addIdea = (ideas, field, text) => {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean || clean.length < 4) return;
+    const key = `${field}:${clean.toLowerCase()}`;
+    if (!ideas.some((idea) => idea.key === key)) ideas.push({ key, field, text: clean });
+  };
+  const render = () => {
+    const vacancy = form.querySelector('[name="vacancy_text"]')?.value || "";
+    const summary = form.querySelector('[name="summary"]')?.value || "";
+    const skills = form.querySelector('[name="skills"]')?.value || "";
+    const position = form.querySelector('[name="position"]')?.value || "";
+    const target = form.querySelector('[name="target_role"]')?.value || "";
+    const tokens = topResumePhrases(`${vacancy} ${summary} ${skills}`, 9);
+    const ideas = [];
+    addIdea(ideas, "target_role", target || position || (tokens.length ? `${tokens[0]} specialist` : "Product-minded specialist"));
+    if (tokens.length >= 2) addIdea(ideas, "target_scope", tokens.slice(0, 4).join(", "));
+    addIdea(ideas, "work_format", vacancy.toLowerCase().includes("remote") ? "Remote, full-time" : "Remote / hybrid, full-time");
+    if (tokens.length >= 3) {
+      addIdea(ideas, "value_offer", `I connect ${tokens.slice(0, 3).join(", ")} with clear execution, ownership and measurable outcomes.`);
+    }
+    if (summary) addIdea(ideas, "value_offer", summary.split(/[.!?\n]/).find((part) => part.trim().length > 24) || summary);
+    list.innerHTML = "";
+    ideas.slice(0, 7).forEach((idea) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.targetField = idea.field;
+      button.innerHTML = `<span>${escapeHtml(idea.text)}</span>`;
+      button.addEventListener("click", () => {
+        const field = form.querySelector(`[name="${idea.field}"]`);
+        if (!field) return;
+        field.value = idea.text;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.focus();
+      });
+      list.appendChild(button);
+    });
+    box.hidden = !ideas.length;
+  };
+  fields.forEach((field) => field.addEventListener("input", render));
+  render();
+}
+
+function setupResumeContentIdeas(form) {
+  const fields = [...form.querySelectorAll("[data-resume-content]")];
+  const quality = form.querySelector("[data-resume-content-quality]");
+  if (!fields.length) return;
+  const recipes = {
+    summary: [
+      { label: "Role + domain", text: () => `I am a ${form.querySelector('[name="target_role"]')?.value || form.querySelector('[name="position"]')?.value || "specialist"} focused on ${form.querySelector('[name="target_scope"]')?.value || "digital products and measurable delivery"}.` },
+      { label: "Add outcome", text: () => "I connect user needs, business goals and practical execution to produce measurable results." },
+      { label: "Sharper opening", text: () => "Product-minded specialist with ownership, structured communication and launch discipline." },
+    ],
+    experience: [
+      { label: "Metric line", text: () => "- Improved delivery speed, quality or conversion by 20-30% through clearer priorities and ownership." },
+      { label: "Project line", text: () => "- Led a project from idea and requirements to release, coordinating design, content and technical tasks." },
+      { label: "Stack line", text: () => `- Used ${compactResumeValue(form.querySelector('[name="skills"]')?.value, "tools, analytics and documentation")} to make execution clearer and faster.` },
+    ],
+    education: [
+      { label: "Course format", text: () => "Course / certificate - Institution, 2024\nFocus: product thinking, analytics, communication and practical delivery." },
+      { label: "Relevant focus", text: () => "Relevant training: UX, analytics, business communication, project delivery and digital tools." },
+      { label: "Student version", text: () => "Currently developing practical skills through projects, coursework and independent learning." },
+    ],
+    skills: [
+      { label: "Product set", text: () => "Product strategy, UX, Figma, analytics, communication, project coordination, documentation" },
+      { label: "Tech set", text: () => "Python, Django, REST API, PostgreSQL, Git, automation, debugging, deployment basics" },
+      { label: "Soft skills", text: () => "Ownership, structured communication, prioritization, teamwork, problem solving, fast learning" },
+    ],
+    achievements: [
+      { label: "Launch proof", text: () => "- Launched a workflow, project or feature from zero to usable result." },
+      { label: "Efficiency proof", text: () => "- Reduced manual routine and improved team speed through clearer process and automation." },
+      { label: "Portfolio proof", text: () => "- Built reusable materials, templates or systems that made future work faster." },
+    ],
+    additional: [
+      { label: "Languages", text: () => "Languages: English B1, Ukrainian/Russian native." },
+      { label: "Availability", text: () => `Available for ${form.querySelector('[name="work_format"]')?.value || "remote or hybrid full-time work"}.` },
+      { label: "Links", text: () => "Portfolio / GitHub / Behance / LinkedIn: add one strongest link here." },
+    ],
+  };
+  const labels = {
+    summary: "summary",
+    experience: "experience",
+    education: "education",
+    skills: "skills",
+    achievements: "achievements",
+    additional: "additional",
+  };
+  const appendText = (field, text) => {
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    field.value = field.value.trim() ? `${field.value.trim()}\n${clean}` : clean;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.focus();
+  };
+  const setText = (field, text) => {
+    field.value = String(text || "").trim();
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.focus();
+  };
+  const renderField = (wrapper) => {
+    const name = wrapper.dataset.resumeContent;
+    const field = wrapper.querySelector("textarea");
+    const list = wrapper.querySelector("[data-content-suggestions]");
+    if (!field || !list) return;
+    const value = field.value.trim();
+    const words = resumeTokens(value);
+    const hasNumber = /\d/.test(value);
+    const hasBullet = /(^|\n)\s*[-•]/.test(value);
+    const actions = [];
+    if (!value && recipes[name]?.[0]) actions.push({ kind: "set", ...recipes[name][0] });
+    if (["experience", "achievements"].includes(name) && value && !hasNumber) actions.push({ kind: "append", label: "Add numbers", text: () => "- Result: improved speed, quality or clarity by 20-30%." });
+    if (["experience", "achievements"].includes(name) && value && !hasBullet) actions.push({ kind: "set", label: "Make bullets", text: () => value.split(/[.;\n]+/).map((line) => line.trim()).filter(Boolean).map((line) => `- ${line}`).join("\n") });
+    if (name === "skills" && value && !value.includes(",")) actions.push({ kind: "set", label: "Comma format", text: () => value.split(/\s+/).filter(Boolean).join(", ") });
+    if (name === "summary" && value && words.length < 18) actions.push({ kind: "append", label: "Add value", text: () => compactResumeValue(form.querySelector('[name="value_offer"]')?.value, "I bring ownership, structured communication and measurable delivery.") });
+    (recipes[name] || []).forEach((item) => {
+      if (!actions.some((action) => action.label === item.label)) actions.push({ kind: name === "skills" ? "set" : "append", ...item });
+    });
+    list.innerHTML = actions.slice(0, 4).map((action, index) => (
+      `<button type="button" data-content-action="${index}">${escapeHtml(action.label)}</button>`
+    )).join("");
+    list.querySelectorAll("button").forEach((button) => {
+      const action = actions[Number(button.dataset.contentAction)];
+      button.addEventListener("click", () => {
+        const text = typeof action.text === "function" ? action.text() : action.text;
+        if (action.kind === "set") setText(field, text);
+        else appendText(field, text);
+      });
+    });
+  };
+  const renderQuality = () => {
+    if (!quality) return;
+    const values = Object.fromEntries(["summary", "experience", "education", "skills", "achievements", "additional"].map((name) => [name, form.querySelector(`[name="${name}"]`)?.value.trim() || ""]));
+    const checks = [
+      resumeTokens(values.summary).length >= 16,
+      resumeTokens(values.experience).length >= 18,
+      /\d/.test(`${values.experience} ${values.achievements}`),
+      resumeTokens(values.skills).length >= 6,
+      Boolean(values.education),
+      Boolean(values.achievements),
+      Boolean(values.additional),
+    ];
+    const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+    const bar = quality.querySelector("i");
+    const number = quality.querySelector("strong");
+    const note = quality.querySelector("small");
+    if (bar) bar.style.width = `${score}%`;
+    if (number) number.textContent = `${score}%`;
+    if (note) {
+      note.textContent = score >= 82
+        ? (i18n.resume_content_quality_strong || "Strong content: the resume already has role, proof and keywords.")
+        : score >= 45
+          ? (i18n.resume_content_quality_good || "Good base. Add sharper metrics where possible.")
+          : (i18n.resume_content_quality_empty || "Start filling fields to see what is missing.");
+    }
+  };
+  fields.forEach((wrapper) => {
+    const field = wrapper.querySelector("textarea");
+    if (!field) return;
+    field.addEventListener("input", () => {
+      renderField(wrapper);
+      renderQuality();
+    });
+    field.addEventListener("focus", () => renderField(wrapper));
+    renderField(wrapper);
+  });
+  renderQuality();
+}
+
+function compactResumeValue(value, fallback) {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+  return clean || fallback;
+}
+
+function resumeRewrite(value, mode, fieldName) {
+  const text = String(value || "").trim();
+  const base = text || "";
+  if (mode === "shorter") {
+    return base
+      .split(/\n+/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, fieldName === "summary" ? 3 : 5)
+      .join("\n");
+  }
+  if (mode === "english") {
+    return base || "Product-minded specialist focused on clear execution, measurable outcomes and practical teamwork.";
+  }
+  if (mode === "formal") {
+    return base
+      ? `${base}\nFocus: structured communication, ownership, measurable delivery and clear business value.`
+      : "Structured specialist with ownership mindset, clear communication and focus on measurable business value.";
+  }
+  const prefix = fieldName === "experience" || fieldName === "achievements" ? "- " : "";
+  const addition = fieldName === "skills"
+    ? "analytics, ownership, communication, launch planning"
+    : `${prefix}Strengthened outcomes through clearer priorities, practical execution and measurable improvements.`;
+  return base ? `${base}\n${addition}` : addition;
+}
+
+function resumeFormPayload(form, extra = {}) {
+  const data = new FormData();
+  form.querySelectorAll("input[name], textarea[name], select[name]").forEach((field) => {
+    if (field.type === "file") return;
+    data.append(field.name, field.value || "");
+  });
+  Object.entries(extra).forEach(([key, value]) => data.set(key, value == null ? "" : String(value)));
+  return data;
+}
+
+async function postResumeAi(url, form, extra) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "X-CSRFToken": csrfToken(), "X-Requested-With": "XMLHttpRequest" },
+    body: resumeFormPayload(form, extra),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "AI request failed");
+  return payload;
+}
+
+function setupResumeRewriteTools(form) {
+  const aiConfig = window.STUDIO_RESUME_AI || {};
+  const names = ["summary", "experience", "education", "skills", "achievements", "additional", "value_offer", "cover_letter"];
+  names.forEach((name) => {
+    const field = form.querySelector(`[name="${name}"]`);
+    const wrapper = field?.closest(".resume-smart-field");
+    if (!field || !wrapper || wrapper.querySelector("[data-resume-rewrite-toolbar]")) return;
+    const toolbar = document.createElement("div");
+    toolbar.className = "resume-rewrite-toolbar";
+    toolbar.dataset.resumeRewriteToolbar = "true";
+    [
+      ["stronger", i18n.resume_rewrite_stronger || "Stronger"],
+      ["shorter", i18n.resume_rewrite_shorter || "Shorter"],
+      ["formal", i18n.resume_rewrite_formal || "Business tone"],
+      ["english", i18n.resume_rewrite_english || "English"],
+    ].forEach(([mode, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", async () => {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = i18n.processing || "Processing";
+        try {
+          if (!aiConfig.rewriteUrl) throw new Error("Missing AI endpoint");
+          const payload = await postResumeAi(aiConfig.rewriteUrl, form, {
+            field: name,
+            mode,
+            text: field.value,
+          });
+          field.value = payload.text || resumeRewrite(field.value, mode, name);
+        } catch {
+          field.value = resumeRewrite(field.value, mode, name);
+        } finally {
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.focus();
+          button.disabled = false;
+          button.textContent = original;
+        }
+      });
+      toolbar.appendChild(button);
+    });
+    wrapper.appendChild(toolbar);
+  });
+}
+
+function resumeTokens(text) {
+  const stop = new Set(["and", "the", "for", "with", "you", "your", "are", "this", "that", "from", "will", "have", "has", "our", "для", "или", "как", "что", "это", "на", "по", "та", "та", "і", "або", "для", "що", "это"]);
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s+#.-]/gu, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 2 && !stop.has(word));
+}
+
+function setupResumeMatcher(form) {
+  const aiConfig = window.STUDIO_RESUME_AI || {};
+  const vacancy = form.querySelector("[data-vacancy-text]");
+  const scoreNode = form.querySelector("[data-resume-ats-score]");
+  const bar = form.querySelector("[data-resume-ats-bar]");
+  const keywords = form.querySelector("[data-resume-keywords]");
+  const checklist = form.querySelector("[data-resume-ats-checklist]");
+  const cover = form.querySelector("[data-cover-letter]");
+  const generate = form.querySelector("[data-generate-cover-letter]");
+  const copy = form.querySelector("[data-copy-cover-letter]");
+  if (!scoreNode || !bar || !keywords || !checklist) return;
+  const resumeFieldNames = ["position", "target_role", "target_scope", "value_offer", "summary", "experience", "skills", "achievements"];
+  let localScore = 0;
+  const renderMatch = (data, source = "local") => {
+    const matched = data.matched_keywords || [];
+    const missing = data.missing_keywords || [];
+    const suggestions = data.suggestions || [];
+    const score = Math.max(0, Math.min(100, Number(data.score || 0)));
+    scoreNode.textContent = `${score}%`;
+    bar.style.width = `${score}%`;
+    keywords.innerHTML = "";
+    matched.slice(0, 12).forEach((word) => {
+      const chip = document.createElement("span");
+      chip.textContent = word;
+      chip.className = "is-hit";
+      keywords.appendChild(chip);
+    });
+    missing.slice(0, 12).forEach((word) => {
+      const chip = document.createElement("span");
+      chip.textContent = word;
+      chip.className = "is-missing";
+      keywords.appendChild(chip);
+    });
+    checklist.innerHTML = "";
+    suggestions.slice(0, 6).forEach((text) => {
+      const item = document.createElement("li");
+      item.className = source === "ai" ? "is-ok" : "is-warn";
+      item.textContent = text;
+      checklist.appendChild(item);
+    });
+  };
+  const update = () => {
+    const resumeText = resumeFieldNames.map((name) => form.querySelector(`[name="${name}"]`)?.value || "").join(" ");
+    const vacancyTokens = resumeTokens(vacancy?.value || "");
+    const resumeSet = new Set(resumeTokens(resumeText));
+    const top = [...new Set(vacancyTokens)].slice(0, 26);
+    const matched = top.filter((word) => resumeSet.has(word));
+    const base = top.length ? Math.round((matched.length / top.length) * 65) : 0;
+    const essentials = [
+      ["name", Boolean(form.querySelector('[name="name"]')?.value.trim())],
+      ["contact", Boolean(form.querySelector('[name="contact"]')?.value.trim())],
+      ["summary", resumeTokens(form.querySelector('[name="summary"]')?.value || "").length >= 14],
+      ["metrics", /\d/.test(resumeText)],
+      ["skills", resumeTokens(form.querySelector('[name="skills"]')?.value || "").length >= 5],
+    ];
+    const bonus = essentials.filter((item) => item[1]).length * 7;
+    localScore = Math.max(0, Math.min(100, top.length ? base + bonus : bonus));
+    renderMatch({
+      score: localScore,
+      matched_keywords: top.filter((word) => resumeSet.has(word)),
+      missing_keywords: top.filter((word) => !resumeSet.has(word)),
+      suggestions: essentials.map(([name, ok]) => `${ok ? "OK" : "Add"}: ${name}`),
+    });
+  };
+  let matchTimer = null;
+  const requestAiMatch = () => {
+    if (!aiConfig.matchUrl || !vacancy || vacancy.value.trim().length < 40) return;
+    window.clearTimeout(matchTimer);
+    matchTimer = window.setTimeout(async () => {
+      try {
+        const payload = await postResumeAi(aiConfig.matchUrl, form, {});
+        renderMatch(payload, payload.used_ai ? "ai" : "local");
+      } catch {
+        update();
+      }
+    }, 650);
+  };
+  form.querySelectorAll("input[name], textarea[name]").forEach((field) => field.addEventListener("input", update));
+  form.querySelectorAll("input[name], textarea[name]").forEach((field) => field.addEventListener("input", requestAiMatch));
+  if (generate && cover) {
+    generate.addEventListener("click", async () => {
+      const original = generate.textContent;
+      generate.disabled = true;
+      generate.textContent = i18n.processing || "Processing";
+      try {
+        if (!aiConfig.coverLetterUrl) throw new Error("Missing AI endpoint");
+        const payload = await postResumeAi(aiConfig.coverLetterUrl, form, {});
+        cover.value = payload.letter || "";
+      } catch {
+        const name = form.querySelector('[name="name"]')?.value.trim() || "Hello";
+        const role = form.querySelector('[name="target_role"]')?.value.trim() || form.querySelector('[name="position"]')?.value.trim() || "this role";
+        const value = form.querySelector('[name="value_offer"]')?.value.trim() || form.querySelector('[name="summary"]')?.value.trim() || "I can bring structured execution, clear communication and measurable results.";
+        const skills = form.querySelector('[name="skills"]')?.value.trim() || "relevant tools, teamwork and delivery discipline";
+        cover.value = `Hello,\n\nI am interested in the ${role} position. ${value}\n\nMy relevant strengths include ${skills}. I would be glad to discuss how my experience can help your team move faster and produce stronger results.\n\nBest regards,\n${name}`;
+      } finally {
+        cover.dispatchEvent(new Event("input", { bubbles: true }));
+        generate.disabled = false;
+        generate.textContent = original;
+      }
+    });
+  }
+  if (copy && cover) {
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(cover.value || "");
+        copy.textContent = i18n.result_link_copied || "Copied";
+      } catch {
+        cover.select();
+      }
+    });
+  }
+  update();
+}
+
+function setupResumeLivePreview(form) {
+  const preview = form.querySelector("[data-resume-live-preview]");
+  if (!preview) return;
+  const nameNode = preview.querySelector("[data-preview-name]");
+  const roleNode = preview.querySelector("[data-preview-role]");
+  const summaryNode = preview.querySelector("[data-preview-summary]");
+  const tagsNode = preview.querySelector("[data-preview-tags]");
+  const update = () => {
+    if (nameNode) nameNode.textContent = form.querySelector('[name="name"]')?.value.trim() || "Alex Morgan";
+    if (roleNode) roleNode.textContent = form.querySelector('[name="position"]')?.value.trim() || form.querySelector('[name="target_role"]')?.value.trim() || "Product profile";
+    if (summaryNode) summaryNode.textContent = form.querySelector('[name="summary"]')?.value.trim() || form.querySelector('[name="value_offer"]')?.value.trim() || (i18n.resume_finish_note || "Ready to build.");
+    if (tagsNode) tagsNode.textContent = [form.querySelector('[name="target_scope"]')?.value.trim(), form.querySelector('[name="work_format"]')?.value.trim()].filter(Boolean).join(" / ");
+  };
+  form.querySelectorAll("input[name], textarea[name]").forEach((field) => field.addEventListener("input", update));
+  update();
+}
+
+function setupResumePhotoCrop(form) {
+  const input = form.querySelector('input[type="file"][name="photo"]');
+  const editor = form.querySelector("[data-resume-photo-editor]");
+  const canvas = form.querySelector("[data-resume-photo-canvas]");
+  const zoomInput = form.querySelector("[data-resume-photo-zoom]");
+  const centerButton = form.querySelector("[data-resume-photo-center]");
+  const hidden = form.querySelector("[data-resume-photo-crop]");
+  const checklist = form.querySelector("[data-resume-photo-checklist]");
+  if (!input || !editor || !canvas || !zoomInput || !hidden) return;
+  const ctx = canvas.getContext("2d");
+  const state = {
+    image: null,
+    x: 0.5,
+    y: 0.42,
+    zoom: 1,
+    dragging: false,
+    lastX: 0,
+    lastY: 0,
+  };
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const fitScale = () => {
+    if (!state.image) return 1;
+    return Math.max(canvas.width / state.image.width, canvas.height / state.image.height) * state.zoom;
+  };
+  const clampCenter = () => {
+    if (!state.image) return;
+    const scale = fitScale();
+    const halfX = Math.min(0.5, canvas.width / (2 * state.image.width * scale));
+    const halfY = Math.min(0.5, canvas.height / (2 * state.image.height * scale));
+    state.x = state.image.width * scale <= canvas.width ? 0.5 : clamp(state.x, halfX, 1 - halfX);
+    state.y = state.image.height * scale <= canvas.height ? 0.5 : clamp(state.y, halfY, 1 - halfY);
+  };
+  const writeValue = () => {
+    hidden.value = JSON.stringify({
+      x: Number(state.x.toFixed(4)),
+      y: Number(state.y.toFixed(4)),
+      zoom: Number(state.zoom.toFixed(2)),
+    });
+  };
+  const draw = () => {
+    if (!ctx || !state.image) return;
+    clampCenter();
+    const scale = fitScale();
+    const drawW = state.image.width * scale;
+    const drawH = state.image.height * scale;
+    const drawX = canvas.width / 2 - state.x * state.image.width * scale;
+    const drawY = canvas.height / 2 - state.y * state.image.height * scale;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#111827";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(state.image, drawX, drawY, drawW, drawH);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2, 0);
+    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.moveTo(0, canvas.height / 2);
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    writeValue();
+  };
+  const resetCenter = () => {
+    state.x = 0.5;
+    state.y = 0.42;
+    state.zoom = Number(zoomInput.value || 1);
+    draw();
+  };
+  const renderPhotoChecklist = () => {
+    if (!checklist || !state.image || !ctx) return;
+    const sample = document.createElement("canvas");
+    sample.width = 48;
+    sample.height = 48;
+    const sampleCtx = sample.getContext("2d");
+    sampleCtx.drawImage(state.image, 0, 0, sample.width, sample.height);
+    const data = sampleCtx.getImageData(0, 0, sample.width, sample.height).data;
+    let brightness = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      brightness += (data[index] + data[index + 1] + data[index + 2]) / 3;
+    }
+    brightness = brightness / (data.length / 4);
+    const checks = [
+      [state.image.width >= 420 && state.image.height >= 420, i18n.resume_photo_check_size || "Enough resolution"],
+      [Math.min(state.image.width, state.image.height) / Math.max(state.image.width, state.image.height) > 0.45, i18n.resume_photo_check_crop || "Photo can crop cleanly"],
+      [brightness > 55 && brightness < 225, i18n.resume_photo_check_light || "Light looks usable"],
+      [state.zoom >= 1 && state.zoom <= 2.35, i18n.resume_photo_check_zoom || "Zoom is not extreme"],
+    ];
+    checklist.innerHTML = "";
+    checks.forEach(([ok, label]) => {
+      const item = document.createElement("li");
+      item.className = ok ? "is-ok" : "is-warn";
+      item.textContent = `${ok ? "OK" : "Check"}: ${label}`;
+      checklist.appendChild(item);
+    });
+  };
+
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    if (!file || !file.type.startsWith("image/")) {
+      editor.hidden = true;
+      hidden.value = "";
+      return;
+    }
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(image.src);
+      state.image = image;
+      state.zoom = 1;
+      zoomInput.value = "1";
+      editor.hidden = false;
+      resetCenter();
+      renderPhotoChecklist();
+    };
+    image.src = URL.createObjectURL(file);
+  });
+  zoomInput.addEventListener("input", () => {
+    state.zoom = Number(zoomInput.value || 1);
+    draw();
+    renderPhotoChecklist();
+  });
+  if (centerButton) centerButton.addEventListener("click", () => {
+    resetCenter();
+    renderPhotoChecklist();
+  });
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!state.image) return;
+    state.dragging = true;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!state.dragging || !state.image) return;
+    const scale = fitScale();
+    state.x -= (event.clientX - state.lastX) / (state.image.width * scale);
+    state.y -= (event.clientY - state.lastY) / (state.image.height * scale);
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    draw();
+  });
+  ["pointerup", "pointercancel"].forEach((eventName) => {
+    canvas.addEventListener(eventName, (event) => {
+      state.dragging = false;
+      try {
+        canvas.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Pointer may already be released by the browser.
+      }
+    });
   });
 }
 
@@ -5460,6 +6401,7 @@ function activateTab(target, options = {}) {
     panel.classList.toggle("is-active", panel.id === `tab-${target}`);
   });
   scrollActiveMobileNavIcon();
+  if (target === "resume") syncActiveResumeStepper(document.getElementById("tab-resume") || document);
   if (shouldReveal) scrollActiveMobileTool();
 }
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import asyncio
 import json
 import mimetypes
+import os
 import re
 import shutil
 import threading
@@ -400,6 +401,7 @@ def start_youtube_job(
             profile.short_seconds,
             profile.sample_limit,
             settings.face_detection_enabled,
+            profile.mode,
         )
         starts = calculate_smart_clip_starts(
             download.path,
@@ -408,6 +410,7 @@ def start_youtube_job(
             profile.short_seconds,
             profile.sample_limit,
             settings.face_detection_enabled,
+            profile.mode,
         )
         if not starts:
             raise ValueError("Не получилось подобрать фрагменты для Shorts")
@@ -418,6 +421,7 @@ def start_youtube_job(
         source_info = inspect_video(download.path)
         clips = []
         base_name = clean_base_name(download.title, "youtube_short")
+        editor_source_path = _prepare_youtube_editor_source(download.path, output_dir, base_name)
         for index, start_second in enumerate(starts, start=1):
             progress = 38 + int((index - 1) / max(1, len(starts)) * 38)
             _update_job(job, progress, f"Режу клип {index}/{len(starts)}: старт {format_duration(start_second)}")
@@ -436,6 +440,29 @@ def start_youtube_job(
                 source_info.height,
             )
             clips.append(clip)
+            try:
+                clip.path.with_suffix(".edit.json").write_text(
+                    json.dumps(
+                        {
+                            "kind": "youtube_short_source",
+                            "source_path": str(editor_source_path),
+                            "fallback_source_path": str(download.path),
+                            "source_title": download.title,
+                            "source_url": clean_url,
+                            "source_start": float(clip.start_seconds),
+                            "clip_duration": float(clip.duration_seconds),
+                            "source_width": source_info.width,
+                            "source_height": source_info.height,
+                            "mode": profile.mode,
+                            "aspect": "9 / 16",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
             _add_output(job, clip.path, f"Short {index}")
 
         _update_job(job, 82, "Собираю ZIP со всеми Shorts")
@@ -2223,6 +2250,21 @@ def _youtube_plan_text(profile: YouTubeProfile, duration_seconds: float) -> str:
         f"{clips} Shorts по {profile.short_seconds} сек. Обработка: "
         f"{estimate_cut_time(duration_seconds, clips, profile.short_seconds, settings.face_detection_enabled)}"
     )
+
+
+def _prepare_youtube_editor_source(source: Path, output_dir: Path, base_name: str) -> Path:
+    target_dir = output_dir / "editor_source"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    suffix = source.suffix.lower()[:16] or ".mp4"
+    target = target_dir / f"{clean_base_name(base_name, 'youtube_source')}_wide_source{suffix}"
+    if target.exists() and target.stat().st_size == source.stat().st_size:
+        return target
+    target.unlink(missing_ok=True)
+    try:
+        os.link(source, target)
+    except Exception:
+        shutil.copy2(source, target)
+    return target
 
 
 def _zip_paths(paths: list[Path], output: Path) -> Path:

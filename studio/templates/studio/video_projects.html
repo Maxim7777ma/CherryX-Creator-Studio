@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "video_projects_title" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260619-project-actions-polish">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-projects-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
@@ -129,7 +129,7 @@
       window.CX_MUSIC_MESSAGES = {{ music_messages_json|default:"{}"|safe }};
     </script>
     {% include "studio/_mobile_workspace_dock.html" with active_mobile_nav="video" %}
-    <script defer src="{% static 'studio/project_lists.js' %}?v=20260618-mobile-create-icon"></script>
+    <script defer src="{% static 'studio/project_lists.js' %}?v=20260622-language-portal-clean"></script>
   </body>
 </html>
 

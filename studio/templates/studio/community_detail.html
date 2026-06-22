@@ -8,7 +8,7 @@
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_work_detail' work.slug %}">
     {% if preview_url %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ preview_url }}">{% endif %}
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-community-active-icons">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260622-strong-icons">
   </head>
   <body class="community-page community-detail-page community-{{ work.kind }}">
     <header class="community-nav">
@@ -23,59 +23,100 @@
     <main class="community-detail-shell">
       <article class="community-work">
         <section class="community-work-media">
-          {% if work.kind == "video" and work.media_file and can_access %}
+          {% if work.kind == "video" and work.media_file and can_view_original %}
             <video controls poster="{% if preview_url %}{{ preview_url }}{% endif %}" src="{{ download_url }}"></video>
+          {% elif work.kind == "video" and protected_preview_url %}
+            <div class="community-protected-preview is-video-preview">
+              <video controls controlsList="nodownload" poster="{% if preview_url %}{{ preview_url }}{% endif %}" src="{{ protected_preview_url }}"></video>
+              <span>Protected short preview - unlock the clean original after payment</span>
+            </div>
           {% elif work.kind == "video" and preview_url %}
-            <img src="{{ preview_url }}" alt="">
+            <div class="community-protected-preview">
+              <img src="{{ preview_url }}" alt="">
+              {% if work.is_paid %}<span>Watermarked preview - unlock the original to download without marks</span>{% endif %}
+            </div>
           {% elif work.kind == "video" %}
             <span class="community-locked-preview" data-kind="{{ work.kind }}">Video locked</span>
           {% elif work.kind == "image" %}
-            {% if can_access and work.media_file %}
+            {% if can_view_original and work.media_file %}
               <img src="{{ download_url }}" alt="">
             {% elif preview_url %}
-              <img src="{{ preview_url }}" alt="">
+              <div class="community-protected-preview">
+                <img src="{{ preview_url }}" alt="">
+                {% if work.is_paid %}<span>Watermarked preview - unlock the original to download without marks</span>{% endif %}
+              </div>
             {% else %}
               <span class="community-locked-preview" data-kind="{{ work.kind }}">Image locked</span>
             {% endif %}
           {% elif work.kind == "music" %}
-            {% if can_access and download_url %}
+            {% if can_view_original and download_url %}
               <div class="community-audio-preview">
                 <i data-icon="music-2"></i>
                 <strong>{{ work.title }}</strong>
                 <audio controls src="{{ download_url }}"></audio>
               </div>
+            {% elif protected_preview_url %}
+              <div class="community-audio-preview is-protected">
+                <i data-icon="music-2"></i>
+                <strong>{{ work.title }}</strong>
+                <span>Protected audio preview. Clean original unlocks after payment.</span>
+                <audio controls controlsList="nodownload" src="{{ protected_preview_url }}"></audio>
+              </div>
             {% else %}
-              <span class="community-locked-preview" data-kind="{{ work.kind }}">Music locked</span>
+              <span class="community-locked-preview is-paid-preview" data-kind="{{ work.kind }}">Audio preview locked - unlock to download the original</span>
+            {% endif %}
+          {% elif work.kind == "text" %}
+            {% if can_view_original and work.body %}
+              <div class="community-text-original">{{ work.body|linebreaks }}</div>
+            {% else %}
+              <div class="community-text-preview">
+                <strong>Protected text preview</strong>
+                <p>{{ work.excerpt|default:work.body|truncatechars:420 }}</p>
+                <span>Unlock to read and download the full original.</span>
+              </div>
             {% endif %}
           {% elif preview_url %}
             <img src="{{ preview_url }}" alt="">
           {% endif %}
         </section>
         <section class="community-work-copy">
-          <p>{{ work.get_kind_display }}{% if work.owner %} by {{ work.owner.email|default:work.owner.username }}{% endif %}</p>
+          <p>{{ work.get_kind_display }}{% if work.owner %} by {{ work.owner.first_name|default:work.owner.username }}{% endif %}</p>
           <h1>{{ work.title }}</h1>
           {% if work.excerpt %}<span>{{ work.excerpt }}</span>{% endif %}
-          {% if work.body %}<div class="community-work-body">{{ work.body|linebreaks }}</div>{% endif %}
+          <div class="community-work-stats">
+            <span data-icon="download">{{ work.download_count }} downloads</span>
+            <span data-icon="shopping-bag">{{ work.purchase_count }} sold</span>
+            <span data-icon="{% if work.is_paid %}badge-dollar-sign{% else %}gift{% endif %}">{% if work.is_paid %}{{ work.price_cherryx }} CherryX{% else %}Free{% endif %}</span>
+          </div>
+          {% if work.is_paid and not can_view_original %}
+            <a class="community-preview-open" href="#community-preview-fullscreen">Open protected preview</a>
+          {% endif %}
+          {% if work.body and can_view_original and work.kind != "text" %}<div class="community-work-body">{{ work.body|linebreaks }}</div>{% endif %}
           <div class="community-access-box">
             {% if work.is_paid %}
-              <strong>{{ work.price_cherryx }} CherryX</strong>
-              {% if can_access %}
-                <span>Access unlocked.</span>
+              <strong>{{ purchase_total }} CherryX</strong>
+              {% if is_owner %}<span class="community-price-note">Buyer pays {{ purchase_total }} CX. You receive {{ work.price_cherryx }} CX.</span>{% endif %}
+              {% if can_view_original %}
+                <span>Payment confirmed. Download the original without watermarks.</span>
                 {% if download_url %}<a href="{{ download_url }}">Download file</a>{% endif %}
                 {% if work.kind == "music" and work.source_music_project %}
                   <a href="{% url 'studio:community_open_music_project' work.slug %}">Open in music editor</a>
                 {% endif %}
+              {% elif is_owner %}
+                <span>This public page shows a protected preview. Buyers get the clean original only after payment.</span>
               {% elif request.user.is_authenticated %}
                 {% if request.GET.payment == "insufficient" %}
-                  <span class="is-error">Not enough CherryX. Top up balance first.</span>
+                  <span class="is-error">Not enough CherryX. You need {{ purchase_total }} CherryX.</span>
                 {% elif request.GET.payment == "required" %}
-                  <span class="is-error">Buy this work to download the file.</span>
+                  <span class="is-error">Payment is required to download the original file.</span>
                 {% endif %}
+                <span>Balance: {{ balance_cherryx }} CherryX. Preview is protected; the clean file unlocks after payment.</span>
                 <form method="post" action="{% url 'studio:community_purchase' work.slug %}">
                   {% csrf_token %}
-                  <button type="submit">Buy with CherryX</button>
+                  <button type="submit">Pay {{ purchase_total }} CherryX from balance</button>
                 </form>
               {% else %}
+                <span>Preview is watermarked. Log in and pay to download the clean original.</span>
                 <a href="{% url 'studio:login' %}?next={{ request.path }}">Log in to buy</a>
               {% endif %}
             {% else %}
@@ -89,6 +130,66 @@
           </div>
         </section>
       </article>
+      {% if work.is_paid and not can_view_original %}
+        <section id="community-preview-fullscreen" class="community-preview-modal" aria-label="Protected preview">
+          <a class="community-preview-backdrop" href="#"></a>
+          <div class="community-preview-dialog">
+            <a class="community-preview-close" href="#" aria-label="Close preview"></a>
+            {% if work.kind == "video" and protected_preview_url %}
+              <video controls autoplay muted controlsList="nodownload" poster="{% if preview_url %}{{ preview_url }}{% endif %}" src="{{ protected_preview_url }}"></video>
+            {% elif work.kind == "music" and protected_preview_url %}
+              <div class="community-audio-preview is-protected">
+                <i data-icon="music-2"></i>
+                <strong>{{ work.title }}</strong>
+                <audio controls autoplay controlsList="nodownload" src="{{ protected_preview_url }}"></audio>
+              </div>
+            {% elif preview_url %}
+              <img src="{{ preview_url }}" alt="">
+            {% else %}
+              <div class="community-text-preview">
+                <strong>{{ work.title }}</strong>
+                <p>{{ work.excerpt|default:work.body|truncatechars:520 }}</p>
+              </div>
+            {% endif %}
+            <div class="community-preview-paybar">
+              <span>Clean original unlocks after payment.</span>
+              {% if request.user.is_authenticated and not is_owner %}
+                <form method="post" action="{% url 'studio:community_purchase' work.slug %}">
+                  {% csrf_token %}
+                  <button type="submit">Pay {{ purchase_total }} CherryX</button>
+                </form>
+              {% elif not request.user.is_authenticated %}
+                <a href="{% url 'studio:login' %}?next={{ request.path }}">Log in to buy</a>
+              {% endif %}
+            </div>
+          </div>
+        </section>
+      {% endif %}
+      {% if related_works %}
+        <section class="community-related">
+          <header>
+            <div>
+              <p>Similar listings</p>
+              <h2>More from CherryX market</h2>
+            </div>
+            <a href="{% if work.kind == "video" %}{% url 'studio:community_videos' %}{% elif work.kind == "image" %}{% url 'studio:community_images' %}{% elif work.kind == "music" %}{% url 'studio:community_music' %}{% else %}{% url 'studio:community_texts' %}{% endif %}">Open all</a>
+          </header>
+          <div class="community-related-rail" aria-label="Similar works">
+            {% for item in related_works %}
+              <a class="community-related-card" href="{% url 'studio:community_work_detail' item.slug %}">
+                <span class="community-card-kind" data-kind="{{ item.kind }}">{{ item.get_kind_display }}</span>
+                {% if item.cover_image or item.kind == "image" and item.media_file %}
+                  <img src="{% url 'studio:community_work_preview' item.slug %}" alt="">
+                {% else %}
+                  <span class="community-card-fallback" data-kind="{{ item.kind }}">{{ item.get_kind_display }}</span>
+                {% endif %}
+                <strong>{{ item.title }}</strong>
+                <small>{% if item.is_paid %}{{ item.price_cherryx }} CherryX{% else %}Free{% endif %}</small>
+              </a>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
     </main>
   </body>
 </html>

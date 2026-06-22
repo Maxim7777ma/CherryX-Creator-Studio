@@ -128,6 +128,109 @@ def generate_cover_copy(title: str, transcript_summary: str = "") -> dict[str, s
     }
 
 
+def rewrite_resume_block(payload: dict[str, object]) -> dict[str, object]:
+    if not is_openai_ready():
+        raise OpenAIUnavailableError("OpenAI is not configured")
+    request = {
+        "task": "Rewrite one resume field.",
+        "mode": str(payload.get("mode") or "stronger")[:40],
+        "field": str(payload.get("field") or "")[:80],
+        "language": str(payload.get("language") or "en")[:20],
+        "target_role": str(payload.get("target_role") or "")[:220],
+        "vacancy": str(payload.get("vacancy") or "")[:4000],
+        "text": str(payload.get("text") or "")[:5000],
+        "rules": [
+            "Return compact JSON only.",
+            "Do not invent employers, degrees, dates, certificates, exact metrics, or technologies not present unless phrased as an optional suggestion.",
+            "Keep the same language as the source text unless mode is english.",
+            "Make it recruiter-friendly, concrete, concise, and ATS-readable.",
+            "For experience and achievements, prefer bullet points.",
+        ],
+        "schema": {"text": "rewritten field", "notes": ["short practical notes"]},
+    }
+    response_text = _responses_text(
+        "You are a senior resume editor. Return only valid JSON.",
+        json.dumps(request, ensure_ascii=False),
+    )
+    data = _loads_json_object(response_text)
+    return {
+        "text": str(data.get("text") or "").strip()[:7000],
+        "notes": _string_list(data.get("notes"), 5),
+        "model": get_settings().openai_text_model,
+    }
+
+
+def analyze_resume_match(payload: dict[str, object]) -> dict[str, object]:
+    if not is_openai_ready():
+        raise OpenAIUnavailableError("OpenAI is not configured")
+    request = {
+        "task": "Compare a resume draft with a vacancy.",
+        "language": str(payload.get("language") or "en")[:20],
+        "resume": str(payload.get("resume") or "")[:9000],
+        "vacancy": str(payload.get("vacancy") or "")[:7000],
+        "rules": [
+            "Return compact JSON only.",
+            "Do not recommend adding false experience.",
+            "Score how clear and relevant the current resume is for the vacancy.",
+            "Separate matched keywords from missing relevant keywords.",
+            "Give short actionable suggestions.",
+        ],
+        "schema": {
+            "score": 0,
+            "matched_keywords": ["string"],
+            "missing_keywords": ["string"],
+            "suggestions": ["string"],
+            "summary": "short explanation",
+        },
+    }
+    response_text = _responses_text(
+        "You are an ATS and recruiter screening assistant. Return only valid JSON.",
+        json.dumps(request, ensure_ascii=False),
+    )
+    data = _loads_json_object(response_text)
+    try:
+        score = int(float(data.get("score") or 0))
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "score": max(0, min(100, score)),
+        "matched_keywords": _string_list(data.get("matched_keywords"), 16),
+        "missing_keywords": _string_list(data.get("missing_keywords"), 16),
+        "suggestions": _string_list(data.get("suggestions"), 8),
+        "summary": str(data.get("summary") or "").strip()[:700],
+        "model": get_settings().openai_text_model,
+    }
+
+
+def generate_resume_cover_letter(payload: dict[str, object]) -> dict[str, object]:
+    if not is_openai_ready():
+        raise OpenAIUnavailableError("OpenAI is not configured")
+    request = {
+        "task": "Write a short cover letter for a job application.",
+        "language": str(payload.get("language") or "en")[:20],
+        "resume": str(payload.get("resume") or "")[:9000],
+        "vacancy": str(payload.get("vacancy") or "")[:7000],
+        "rules": [
+            "Return compact JSON only.",
+            "Write 3 short paragraphs plus a polite closing.",
+            "Do not invent facts, companies, degrees, or exact metrics.",
+            "Keep it natural, specific, and not overly formal.",
+            "Use the same language as the vacancy/resume unless language asks otherwise.",
+        ],
+        "schema": {"letter": "string", "subject": "string"},
+    }
+    response_text = _responses_text(
+        "You are a practical career writing assistant. Return only valid JSON.",
+        json.dumps(request, ensure_ascii=False),
+    )
+    data = _loads_json_object(response_text)
+    return {
+        "letter": str(data.get("letter") or "").strip()[:6000],
+        "subject": str(data.get("subject") or "").strip()[:180],
+        "model": get_settings().openai_text_model,
+    }
+
+
 def generate_cover_image(frame_path: Path, title: str, prompt: str, output_path: Path) -> Path:
     if not is_openai_ready():
         raise OpenAIUnavailableError("OpenAI is not configured")
@@ -255,6 +358,19 @@ def _loads_json_object(value: str) -> dict[str, object]:
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError:
             return {}
+
+
+def _string_list(value: Any, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = " ".join(str(item or "").split()).strip()
+        if text and text not in items:
+            items.append(text[:220])
+        if len(items) >= limit:
+            break
+    return items
 
 
 def _normalize_candidates(local_scores: list[dict[str, object]] | list[int], duration: float) -> list[dict[str, object]]:

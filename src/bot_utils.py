@@ -281,12 +281,35 @@ def unique_archive_name(original_name: str, used_names: set[str]) -> str:
 def normalize_resume_text(value: str | None) -> str:
     if not value:
         return ""
-    lines = [" ".join(line.split()) for line in str(value).splitlines() if line.strip()]
+    value = repair_cyrillic_mojibake(str(value))
+    lines = [" ".join(line.split()) for line in value.splitlines() if line.strip()]
     return "\n".join(lines)
 
 
 def resume_safe_text(value: str) -> str:
-    return escape(value, quote=False).replace("\n", "<br/>")
+    return escape(repair_cyrillic_mojibake(value), quote=False).replace("\n", "<br/>")
+
+
+def repair_cyrillic_mojibake(value: str) -> str:
+    text = str(value or "")
+    candidates = [text]
+    for encoding in ("cp1251", "latin-1", "cp1252"):
+        try:
+            repaired = text.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        if repaired.strip():
+            candidates.append(repaired)
+    return max(candidates, key=_cyrillic_text_quality)
+
+
+def _cyrillic_text_quality(text: str) -> int:
+    text = str(text or "")
+    cyrillic = len(re.findall(r"[А-Яа-яЁёІіЇїЄєҐґ]", text))
+    common_lower = len(re.findall(r"[а-яёіїєґ]", text))
+    mojibake_pairs = len(re.findall(r"[РС][\u00a0-\u00bf\u0400-\u045f\u2010-\u203a\u20ac\u2116]", text))
+    replacements = text.count("\ufffd") + text.count("?")
+    return cyrillic + common_lower * 2 - mojibake_pairs * 8 - replacements * 12
 
 
 def resume_is_empty(value: str) -> bool:
@@ -323,6 +346,14 @@ def polish_resume_skills(value: str) -> str:
 
 
 def resume_section_data(data: dict) -> dict[str, str]:
+    target_bits = [
+        normalize_resume_text(data.get("resume_mode")),
+        normalize_resume_text(data.get("target_role")),
+        normalize_resume_text(data.get("target_scope")),
+        normalize_resume_text(data.get("work_format")),
+    ]
+    target_line = " | ".join(bit for bit in target_bits if bit)
+    value_offer = normalize_resume_text(data.get("value_offer"))
     prepared = {
         "name": normalize_resume_text(data.get("name")),
         "position": normalize_resume_text(data.get("position")),
@@ -334,7 +365,11 @@ def resume_section_data(data: dict) -> dict[str, str]:
         "skills": normalize_resume_text(data.get("skills")),
         "achievements": normalize_resume_text(data.get("achievements")),
         "additional": normalize_resume_text(data.get("additional")),
+        "cover_letter": normalize_resume_text(data.get("cover_letter")),
     }
+    summary_parts = [part for part in (target_line, value_offer, prepared["summary"]) if part]
+    if summary_parts:
+        prepared["summary"] = "\n".join(summary_parts)
     for key in ("achievements", "additional"):
         if resume_is_empty(prepared[key]):
             prepared[key] = ""

@@ -1,39 +1,5 @@
 ﻿(() => {
-        document.querySelectorAll(".language-switcher").forEach((switcher) => {
-          const button = switcher.querySelector(".language-current");
-          if (!button) return;
-          const positionMenu = () => {
-            const rect = button.getBoundingClientRect();
-            const safeGap = 14;
-            const menuWidth = 230;
-            const right = Math.max(safeGap, window.innerWidth - rect.right);
-            const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
-            switcher.style.setProperty("--language-menu-top", `${Math.max(safeGap, top)}px`);
-            switcher.style.setProperty(
-              "--language-menu-right",
-              `${Math.min(right, Math.max(safeGap, window.innerWidth - menuWidth - safeGap))}px`
-            );
-          };
-          switcher.addEventListener("click", (event) => event.stopPropagation());
-          button.addEventListener("click", (event) => {
-            event.stopPropagation();
-            const open = switcher.classList.toggle("is-open");
-            button.setAttribute("aria-expanded", open ? "true" : "false");
-            if (open) positionMenu();
-          });
-          window.addEventListener("resize", () => {
-            if (switcher.classList.contains("is-open")) positionMenu();
-          });
-          window.addEventListener("scroll", () => {
-            if (switcher.classList.contains("is-open")) positionMenu();
-          }, { passive: true });
-          document.addEventListener("click", (event) => {
-            if (!switcher.contains(event.target)) {
-              switcher.classList.remove("is-open");
-              button.setAttribute("aria-expanded", "false");
-            }
-          });
-        });
+        // Language switching is handled by the shared portal script in _language_switcher.html.
 
         const root = document.querySelector("[data-video-editor]");
         if (!root) return;
@@ -254,8 +220,9 @@
             if (patch.x !== undefined) clip.x = Math.max(0, Math.min(100, Number(patch.x) || 0));
             if (patch.y !== undefined) clip.y = Math.max(0, Math.min(100, Number(patch.y) || 0));
             if (patch.scale !== undefined) {
-              const maxScale = clip.type === "video" ? 300 : 160;
-              const minScale = clip.type === "video" ? 100 : 8;
+              const bounds = clip.type === "video" ? videoScaleBounds(clip) : {min: 8, max: 160};
+              const maxScale = bounds.max;
+              const minScale = bounds.min;
               clip.scale = Math.max(minScale, Math.min(maxScale, Number(patch.scale) || 100));
             }
             if (patch.rotation !== undefined) clip.rotation = Number(patch.rotation) || 0;
@@ -720,13 +687,17 @@
           const fit = clip?.style?.fit || "contain";
           return fit === "crop" ? "cover" : fit;
         }
+        function videoScaleBounds(clip) {
+          const fit = clip?.style?.fit || "contain";
+          return fit === "cover" || fit === "crop" ? {min: 100, max: 300} : {min: 8, max: 300};
+        }
         function videoFrameScale(clip) {
-          return Math.max(100, Math.min(300, Number(clip?.scale || 100)));
+          const bounds = videoScaleBounds(clip);
+          return Math.max(bounds.min, Math.min(bounds.max, Number(clip?.scale || 100)));
         }
         function ensureVideoReframeMode(clip) {
           if (!clip || clip.type !== "video") return;
           clip.style = clip.style || {};
-          clip.style.fit = "crop";
           clip.x = Math.max(0, Math.min(100, Number.isFinite(Number(clip.x)) ? Number(clip.x) : 50));
           clip.y = Math.max(0, Math.min(100, Number.isFinite(Number(clip.y)) ? Number(clip.y) : 50));
           clip.scale = videoFrameScale(clip);
@@ -1178,10 +1149,6 @@
           event.stopPropagation();
           selectOnly(clip.id);
           ensureVideoReframeMode(clip);
-          if (!cropMode) {
-            cropMode = true;
-            root.querySelector("[data-crop-mode]")?.classList.add("is-active");
-          }
           pushHistory();
           const target = event.currentTarget;
           videoReframeDrag = {
@@ -1234,7 +1201,8 @@
             videoWheelHistory = false;
           }, 450);
           const delta = event.deltaY > 0 ? -6 : 6;
-          clip.scale = Math.max(100, Math.min(300, videoFrameScale(clip) + delta));
+          const bounds = videoScaleBounds(clip);
+          clip.scale = Math.max(bounds.min, Math.min(bounds.max, videoFrameScale(clip) + delta));
           applyVideoFrameStyle(clip);
           updateClipControls(clip);
           scheduleSave();
@@ -2461,9 +2429,6 @@
             if (!clip) return;
             const value = Number(input.value);
             const patch = {[name]: value};
-            if (clip.type === "video" && ["x", "y", "scale"].includes(name)) {
-              patch.style = {fit: "crop"};
-            }
             updateClipPatch([clip.id], patch);
             if (clip.type === "video") syncMediaForProjectTime(playing);
           });
@@ -2471,7 +2436,12 @@
         root.querySelector("[data-clip-fit]").addEventListener("change", (event) => {
           const clip = selectedClip();
           if (!clip) return;
-          updateClipPatch([clip.id], {style: {fit: event.target.value}});
+          const fit = event.target.value;
+          const patch = {style: {fit}};
+          if (clip.type === "video" && ["cover", "crop"].includes(fit) && Number(clip.scale || 100) < 100) {
+            patch.scale = 100;
+          }
+          updateClipPatch([clip.id], patch);
           syncMediaForProjectTime(playing);
         });
         root.querySelector("[data-clip-speed]").addEventListener("change", (event) => {
@@ -2513,8 +2483,7 @@
         root.querySelector("[data-fit-auto]")?.addEventListener("click", () => {
           const clip = selectedClip();
           if (!clip || !["video", "image"].includes(clip.type)) return;
-          const fit = state.aspect === "9 / 16" ? "cover" : "contain";
-          updateClipPatch([clip.id], {x: 50, y: 50, scale: clip.type === "image" ? 42 : 100, style: {fit}});
+          updateClipPatch([clip.id], {x: 50, y: 50, scale: clip.type === "image" ? 42 : 100, style: {fit: "contain"}});
           if (clip.type === "video") syncMediaForProjectTime(playing);
         });
         root.querySelector("[data-crop-mode]")?.addEventListener("click", (event) => {
@@ -2524,6 +2493,8 @@
           if (clip && cropMode) {
             if (clip.type === "video") {
               if (!isClipActive(clip)) seekTo(clip.start + 0.01);
+              clip.style = {...(clip.style || {}), fit: "crop"};
+              clip.scale = Math.max(100, videoFrameScale(clip));
               ensureVideoReframeMode(clip);
               updateClipPatch([clip.id], {x: clip.x, y: clip.y, scale: clip.scale, style: {fit: "crop"}});
               syncMediaForProjectTime(playing);

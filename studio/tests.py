@@ -566,6 +566,16 @@ class SiteSmokeTests(TransactionTestCase):
         self.assertTrue(any(metric["key"] == "ai_risk" for metric in payload["metrics"]))
         self.assertEqual(response.json()["job"]["status"], "completed")
 
+    def test_originality_pdf_text_repair_handles_cyrillic_mojibake(self) -> None:
+        original = "Фінанси Україна Програмування Досвід роботи"
+        mojibake = original.encode("utf-8").decode("cp1251")
+
+        repaired = views._repair_extracted_text(mojibake)
+
+        self.assertIn("Фінанси", repaired)
+        self.assertIn("Україна", repaired)
+        self.assertIn("Досвід роботи", repaired)
+
 
 class QueryOptimizationTests(TransactionTestCase):
     def setUp(self) -> None:

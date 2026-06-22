@@ -7,7 +7,7 @@
     <title>{{ seo_title }} - CherryX Creator Studio</title>
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_publish' %}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260619-filter-select-icons">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260622-strong-icons">
   </head>
   <body class="community-page community-publish-page">
     <header class="community-nav">
@@ -29,17 +29,50 @@
           <input type="hidden" name="source" value="{{ source_payload.source }}">
           <input type="hidden" name="source_id" value="{{ source_payload.source_id }}">
         {% endif %}
-        <header>
-          <p>Publish</p>
-          <h1>Share to CherryX network</h1>
-          <span>Publish a public work for free or set a CherryX price. Paid sales are credited to your CherryX balance.</span>
-        </header>
-        {% if source_payload %}
-          <div class="community-source-note">
-            <strong>Source connected</strong>
-            <span>{{ source_payload.title }} - file or preview will be copied automatically when available.</span>
+        <header class="publish-hero">
+          <div>
+            <p>Publish from your account</p>
+            <h1>Prepare the marketplace listing</h1>
+            <span>Review the source, choose the preview, set access, then publish as your CherryX account.</span>
           </div>
-        {% endif %}
+          <aside class="publish-account-card">
+            <img src="{{ publish_account.avatar_url }}" alt="">
+            <span>Publishing as</span>
+            <strong>{{ publish_account.name }}</strong>
+            <small>{{ publish_account.email }}</small>
+          </aside>
+        </header>
+
+        <section class="publish-source-flow" aria-label="Publication source">
+          <article class="publish-source-card {% if source_publish_info.connected %}is-connected{% else %}is-manual{% endif %}">
+            <div>
+              <span>{% if source_publish_info.connected %}Source attached{% else %}Manual publication{% endif %}</span>
+              <strong>{% if source_publish_info.connected %}{{ source_publish_info.title }}{% else %}Upload files and fill the listing{% endif %}</strong>
+              <small>
+                {% if source_publish_info.connected %}
+                  {{ source_publish_info.source_label }}. CherryX will copy available media into the published work when you submit.
+                {% else %}
+                  Start from scratch: upload the final media, add a cover and publish from this account.
+                {% endif %}
+              </small>
+            </div>
+            <dl>
+              <div class="{% if source_publish_info.media_ready %}is-ok{% else %}is-waiting{% endif %}">
+                <dt>Main media</dt>
+                <dd>{% if source_publish_info.media_ready %}Ready to copy{% else %}Upload required{% endif %}</dd>
+              </div>
+              <div class="{% if source_publish_info.cover_ready %}is-ok{% else %}is-waiting{% endif %}">
+                <dt>Preview</dt>
+                <dd>{% if source_publish_info.cover_ready %}Found{% else %}Add cover{% endif %}</dd>
+              </div>
+            </dl>
+          </article>
+          <ol class="publish-steps">
+            {% for step in source_publish_info.steps %}
+              <li class="is-{{ step.state }}"><span>{{ forloop.counter }}</span>{{ step.label }}</li>
+            {% endfor %}
+          </ol>
+        </section>
         {% if form.non_field_errors %}<div class="community-form-errors">{{ form.non_field_errors }}</div>{% endif %}
 
         <section class="publish-compose">
@@ -65,38 +98,52 @@
             <div class="custom-select" data-custom-select>
               <span>Category</span>
               <input type="hidden" name="kind" value="{{ form.kind.value|default:'video' }}" data-custom-select-input>
-              <button type="button" data-custom-select-button>Video</button>
+              <button type="button" data-custom-select-button data-icon="video">Video</button>
               <div class="custom-select-menu" hidden>
-                <button type="button" data-value="video" data-label="Video">Video</button>
-                <button type="button" data-value="image" data-label="Image">Image</button>
-                <button type="button" data-value="music" data-label="Music">Music</button>
-                <button type="button" data-value="text" data-label="Text">Text</button>
+                <button type="button" data-value="video" data-label="Video" data-icon="video">Video</button>
+                <button type="button" data-value="image" data-label="Image" data-icon="image">Image</button>
+                <button type="button" data-value="music" data-label="Music" data-icon="music">Music</button>
+                <button type="button" data-value="text" data-label="Text" data-icon="text">Text</button>
               </div>
               {% for error in form.kind.errors %}<em>{{ error }}</em>{% endfor %}
             </div>
 
-            <div class="custom-file-zone" data-file-zone>
+            <div class="custom-file-zone {% if source_publish_info.media_ready %}has-source{% endif %}" data-file-zone>
               <input id="media-file-input" type="file" name="media_file" hidden data-file-input>
               <label for="media-file-input" data-icon="upload-cloud">
-                <strong>Upload main file</strong>
-                <span>Video, image or downloadable source. Paid originals stay protected.</span>
-                <small data-file-name>No file selected</small>
+                <strong>{% if source_publish_info.media_ready %}Replace main file{% else %}Upload main file{% endif %}</strong>
+                <span>{% if source_publish_info.media_ready %}A file is already connected from the source. Upload only if you want to replace it.{% else %}Video, image, audio or downloadable source. Paid originals stay protected.{% endif %}</span>
+                <small data-file-name>{% if source_publish_info.media_ready %}Source media will be copied{% else %}No file selected{% endif %}</small>
               </label>
               {% for error in form.media_file.errors %}<em>{{ error }}</em>{% endfor %}
             </div>
 
-            <div class="custom-file-zone" data-file-zone>
+            <div class="custom-file-zone {% if source_publish_info.cover_ready %}has-source{% endif %}" data-file-zone>
               <input id="cover-image-input" type="file" name="cover_image" accept="image/*" hidden data-file-input>
               <label for="cover-image-input" data-icon="image">
-                <strong>Upload cover</strong>
-                <span>Optional WebP preview card image.</span>
-                <small data-file-name>No cover selected</small>
+                <strong>{% if source_publish_info.cover_ready %}Replace preview cover{% else %}Upload preview cover{% endif %}</strong>
+                <span>{% if source_publish_info.cover_ready %}A preview was found. Upload a polished cover if the marketplace card needs a better first frame.{% else %}Optional: if you skip this, CherryX will build a preview from the uploaded material when possible.{% endif %}</span>
+                <small data-file-name>{% if source_publish_info.cover_ready %}Source preview is ready{% else %}Auto preview from material{% endif %}</small>
               </label>
               {% for error in form.cover_image.errors %}<em>{{ error }}</em>{% endfor %}
             </div>
 
-            <div class="publish-preview" data-publish-preview>
-              <span data-preview-empty>Preview appears after selecting a file or cover</span>
+            <div class="publish-preview {% if source_publish_info.cover_url or source_publish_info.media_url or source_publish_info.source_preview_url %}has-source-preview{% endif %}" data-publish-preview>
+              {% if source_publish_info.cover_url %}
+                <img src="{{ source_publish_info.cover_url }}" alt="">
+                <small>Source preview. You can replace it before publishing.</small>
+              {% elif source_publish_info.media_url and source_publish_info.kind == "video" %}
+                <video src="{{ source_publish_info.media_url }}" muted controls preload="metadata"></video>
+                <small>Source media preview. If no cover is uploaded, CherryX will use this material to create the marketplace preview.</small>
+              {% elif source_publish_info.media_url and source_publish_info.kind == "image" %}
+                <img src="{{ source_publish_info.media_url }}" alt="">
+                <small>Source image preview.</small>
+              {% elif source_publish_info.source_preview_url %}
+                <img src="{{ source_publish_info.source_preview_url }}" alt="">
+                <small>Source preview is ready. You can replace it before publishing.</small>
+              {% else %}
+                <span data-preview-empty>Preview appears here after selecting a cover or media file</span>
+              {% endif %}
             </div>
           </aside>
         </section>
@@ -115,17 +162,21 @@
           </label>
           <label class="rights-check">
             <input type="checkbox" name="rights_confirm" value="on" {% if form.rights_confirm.value %}checked{% endif %}>
-            <span>I have the rights to publish and sell this work.</span>
+            <span>I confirm this work belongs to me or I have permission to publish it from this account.</span>
             {% for error in form.rights_confirm.errors %}<em>{{ error }}</em>{% endfor %}
           </label>
         </section>
 
         <footer>
-          <button type="submit">Publish work</button>
+          <div>
+            <strong>Final step</strong>
+            <span>The listing will go live under {{ publish_account.email }}.</span>
+          </div>
+          <button type="submit" data-publish-submit>Publish from my account</button>
           <a href="{% url 'studio:community_market' %}">Open marketplace</a>
         </footer>
       </form>
     </main>
-    <script src="{% static 'studio/community_publish.js' %}?v=20260619-filter-select-icons" defer></script>
+    <script src="{% static 'studio/community_publish.js' %}?v=20260622-source-preview-route" defer></script>
   </body>
 </html>

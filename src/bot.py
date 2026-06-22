@@ -24,7 +24,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as RLImage
-from reportlab.platypus import Flowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, KeepTogether, PageBreak, Paragraph as RLParagraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -79,6 +79,7 @@ from .bot_utils import (
     publication_description as utils_publication_description,
     publication_hashtags as utils_publication_hashtags,
     re_words as utils_re_words,
+    repair_cyrillic_mojibake as utils_repair_cyrillic_mojibake,
     resume_clip as utils_resume_clip,
     resume_is_empty as utils_resume_is_empty,
     resume_safe_text as utils_resume_safe_text,
@@ -108,6 +109,10 @@ from .youtube_tools import (
     video_source_label,
     zip_clips,
 )
+
+
+def Paragraph(text, *args, **kwargs):
+    return RLParagraph(utils_repair_cyrillic_mojibake(str(text or "")), *args, **kwargs)
 
 
 SUBSCRIPTION_PERIOD_SECONDS = 2_592_000
@@ -4055,6 +4060,7 @@ async def process_youtube_link(message: Message, bot: Bot, url: str, lang: str, 
             profile.short_seconds,
             profile.sample_limit,
             settings.face_detection_enabled,
+            profile.mode,
         )
         clips = []
         base_name = clean_base_name(download.title, "youtube_short")
@@ -4610,6 +4616,10 @@ def resume_safe_text(value: str) -> str:
     return utils_resume_safe_text(value)
 
 
+def resume_clean_text(value: str) -> str:
+    return utils_repair_cyrillic_mojibake(str(value or ""))
+
+
 def resume_is_empty(value: str) -> bool:
     return utils_resume_is_empty(value)
 
@@ -4936,7 +4946,33 @@ def face_aware_square_crop(image: Image.Image) -> Image.Image:
     return image.crop((left, top, left + side, top + side))
 
 
-def make_resume_avatar(photo_path: str | None, output_dir: Path) -> Path | None:
+def _clamp_resume_crop(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def manual_resume_square_crop(image: Image.Image, crop_data: str | dict | None) -> Image.Image | None:
+    if not crop_data:
+        return None
+    try:
+        crop = json.loads(crop_data) if isinstance(crop_data, str) else dict(crop_data)
+        image = ImageOps.exif_transpose(image).convert("RGBA")
+        width, height = image.size
+        base_side = max(1, min(width, height))
+        zoom = _clamp_resume_crop(float(crop.get("zoom") or 1), 1.0, 3.0)
+        center_x = _clamp_resume_crop(float(crop.get("x") or 0.5), 0.0, 1.0) * width
+        center_y = _clamp_resume_crop(float(crop.get("y") or 0.5), 0.0, 1.0) * height
+        side = int(max(1, round(base_side / zoom)))
+        left = int(round(center_x - side / 2))
+        top = int(round(center_y - side / 2))
+        left = max(0, min(left, width - side))
+        top = max(0, min(top, height - side))
+        return image.crop((left, top, left + side, top + side))
+    except Exception:
+        logger.exception("Could not apply manual resume photo crop")
+        return None
+
+
+def make_resume_avatar(photo_path: str | None, output_dir: Path, crop_data: str | dict | None = None) -> Path | None:
     if not photo_path:
         return None
     source = Path(photo_path)
@@ -4944,7 +4980,7 @@ def make_resume_avatar(photo_path: str | None, output_dir: Path) -> Path | None:
         return None
     try:
         with Image.open(source) as image:
-            image = face_aware_square_crop(image)
+            image = manual_resume_square_crop(image, crop_data) or face_aware_square_crop(image)
             image = image.resize((520, 520), Image.Resampling.LANCZOS)
             mask = Image.new("L", image.size, 0)
             draw = ImageDraw.Draw(mask)
@@ -5016,7 +5052,7 @@ def draw_resume_page(canvas, doc, template: dict[str, str]) -> None:
     canvas.line(doc.leftMargin, 13 * mm, width - doc.rightMargin, 13 * mm)
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(colors.HexColor("#9ca3af"))
-    canvas.drawRightString(width - doc.rightMargin, 8 * mm, f"Resume вЂў {template['name']}")
+    canvas.drawRightString(width - doc.rightMargin, 8 * mm, resume_clean_text(f"Resume вЂў {template['name']}"))
     canvas.restoreState()
 
 
@@ -5170,7 +5206,7 @@ def resume_contact_kind(value: str) -> tuple[str, str]:
 def resume_pdf_labels(language: str) -> dict[str, str]:
     code = (language or "ru").lower()
     if code.startswith("uk"):
-        return {
+        labels = {
             "experience": "Р”РѕСЃРІС–Рґ СЂРѕР±РѕС‚Рё",
             "experience_short": "Р”РѕСЃРІС–Рґ",
             "education": "РћСЃРІС–С‚Р°",
@@ -5180,8 +5216,10 @@ def resume_pdf_labels(language: str) -> dict[str, str]:
             "contacts": "РљРѕРЅС‚Р°РєС‚Рё С‚Р° РїРѕСЃРёР»Р°РЅРЅСЏ",
             "contacts_short": "РљРѕРЅС‚Р°РєС‚Рё",
             "additional": "Р”РѕРґР°С‚РєРѕРІРѕ",
+            "cover_letter": "РЎСѓРїСЂРѕРІС–РґРЅРёР№ Р»РёСЃС‚",
             "more": "Р©Рµ",
         }
+        return {key: resume_clean_text(value) for key, value in labels.items()}
     if code.startswith("en"):
         return {
             "experience": "Work experience",
@@ -5193,9 +5231,10 @@ def resume_pdf_labels(language: str) -> dict[str, str]:
             "contacts": "Contacts and links",
             "contacts_short": "Contacts",
             "additional": "Additional",
+            "cover_letter": "Cover letter",
             "more": "More",
         }
-    return {
+    labels = {
         "experience": "РћРїС‹С‚ СЂР°Р±РѕС‚С‹",
         "experience_short": "РћРїС‹С‚",
         "education": "РћР±СЂР°Р·РѕРІР°РЅРёРµ",
@@ -5205,8 +5244,10 @@ def resume_pdf_labels(language: str) -> dict[str, str]:
         "contacts": "РљРѕРЅС‚Р°РєС‚С‹ Рё СЃСЃС‹Р»РєРё",
         "contacts_short": "РљРѕРЅС‚Р°РєС‚С‹",
         "additional": "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ",
+        "cover_letter": "РЎРѕРїСЂРѕРІРѕРґРёС‚РµР»СЊРЅРѕРµ РїРёСЃСЊРјРѕ",
         "more": "Р•С‰Рµ",
     }
+    return {key: resume_clean_text(value) for key, value in labels.items()}
 
 
 def build_resume_contact_table(
@@ -5362,7 +5403,7 @@ def build_resume_highlight_strip(data: dict[str, str], styles: dict, template: d
     row = []
     for title, value in items:
         cell = [
-            Paragraph(resume_safe_text(title.upper()), styles["ResumeMetricLabel"]),
+            Paragraph(resume_safe_text(resume_clean_text(title).upper()), styles["ResumeMetricLabel"]),
             Spacer(1, 2),
             Paragraph(resume_safe_text(resume_clip(value, 74)), styles["ResumeMetricValue"]),
         ]
@@ -5613,7 +5654,7 @@ def add_resume_rail_section(story: list, title: str, content: str, styles: dict,
     main_width = content_width - rail_width - 6 * mm
     body = paragraph_lines(content, styles)
     table = Table(
-        [[Paragraph(title.upper(), styles["ResumeRailTitle"]), body]],
+        [[Paragraph(resume_clean_text(title).upper(), styles["ResumeRailTitle"]), body]],
         colWidths=[rail_width, main_width],
         hAlign="LEFT",
     )
@@ -5662,7 +5703,7 @@ async def generate_resume_pdf(data: dict, template: str) -> Path:
     selected = RESUME_TEMPLATES.get(template, RESUME_TEMPLATES["1"])
     prepared = resume_section_data(data)
     labels = resume_pdf_labels(str(data.get("lang") or "ru"))
-    avatar_path = make_resume_avatar(data.get("photo_path"), settings.output_dir)
+    avatar_path = make_resume_avatar(data.get("photo_path"), settings.output_dir, data.get("photo_crop"))
     styles = build_resume_styles(selected)
 
     doc = SimpleDocTemplate(
@@ -5777,6 +5818,14 @@ async def generate_resume_pdf(data: dict, template: str) -> Path:
         story = [build_resume_header(prepared, styles, avatar_path, selected, content_width), Spacer(1, 8)]
         main_flow = build_resume_main_flow(prepared, styles, selected, content_width)
         story.extend(main_flow)
+
+    if prepared.get("cover_letter"):
+        story.extend([
+            PageBreak(),
+            Paragraph(resume_safe_text(labels["cover_letter"]), styles["ResumeSection"]),
+            Spacer(1, 5),
+            Paragraph(resume_safe_text(prepared["cover_letter"]), styles["ResumeBody"]),
+        ])
 
     doc.build(
         story,

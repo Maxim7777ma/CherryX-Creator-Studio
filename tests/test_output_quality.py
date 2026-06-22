@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
 from src import youtube_tools
 from src import web_actions
+from src.bot_utils import normalize_resume_text, repair_cyrillic_mojibake, resume_safe_text
 from src.image_tools import JPEG_QUALITY_STEPS, WEBP_QUALITY_STEPS, _target_ratio
 from src.video_tools import VIDEO_AUDIO_FILTER, VIDEO_SCALE_EVEN_FILTER
 
@@ -22,6 +24,14 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertGreaterEqual(min(WEBP_QUALITY_STEPS["quality"]), 80)
         self.assertGreaterEqual(min(JPEG_QUALITY_STEPS["quality"]), 88)
         self.assertEqual(_target_ratio("quality"), 1.0)
+
+    def test_resume_text_repairs_cyrillic_mojibake_before_pdf(self) -> None:
+        original = "Фінанси Україна Програмування Досвід роботи"
+        mojibake = original.encode("utf-8").decode("cp1251")
+
+        self.assertEqual(repair_cyrillic_mojibake(mojibake), original)
+        self.assertIn("Україна", normalize_resume_text(mojibake))
+        self.assertIn("Досвід роботи", resume_safe_text(mojibake))
 
     def test_vertical_shorts_filter_uses_lanczos(self) -> None:
         vf = youtube_tools.build_vertical_filter(
@@ -79,6 +89,25 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertGreaterEqual(ranked[0][0], 41)
         self.assertLessEqual(ranked[0][0], 51)
 
+    def test_clip_window_modes_change_ranking_personality(self) -> None:
+        scores = [
+            (20, 12.0),
+            (30, 105.0),
+            (40, 10.0),
+            (120, 48.0),
+            (130, 52.0),
+            (140, 50.0),
+            (150, 49.0),
+        ]
+
+        dynamic = youtube_tools._rank_clip_windows(scores, 220, 30, 10, 5, selection_mode="dynamic")
+        podcast = youtube_tools._rank_clip_windows(scores, 220, 30, 10, 5, selection_mode="podcast")
+
+        self.assertTrue(dynamic)
+        self.assertTrue(podcast)
+        self.assertLess(dynamic[0][0], 60)
+        self.assertGreaterEqual(podcast[0][0], 110)
+
     def test_local_peak_seconds_detects_peaks(self) -> None:
         peaks = youtube_tools._local_peak_seconds([(0, 1), (5, 10), (10, 3), (15, 12), (20, 2)], 5)
 
@@ -125,6 +154,47 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         vivid_score = youtube_tools._visual_frame_interest_score(vivid, cv2.cvtColor(vivid, cv2.COLOR_BGR2GRAY))
 
         self.assertGreater(vivid_score, dull_score)
+
+    def test_face_moment_score_prefers_clear_centered_face(self) -> None:
+        centered = youtube_tools._face_moment_score([(430, 220, 220, 220)], 1080, 720)
+        edge = youtube_tools._face_moment_score([(8, 20, 120, 120)], 1080, 720)
+
+        self.assertGreater(centered, edge)
+
+    def test_speaker_face_selection_can_switch_to_active_talker(self) -> None:
+        previous = np.zeros((720, 1080), dtype=np.uint8)
+        current = previous.copy()
+        faces = [(210, 220, 180, 190), (690, 220, 180, 190)]
+        x, y, w, h = faces[1]
+        current[int(y + h * 0.50):int(y + h * 0.96), int(x + w * 0.14):int(x + w * 0.86)] = 255
+        previous_point = youtube_tools.FaceTrackPoint(0, 300, 315, 180, 190, 0.8)
+
+        selected = youtube_tools._select_speaker_face(faces, 1080, 720, current, previous, previous_point)
+
+        self.assertIsNotNone(selected)
+        self.assertGreater(selected[0], 600)
+
+    def test_audio_moment_score_rewards_hook_after_pause(self) -> None:
+        windows = []
+        for index in range(48):
+            second = index * 0.5
+            if 5 <= second < 8:
+                rms = 80
+            elif 8 <= second < 11:
+                rms = 860 if index % 2 == 0 else 620
+            elif 22 <= second < 27:
+                rms = 430
+            else:
+                rms = 130
+            windows.append((second, rms))
+
+        with patch.object(youtube_tools, "_read_audio_rms_windows", return_value=windows):
+            scores = youtube_tools._score_audio_moments(Path("missing.mp4"), 30, 2, "dynamic")
+
+        self.assertTrue(scores)
+        best_second = max(scores, key=lambda item: item[1])[0]
+        self.assertGreaterEqual(best_second, 8)
+        self.assertLessEqual(best_second, 10)
 
     def test_cover_variant_profiles_are_distinct_and_editable(self) -> None:
         first = youtube_tools._cover_variant_profile("Big product launch", (920, 310), 1, 123)

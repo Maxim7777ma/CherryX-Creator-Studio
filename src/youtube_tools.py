@@ -282,6 +282,7 @@ def calculate_smart_clip_starts(
     clip_seconds: int,
     sample_limit: int = 360,
     face_detection_enabled: bool = True,
+    selection_mode: str = "regular",
 ) -> list[int]:
     ranked_starts = rank_smart_clip_candidates(
         source,
@@ -290,6 +291,7 @@ def calculate_smart_clip_starts(
         clip_seconds,
         sample_limit,
         face_detection_enabled,
+        selection_mode,
     )
     if not ranked_starts:
         return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
@@ -318,6 +320,7 @@ def rank_smart_clip_candidates(
     clip_seconds: int,
     sample_limit: int = 360,
     face_detection_enabled: bool = True,
+    selection_mode: str = "regular",
 ) -> list[dict[str, object]]:
     duration = int(duration_seconds)
     if duration < 10:
@@ -329,8 +332,15 @@ def rank_smart_clip_candidates(
 
     sample_limit = max(120, min(1200, sample_limit))
     step = max(2, int(duration / sample_limit))
-    scores = _score_video_moments(source, duration, step, face_detection_enabled)
-    ranked_starts = _rank_clip_windows(scores, duration, clip_seconds, step, lead_seconds=max(2, clip_seconds // 5))
+    scores = _score_video_moments(source, duration, step, face_detection_enabled, selection_mode)
+    ranked_starts = _rank_clip_windows(
+        scores,
+        duration,
+        clip_seconds,
+        step,
+        lead_seconds=max(2, clip_seconds // 5),
+        selection_mode=selection_mode,
+    )
     candidates = _clip_candidate_dicts(ranked_starts, scores, duration, clip_seconds, step)
 
     seen = {int(item["start"]) for item in candidates}
@@ -2817,32 +2827,38 @@ def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10) 
     try:
         offsets = _focus_sample_offsets(max(1, clip_seconds))
         candidates: list[FaceTrackPoint] = []
+        previous_gray: np.ndarray | None = None
+        previous_point: FaceTrackPoint | None = None
         for offset in offsets:
             capture.set(cv2.CAP_PROP_POS_MSEC, max(0, start_seconds + offset) * 1000)
             ok, frame = capture.read()
             if not ok:
                 continue
             faces = _detect_frame_faces(frame, detectors)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.equalizeHist(gray)
             if not faces:
+                previous_gray = gray
                 continue
-            x, y, w, h = max(faces, key=lambda item: item[2] * item[3])
-            face_area = w * h
-            frame_area = max(1, frame.shape[0] * frame.shape[1])
-            if face_area / frame_area < 0.002:
+            selected = _select_speaker_face(faces, frame.shape[1], frame.shape[0], gray, previous_gray, previous_point)
+            if selected is None:
+                previous_gray = gray
                 continue
-            candidates.append(
-                FaceTrackPoint(
-                    second=float(offset),
-                    x=int(x + w / 2),
-                    y=int(y + h / 2),
-                    width=int(w),
-                    height=int(h),
-                    confidence=min(1.0, max(0.08, face_area / frame_area * 18.0)),
-                )
+            x, y, w, h, confidence = selected
+            point = FaceTrackPoint(
+                second=float(offset),
+                x=int(x + w / 2),
+                y=int(y + h / 2),
+                width=int(w),
+                height=int(h),
+                confidence=confidence,
             )
+            candidates.append(point)
+            previous_point = point
+            previous_gray = gray
         if not candidates:
-            return []
-        return _smooth_face_track(_keep_face_track_cluster(candidates))
+            return _detect_motion_focus_track(source, start_seconds, clip_seconds)
+        return _smooth_face_track(candidates)
     finally:
         capture.release()
     return []
@@ -2862,6 +2878,116 @@ def _detect_frame_faces(
         for fx, fy, fw, fh in detector.detectMultiScale(flipped, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)):
             faces.append((int(frame_width - fx - fw), int(fy), int(fw), int(fh)))
     return faces
+
+
+def _select_speaker_face(
+    faces: list[tuple[int, int, int, int]],
+    frame_width: int,
+    frame_height: int,
+    gray: np.ndarray,
+    previous_gray: np.ndarray | None,
+    previous_point: FaceTrackPoint | None,
+) -> tuple[int, int, int, int, float] | None:
+    scored: list[tuple[float, float, tuple[int, int, int, int]]] = []
+    for face in faces:
+        x, y, w, h = face
+        area_ratio = (w * h) / max(1, frame_width * frame_height)
+        if area_ratio < 0.0016:
+            continue
+        quality = _face_focus_quality(face, frame_width, frame_height)
+        speech_motion = _lower_face_motion_score(gray, previous_gray, face)
+        stability = _face_track_stability_bonus(face, previous_point)
+        edge_penalty = 0.72 if _face_is_near_frame_edge(face, frame_width, frame_height) else 1.0
+        score = (quality * 0.58 + speech_motion * 0.34 + stability * 0.18) * edge_penalty
+        confidence = min(1.0, max(0.12, quality * 0.68 + speech_motion * 0.26 + stability * 0.12))
+        scored.append((score, confidence, face))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, confidence, (x, y, w, h) = scored[0]
+    if previous_point is not None and len(scored) > 1:
+        previous_candidate = next(
+            (
+                item
+                for item in scored
+                if abs((item[2][0] + item[2][2] / 2) - previous_point.x) < max(previous_point.width, item[2][2]) * 0.75
+            ),
+            None,
+        )
+        if previous_candidate and previous_candidate[0] >= best_score * 0.84:
+            best_score, confidence, (x, y, w, h) = previous_candidate
+    return int(x), int(y), int(w), int(h), float(confidence)
+
+
+def _face_focus_quality(face: tuple[int, int, int, int], frame_width: int, frame_height: int) -> float:
+    x, y, w, h = face
+    if frame_width <= 0 or frame_height <= 0:
+        return 0.0
+    center_x = (x + w / 2) / frame_width
+    center_y = (y + h / 2) / frame_height
+    area_ratio = (w * h) / max(1, frame_width * frame_height)
+    horizontal = 1.0 - min(1.0, abs(center_x - 0.5) / 0.46)
+    vertical = 1.0 - min(1.0, abs(center_y - 0.40) / 0.42)
+    size = min(1.0, area_ratio / 0.07)
+    aspect = 1.0 - min(1.0, abs((w / max(1, h)) - 0.82) / 0.72)
+    edge = 0.0 if _face_is_near_frame_edge(face, frame_width, frame_height) else 1.0
+    return max(0.0, min(1.0, 0.22 + horizontal * 0.22 + vertical * 0.18 + size * 0.25 + aspect * 0.07 + edge * 0.06))
+
+
+def _face_is_near_frame_edge(face: tuple[int, int, int, int], frame_width: int, frame_height: int) -> bool:
+    x, y, w, h = face
+    margin = max(4, int(min(frame_width, frame_height) * 0.018))
+    return x <= margin or y <= margin or x + w >= frame_width - margin or y + h >= frame_height - margin
+
+
+def _face_track_stability_bonus(face: tuple[int, int, int, int], previous_point: FaceTrackPoint | None) -> float:
+    if previous_point is None:
+        return 0.0
+    x, y, w, h = face
+    center_x = x + w / 2
+    center_y = y + h / 2
+    distance = abs(center_x - previous_point.x) + abs(center_y - previous_point.y)
+    tolerance = max(1.0, (w + h + previous_point.width + previous_point.height) * 0.35)
+    return max(0.0, 1.0 - min(1.0, distance / tolerance))
+
+
+def _lower_face_motion_score(gray: np.ndarray, previous_gray: np.ndarray | None, face: tuple[int, int, int, int]) -> float:
+    if previous_gray is None or previous_gray.shape != gray.shape:
+        return 0.0
+    x, y, w, h = face
+    x1 = clamp(int(x + w * 0.14), 0, gray.shape[1] - 1)
+    x2 = clamp(int(x + w * 0.86), x1 + 1, gray.shape[1])
+    y1 = clamp(int(y + h * 0.50), 0, gray.shape[0] - 1)
+    y2 = clamp(int(y + h * 0.96), y1 + 1, gray.shape[0])
+    current = gray[y1:y2, x1:x2]
+    previous = previous_gray[y1:y2, x1:x2]
+    if current.size == 0 or previous.size == 0:
+        return 0.0
+    diff = cv2.absdiff(current, previous)
+    return max(0.0, min(1.0, float(diff.mean()) / 30.0))
+
+
+def _face_moment_score(faces: list[tuple[int, int, int, int]], frame_width: int, frame_height: int) -> float:
+    if not faces or frame_width <= 0 or frame_height <= 0:
+        return 0.0
+    frame_area = max(1, frame_width * frame_height)
+    best = 0.0
+    for x, y, w, h in faces:
+        area_ratio = max(0.0, (w * h) / frame_area)
+        if area_ratio < 0.0015:
+            continue
+        center_x = x + w / 2
+        center_y = y + h / 2
+        horizontal = 1.0 - min(1.0, abs(center_x / frame_width - 0.5) / 0.42)
+        vertical_target = 0.40
+        vertical = 1.0 - min(1.0, abs(center_y / frame_height - vertical_target) / 0.36)
+        size_score = min(1.0, area_ratio / 0.075)
+        edge_clearance = min(x, y, frame_width - (x + w), frame_height - (y + h))
+        edge_score = max(0.0, min(1.0, edge_clearance / max(1.0, min(frame_width, frame_height) * 0.045)))
+        quality = 0.26 + horizontal * 0.24 + vertical * 0.18 + size_score * 0.24 + edge_score * 0.08
+        best = max(best, min(68.0, 12.0 + quality * 56.0))
+    multi_face_bonus = min(10.0, max(0, len(faces) - 1) * 3.0)
+    return min(74.0, best + multi_face_bonus)
 
 
 def _keep_face_track_cluster(points: list[FaceTrackPoint]) -> list[FaceTrackPoint]:
@@ -2900,6 +3026,59 @@ def _smooth_face_track(points: list[FaceTrackPoint]) -> list[FaceTrackPoint]:
     return smoothed
 
 
+def _detect_motion_focus_track(source: Path, start_seconds: int, clip_seconds: int) -> list[FaceTrackPoint]:
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return []
+    points: list[FaceTrackPoint] = []
+    previous_gray: np.ndarray | None = None
+    last_x: int | None = None
+    try:
+        for offset in _focus_sample_offsets(max(1, clip_seconds)):
+            capture.set(cv2.CAP_PROP_POS_MSEC, max(0, start_seconds + offset) * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                continue
+            height, width = frame.shape[:2]
+            small = cv2.resize(frame, (320, 180))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 0)
+            if previous_gray is None:
+                previous_gray = gray
+                continue
+            diff = cv2.absdiff(gray, previous_gray)
+            previous_gray = gray
+            column_energy = diff.mean(axis=0)
+            if float(column_energy.max()) < 2.0:
+                continue
+            weighted_x = _weighted_column_center(column_energy)
+            focus_x = int(weighted_x / max(1, len(column_energy) - 1) * width)
+            if last_x is not None:
+                focus_x = int(round(last_x * 0.45 + focus_x * 0.55))
+            last_x = focus_x
+            points.append(
+                FaceTrackPoint(
+                    second=float(offset),
+                    x=clamp(focus_x, 0, max(0, width - 1)),
+                    y=int(height * 0.42),
+                    width=max(48, int(width * 0.16)),
+                    height=max(64, int(height * 0.34)),
+                    confidence=0.24,
+                )
+            )
+    finally:
+        capture.release()
+    return _smooth_face_track(points)
+
+
+def _weighted_column_center(values: np.ndarray) -> float:
+    total = float(values.sum())
+    if total <= 0:
+        return float(len(values) / 2)
+    indexes = np.arange(len(values), dtype=np.float32)
+    return float((indexes * values).sum() / total)
+
+
 def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, source_size: int, axis: str) -> list[tuple[float, int]]:
     max_offset = max(0, source_size - crop_size)
     positions: list[tuple[float, int]] = []
@@ -2909,31 +3088,51 @@ def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, sour
         face_start = center - face_size / 2
         face_end = center + face_size / 2
         if axis == "x":
-            padding = max(18, int(face_size * 0.62), int(crop_size * 0.08))
+            padding = max(22, int(face_size * 0.72), int(crop_size * 0.09))
             desired = center - crop_size * 0.50
         else:
-            padding = max(22, int(face_size * 0.72), int(crop_size * 0.10))
-            desired = center - crop_size * 0.42
+            padding = max(28, int(face_size * 0.82), int(crop_size * 0.12))
+            desired = center - crop_size * 0.38
         lower = face_end + padding - crop_size
         upper = face_start - padding
         if lower <= upper:
             offset = min(max(desired, lower), upper)
         else:
-            offset = center - crop_size * (0.50 if axis == "x" else 0.42)
+            offset = center - crop_size * (0.50 if axis == "x" else 0.38)
         positions.append((point.second, clamp(int(round(offset)), 0, max_offset)))
     if not positions:
         return []
-    return _limit_crop_motion(positions, max_step=max(24, crop_size // 22))
+    return _limit_crop_motion(_smooth_crop_positions(positions), max_step=max(90, crop_size // 5))
+
+
+def _smooth_crop_positions(positions: list[tuple[float, int]]) -> list[tuple[float, int]]:
+    if len(positions) < 3:
+        return positions
+    smoothed: list[tuple[float, int]] = []
+    for index, (second, offset) in enumerate(positions):
+        neighbors = positions[max(0, index - 1) : min(len(positions), index + 2)]
+        weighted = 0.0
+        total = 0.0
+        for neighbor_index, (_neighbor_second, neighbor_offset) in enumerate(neighbors):
+            weight = 1.8 if max(0, index - 1) + neighbor_index == index else 1.0
+            weighted += neighbor_offset * weight
+            total += weight
+        smoothed.append((second, int(round(weighted / max(1.0, total)))))
+    return smoothed
 
 
 def _limit_crop_motion(positions: list[tuple[float, int]], max_step: int) -> list[tuple[float, int]]:
     limited: list[tuple[float, int]] = []
     previous: int | None = None
+    previous_second: float | None = None
     for second, offset in positions:
         if previous is not None:
-            offset = clamp(offset, previous - max_step, previous + max_step)
+            elapsed = max(1.0, float(second) - float(previous_second or 0.0))
+            allowed_step = int(max_step * min(3.0, elapsed))
+            offset = clamp(offset, previous - allowed_step, previous + allowed_step)
         limited.append((second, offset))
         previous = offset
+        previous_second = second
     return limited
 
 
@@ -2974,7 +3173,7 @@ def _keep_face_cluster(candidates: list[tuple[float, float, float]]) -> list[tup
 def _focus_sample_offsets(clip_seconds: int) -> list[int]:
     if clip_seconds <= 8:
         return [0, max(0, clip_seconds // 2)]
-    count = min(7, max(3, clip_seconds // 8))
+    count = min(15, max(5, int(round(clip_seconds / 2.5)) + 1))
     if count == 1:
         return [0]
     return sorted({int(round(i * (clip_seconds - 1) / (count - 1))) for i in range(count)})
@@ -2999,8 +3198,15 @@ def calculate_backstage_clip_starts(
     sample_limit = max(60, min(1200, sample_limit))
     step = max(5, int(duration / sample_limit))
     min_gap = max(clip_seconds, min_gap_seconds)
-    scores = _score_video_moments(source, duration, step, face_detection_enabled)
-    ranked_starts = _rank_clip_windows(scores, duration, clip_seconds, step, lead_seconds=max(1, clip_seconds // 3))
+    scores = _score_video_moments(source, duration, step, face_detection_enabled, "backstage")
+    ranked_starts = _rank_clip_windows(
+        scores,
+        duration,
+        clip_seconds,
+        step,
+        lead_seconds=max(1, clip_seconds // 3),
+        selection_mode="backstage",
+    )
     selected = _select_diverse_ranked_starts(ranked_starts, max_clips, min_gap, duration, clip_seconds)
 
     if len(selected) < max_clips:
@@ -3018,13 +3224,18 @@ def _score_video_moments(
     duration_seconds: int,
     step_seconds: int,
     face_detection_enabled: bool,
+    selection_mode: str = "regular",
 ) -> list[tuple[int, float]]:
+    profile = _moment_selection_profile(selection_mode)
     native_visual = native_tools.visual_moment_scores(source, duration_seconds, step_seconds)
     if native_visual:
         if face_detection_enabled:
             native_visual = _add_python_face_scores(source, native_visual)
-        audio_scores = _score_audio_moments(source, duration_seconds, step_seconds)
-        return _smooth_scores(_combine_moment_scores(_smooth_scores(native_visual, step_seconds), audio_scores), step_seconds)
+        audio_scores = _score_audio_moments(source, duration_seconds, step_seconds, selection_mode)
+        return _smooth_scores(
+            _combine_moment_scores(_smooth_scores(native_visual, step_seconds), audio_scores, selection_mode),
+            step_seconds,
+        )
 
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
@@ -3063,37 +3274,25 @@ def _score_video_moments(
 
             face_score = 0.0
             if face_detection_enabled and detectors:
-                full_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                full_gray = cv2.equalizeHist(full_gray)
-                faces: list[tuple[int, int, int, int]] = []
-                for detector in detectors:
-                    faces.extend(detector.detectMultiScale(full_gray, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)))
-                    flipped = cv2.flip(full_gray, 1)
-                    frame_width = full_gray.shape[1]
-                    for fx, fy, fw, fh in detector.detectMultiScale(
-                        flipped, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)
-                    ):
-                        faces.append((frame_width - fx - fw, fy, fw, fh))
-                if len(faces):
-                    largest = max((w * h for _x, _y, w, h in faces), default=0)
-                    face_score = min(58.0, 14.0 * len(faces) + largest / max(1, frame.shape[0] * frame.shape[1]) * 150.0)
+                faces = _detect_frame_faces(frame, detectors)
+                face_score = _face_moment_score(faces, frame.shape[1], frame.shape[0])
 
             # Prefer moments with visible people and some visual change, but avoid pure random noise dominating.
             score = (
                 min(32.0, motion_score)
-                + motion_rise_score
-                + scene_score
+                + motion_rise_score * profile["motion_rise"]
+                + scene_score * profile["scene"]
                 + sharpness_score
                 + visual_interest_score
-                + face_score
+                + face_score * profile["face"]
             )
             if score > 0:
                 scores.append((second, score))
     finally:
         capture.release()
     visual_scores = _smooth_scores(scores, step_seconds)
-    audio_scores = _score_audio_moments(source, duration_seconds, step_seconds)
-    return _smooth_scores(_combine_moment_scores(visual_scores, audio_scores), step_seconds)
+    audio_scores = _score_audio_moments(source, duration_seconds, step_seconds, selection_mode)
+    return _smooth_scores(_combine_moment_scores(visual_scores, audio_scores, selection_mode), step_seconds)
 
 
 def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]) -> list[tuple[int, float]]:
@@ -3117,10 +3316,7 @@ def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]
                 boosted.append((second, score))
                 continue
             faces = _detect_frame_faces(frame, detectors)
-            face_score = 0.0
-            if faces:
-                largest = max((w * h for _x, _y, w, h in faces), default=0)
-                face_score = min(58.0, 14.0 * len(faces) + largest / max(1, frame.shape[0] * frame.shape[1]) * 150.0)
+            face_score = _face_moment_score(faces, frame.shape[1], frame.shape[0])
             boosted.append((second, score + face_score))
     finally:
         capture.release()
@@ -3130,13 +3326,74 @@ def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]
 def _combine_moment_scores(
     visual_scores: list[tuple[int, float]],
     audio_scores: list[tuple[int, float]],
+    selection_mode: str = "regular",
 ) -> list[tuple[int, float]]:
+    profile = _moment_selection_profile(selection_mode)
     combined: dict[int, float] = {}
     for second, score in visual_scores:
         combined[second] = combined.get(second, 0.0) + score
     for second, score in audio_scores:
-        combined[second] = combined.get(second, 0.0) + score * 0.85
+        combined[second] = combined.get(second, 0.0) + score * profile["audio"]
     return sorted((second, score) for second, score in combined.items() if score > 0)
+
+
+def _moment_selection_profile(selection_mode: str) -> dict[str, float]:
+    mode = (selection_mode or "regular").lower()
+    profiles = {
+        "dynamic": {
+            "audio": 1.02,
+            "face": 0.9,
+            "scene": 1.24,
+            "motion_rise": 1.28,
+            "peak": 0.5,
+            "sustain": 0.28,
+            "isolated": 0.84,
+            "isolated_ratio": 0.36,
+        },
+        "podcast": {
+            "audio": 1.0,
+            "face": 1.34,
+            "scene": 0.72,
+            "motion_rise": 0.76,
+            "peak": 0.18,
+            "sustain": 0.82,
+            "isolated": 0.38,
+            "isolated_ratio": 0.62,
+        },
+        "calm": {
+            "audio": 0.82,
+            "face": 1.08,
+            "scene": 0.68,
+            "motion_rise": 0.62,
+            "peak": 0.16,
+            "sustain": 0.74,
+            "isolated": 0.34,
+            "isolated_ratio": 0.68,
+        },
+        "backstage": {
+            "audio": 0.78,
+            "face": 1.02,
+            "scene": 1.18,
+            "motion_rise": 1.05,
+            "peak": 0.42,
+            "sustain": 0.34,
+            "isolated": 0.76,
+            "isolated_ratio": 0.42,
+        },
+    }
+    return profiles.get(
+        mode,
+        {
+            "audio": 0.88,
+            "face": 1.0,
+            "scene": 1.0,
+            "motion_rise": 1.0,
+            "peak": 0.34,
+            "sustain": 0.42,
+            "isolated": 0.72,
+            "isolated_ratio": 0.44,
+        },
+    )
 
 
 def _rank_clip_windows(
@@ -3145,9 +3402,11 @@ def _rank_clip_windows(
     clip_seconds: int,
     step_seconds: int,
     lead_seconds: int,
+    selection_mode: str = "regular",
 ) -> list[tuple[int, float]]:
     if not scores:
         return []
+    profile = _moment_selection_profile(selection_mode)
 
     max_start = max(0, duration_seconds - clip_seconds)
     step_seconds = max(1, step_seconds)
@@ -3185,13 +3444,15 @@ def _rank_clip_windows(
         center = start + clip_seconds / 2
         center_bonus = 1.0 - min(1.0, abs(max(by_second, key=lambda sec: by_second[sec] if start <= sec < start + clip_seconds else -1) - center) / max(1.0, clip_seconds / 2))
         edge_penalty = _timeline_edge_penalty(start, duration_seconds, clip_seconds)
-        isolated_peak_penalty = 0.72 if peak > max(1.0, upper_mid) * 2.8 and strong_ratio < 0.34 else 1.0
-        sustained_bonus = 1.0 + min(0.34, strong_ratio * 0.42)
+        isolated_peak_penalty = profile["isolated"] if peak > max(1.0, upper_mid) * 2.8 and strong_ratio < profile["isolated_ratio"] else 1.0
+        sustained_bonus = 1.0 + min(0.48, strong_ratio * profile["sustain"])
+        sustained_points = strong_ratio * average * profile["sustain"]
         score = (
             total * 0.78
-            + peak * 0.34
+            + peak * profile["peak"]
             + average * 0.75
             + upper_mid * 0.42
+            + sustained_points
             + coverage * 24.0
             + center_bonus * 7.0
         ) * edge_penalty * isolated_peak_penalty * sustained_bonus
@@ -3327,7 +3588,9 @@ def _local_peak_seconds(scores: list[tuple[int, float]], step_seconds: int) -> l
     return [second for second, _score in sorted(peaks, key=lambda item: item[1], reverse=True)]
 
 
-def _score_audio_moments(source: Path, duration_seconds: int, step_seconds: int) -> list[tuple[int, float]]:
+def _score_audio_moments(source: Path, duration_seconds: int, step_seconds: int, selection_mode: str = "regular") -> list[tuple[int, float]]:
+    mode = (selection_mode or "regular").lower()
+    profile = _moment_selection_profile(selection_mode)
     window_seconds = 0.5 if duration_seconds <= 3600 else 1.0
     windows = _read_audio_rms_windows(source, 0, max(1, duration_seconds), window_seconds=window_seconds)
     if not windows:
@@ -3347,25 +3610,42 @@ def _score_audio_moments(source: Path, duration_seconds: int, step_seconds: int)
     max_index = max(by_index) if by_index else 0
     for second in range(0, max(1, duration_seconds - 1), max(1, step_seconds)):
         center_index = round(second / window_seconds)
-        before = [by_index.get(index, 0) for index in range(max(0, center_index - 5), center_index)]
-        current = [by_index.get(index, 0) for index in range(center_index, min(max_index + 1, center_index + 7))]
-        after = [by_index.get(index, 0) for index in range(center_index + 7, min(max_index + 1, center_index + 13))]
+        before = [by_index.get(index, 0) for index in range(max(0, center_index - 6), center_index)]
+        current = [by_index.get(index, 0) for index in range(center_index, min(max_index + 1, center_index + 8))]
+        after = [by_index.get(index, 0) for index in range(center_index + 8, min(max_index + 1, center_index + 15))]
         if not current:
             continue
         peak = max(current)
         avg = sum(current) / len(current)
+        local_range = max(current) - min(current)
         active_ratio = sum(1 for value in current if value >= speech_threshold) / len(current)
         before_min = min(before) if before else median
         before_avg = sum(before) / len(before) if before else median
         after_min = min(after) if after else median
+        after_active = sum(1 for value in after if value >= speech_threshold) / max(1, len(after))
 
         loudness_score = min(28.0, avg / max(1.0, median) * 8.0)
-        accent_score = min(28.0, max(0.0, peak - before_avg) / max(1.0, median) * 10.0)
-        phrase_start_bonus = 20.0 if before_min <= speech_threshold * 0.72 and peak >= accent_threshold * 0.82 else 0.0
+        accent_score = min(30.0, max(0.0, peak - before_avg) / max(1.0, median) * 10.5)
+        texture_score = min(12.0, local_range / max(1.0, median) * 5.0)
+        phrase_start_bonus = 22.0 if before_min <= speech_threshold * 0.72 and peak >= accent_threshold * 0.82 else 0.0
+        hook_rise_bonus = 14.0 if before_avg <= speech_threshold * 0.95 and avg >= speech_threshold * 1.12 and active_ratio >= 0.42 else 0.0
         active_score = active_ratio * 16.0
-        ending_pause_bonus = 7.0 if after_min <= speech_threshold * 0.75 else 0.0
-        silence_penalty = 26.0 if active_ratio < 0.25 and peak < accent_threshold else 0.0
-        score = max(0.0, loudness_score + accent_score + phrase_start_bonus + active_score + ending_pause_bonus - silence_penalty)
+        ending_pause_bonus = 8.0 if after_min <= speech_threshold * 0.75 and after_active < 0.45 else 0.0
+        drone_penalty = 10.0 if active_ratio > 0.92 and local_range < max(50.0, median * 0.18) else 0.0
+        silence_penalty = 28.0 if active_ratio < 0.25 and peak < accent_threshold else 0.0
+        score = max(
+            0.0,
+            loudness_score
+            + accent_score * (1.12 if mode == "dynamic" else 1.0)
+            + texture_score * (0.72 if mode == "calm" else 1.0)
+            + phrase_start_bonus
+            + hook_rise_bonus * (1.2 if mode == "dynamic" else 1.0)
+            + active_score * (1.15 if mode == "podcast" else 1.0)
+            + ending_pause_bonus
+            - silence_penalty
+            - drone_penalty * (1.18 if mode == "calm" else 1.0),
+        )
+        score *= max(0.72, min(1.18, profile["audio"] + 0.18))
         if score:
             scores.append((second, score))
     return scores

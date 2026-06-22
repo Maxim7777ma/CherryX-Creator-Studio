@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260619-subscription-mobile-telegram">
-    <script defer src="{% static 'studio/app.js' %}?v=20260619-subscription-telegram"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-strong-icons">
+    <script defer src="{% static 'studio/app.js' %}?v=20260622-youtube-mode-hints"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
@@ -288,22 +288,22 @@
               <span>{% ui "link" %}</span>
               <input type="url" name="url" placeholder="https://youtu.be/..." required>
             </label>
-            <div class="field custom-select-field" data-custom-select>
+            <div class="field custom-select-field youtube-mode-select" data-custom-select>
               <span>{% ui "mode" %}</span>
               {% for value, label in youtube_modes %}
                 {% if forloop.first %}
                   <input type="hidden" name="mode" value="{{ value }}" data-custom-select-input>
-                  <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false">
+                  <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false" data-mode-icon="classic">
                     <b>{{ label }}</b>
-                    <small>YouTube</small>
+                    <small>Balanced shorts for most videos</small>
                   </button>
                 {% endif %}
               {% endfor %}
               <div class="custom-select-menu" data-custom-select-menu>
                 {% for value, label in youtube_modes %}
-                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}">
+                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}" data-mode-icon="{% if value == 'dynamic' %}dynamic{% elif value == 'podcast' %}podcast{% elif value == 'calm' %}calm{% else %}classic{% endif %}" data-select-hint="{% if value == 'dynamic' %}Fast cuts, stronger hooks and more motion{% elif value == 'podcast' %}Keeps speech flow for interviews and talk videos{% elif value == 'calm' %}Softer pacing for lessons, stories and quiet clips{% else %}Balanced shorts for most videos{% endif %}">
                     <b>{{ label }}</b>
-                    <small>{{ value }}</small>
+                    <small>{% if value == 'dynamic' %}Fast cuts, stronger hooks and more motion{% elif value == 'podcast' %}Keeps speech flow for interviews and talk videos{% elif value == 'calm' %}Softer pacing for lessons, stories and quiet clips{% else %}Balanced shorts for most videos{% endif %}</small>
                   </button>
                 {% endfor %}
               </div>
@@ -523,73 +523,241 @@
           <form class="job-form resume-wizard" data-endpoint="{% url 'studio:start_resume' %}" data-wizard-form>
             {% csrf_token %}
             <div class="resume-steps" aria-label="{% ui "resume_steps" %}">
-              <button class="is-active" type="button" data-step-target="0"><span>1</span>{% ui "profile" %}</button>
-              <button type="button" data-step-target="1"><span>2</span>{% ui "content" %}</button>
-              <button type="button" data-step-target="2"><span>3</span>{% ui "appearance" %}</button>
-              <button type="button" data-step-target="3"><span>4</span>PDF</button>
+              <button class="is-active" type="button" data-step-target="0"><span>1</span><b>{% ui "profile" %}</b></button>
+              <button type="button" data-step-target="1"><span>2</span><b>{% ui "resume_step_mode_short" %}</b></button>
+              <button type="button" data-step-target="2"><span>3</span><b>{% ui "resume_step_target_short" %}</b></button>
+              <button type="button" data-step-target="3"><span>4</span><b>{% ui "content" %}</b></button>
+              <button type="button" data-step-target="4"><span>5</span><b>{% ui "resume_step_details_short" %}</b></button>
+              <button type="button" data-step-target="5"><span>6</span><b>{% ui "appearance" %}</b></button>
+              <button type="button" data-step-target="6"><span>7</span><b>{% ui "resume_step_match_short" %}</b></button>
+              <button type="button" data-step-target="7"><span>8</span><b>PDF</b></button>
+            </div>
+            <div class="resume-ai-strip" data-resume-ai-strip>
+              <span aria-hidden="true">AI</span>
+              <div>
+                <strong>{% ui "resume_ai_title" %}</strong>
+                <p data-resume-ai-copy>{% ui "resume_ai_idle" %}</p>
+                <div class="resume-ai-actions" data-resume-ai-actions></div>
+              </div>
             </div>
             <section class="resume-step is-active" data-step="0">
-              <div class="resume-step-head">
-                <strong>{% ui "resume_step_profile_title" %}</strong>
-                <small>{% ui "resume_step_profile_copy" %}</small>
-              </div>
-              <div class="resume-grid resume-profile-grid">
-                <label class="field">
-                  <span>{% ui "name" %}</span>
-                  <input type="text" name="name" placeholder="{% ui "full_name" %}" required>
-                </label>
-                <label class="field">
-                  <span>{% ui "position" %}</span>
-                  <input type="text" name="position" placeholder="Product Designer">
-                </label>
-                <label class="field">
-                  <span>{% ui "contacts" %}</span>
-                  <input type="text" name="contact" placeholder="email, phone">
-                </label>
-                <label class="field">
-                  <span>{% ui "links" %}</span>
-                  <input type="text" name="links" placeholder="LinkedIn, portfolio">
-                </label>
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_profile_title" %}</strong>
+                    <small>{% ui "resume_step_profile_copy" %}</small>
+                  </div>
+                  <div class="resume-grid resume-profile-grid">
+                    <label class="field resume-smart-field">
+                      <span>{% ui "name" %}</span>
+                      <input type="text" name="name" placeholder="{% ui "full_name" %}" required>
+                      <small>{% ui "resume_hint_name" %}</small>
+                    </label>
+                    <label class="field resume-smart-field">
+                      <span>{% ui "position" %}</span>
+                      <input type="text" name="position" placeholder="Product Designer">
+                      <small>{% ui "resume_hint_position" %}</small>
+                    </label>
+                    <label class="field resume-smart-field">
+                      <span>{% ui "contacts" %}</span>
+                      <input type="text" name="contact" placeholder="email, phone">
+                      <small>{% ui "resume_hint_contacts" %}</small>
+                    </label>
+                    <label class="field resume-smart-field">
+                      <span>{% ui "links" %}</span>
+                      <input type="text" name="links" placeholder="LinkedIn, portfolio">
+                      <small>{% ui "resume_hint_links" %}</small>
+                    </label>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_coach_title" %}</strong>
+                  <p>{% ui "resume_coach_profile" %}</p>
+                  {% if not is_guest %}
+                    <div class="resume-account-card" data-resume-account-card>
+                      <img src="{{ avatar_url }}" alt="">
+                      <div>
+                        <b>{{ resume_prefill.name|default:display_name }}</b>
+                        <small>{{ resume_prefill.email }}</small>
+                      </div>
+                      <button class="secondary-action" type="button" data-resume-fill-account>{% ui "resume_fill_account" %}</button>
+                    </div>
+                  {% endif %}
+                  <div class="resume-score" data-resume-score><span style="width: 0%"></span></div>
+                  <small data-resume-score-text>{% ui "resume_score_empty" %}</small>
+                </aside>
               </div>
             </section>
             <section class="resume-step" data-step="1">
-              <div class="resume-step-head">
-                <strong>{% ui "resume_step_content_title" %}</strong>
-                <small>{% ui "resume_step_content_copy" %}</small>
-              </div>
-              <div class="resume-grid">
-                <label class="field field-wide">
-                  <span>{% ui "summary" %}</span>
-                  <textarea name="summary" rows="3" placeholder="{% ui "summary" %}"></textarea>
-                </label>
-                <label class="field field-wide">
-                  <span>{% ui "experience" %}</span>
-                  <textarea name="experience" rows="5" placeholder="{% ui "experience" %}"></textarea>
-                </label>
-                <label class="field">
-                  <span>{% ui "education" %}</span>
-                  <textarea name="education" rows="4"></textarea>
-                </label>
-                <label class="field">
-                  <span>{% ui "skills" %}</span>
-                  <textarea name="skills" rows="4" placeholder="Figma, Python, Strategy..."></textarea>
-                </label>
-                <label class="field">
-                  <span>{% ui "achievements" %}</span>
-                  <textarea name="achievements" rows="4"></textarea>
-                </label>
-                <label class="field">
-                  <span>{% ui "additional" %}</span>
-                  <textarea name="additional" rows="4"></textarea>
-                </label>
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_mode_title" %}</strong>
+                    <small>{% ui "resume_step_mode_copy" %}</small>
+                  </div>
+                  <input type="hidden" name="resume_mode" value="" data-resume-mode-input>
+                  <div class="resume-mode-picker" data-resume-mode-picker aria-label="{% ui "resume_mode_title" %}">
+                    <button type="button" data-resume-mode="it" data-mode-icon="code-2"><strong>IT</strong><small>Stack, API, systems</small></button>
+                    <button type="button" data-resume-mode="design" data-mode-icon="pen-tool"><strong>Design</strong><small>UX, product, UI</small></button>
+                    <button type="button" data-resume-mode="marketing" data-mode-icon="rocket"><strong>Marketing</strong><small>Growth, content, ads</small></button>
+                    <button type="button" data-resume-mode="management" data-mode-icon="clipboard-check"><strong>Management</strong><small>Delivery, teams, roadmap</small></button>
+                    <button type="button" data-resume-mode="student" data-mode-icon="graduation-cap"><strong>Student</strong><small>Junior, intern, learning</small></button>
+                    <button type="button" data-resume-mode="executive" data-mode-icon="landmark"><strong>Executive</strong><small>Leadership, strategy</small></button>
+                    <button type="button" data-resume-mode="data" data-mode-icon="chart-no-axes-column"><strong>Data</strong><small>Analytics, BI, insights</small></button>
+                    <button type="button" data-resume-mode="sales" data-mode-icon="hand-coins"><strong>Sales</strong><small>Clients, pipeline, revenue</small></button>
+                    <button type="button" data-resume-mode="content" data-mode-icon="file-pen-line"><strong>Content</strong><small>Copy, social, editorial</small></button>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_coach_mode_title" %}</strong>
+                  <p>{% ui "resume_coach_mode_copy" %}</p>
+                  <ul>
+                    <li>{% ui "resume_mode_tip_focus" %}</li>
+                    <li>{% ui "resume_mode_tip_safe" %}</li>
+                    <li>{% ui "resume_mode_tip_next" %}</li>
+                  </ul>
+                </aside>
               </div>
             </section>
             <section class="resume-step" data-step="2">
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_target_title" %}</strong>
+                    <small>{% ui "resume_step_target_copy" %}</small>
+                  </div>
+                  <div class="resume-grid resume-target-grid">
+                    <label class="field resume-smart-field resume-auto-field">
+                      <span>{% ui "resume_target_role" %}</span>
+                      <textarea name="target_role" rows="2" data-autogrow placeholder="Product Designer / Python Developer"></textarea>
+                      <small>{% ui "resume_target_role_hint" %}</small>
+                    </label>
+                    <label class="field resume-smart-field resume-auto-field">
+                      <span>{% ui "resume_target_scope" %}</span>
+                      <textarea name="target_scope" rows="2" data-autogrow placeholder="SaaS, fintech, marketplace, creator tools"></textarea>
+                      <small>{% ui "resume_target_scope_hint" %}</small>
+                    </label>
+                    <label class="field resume-smart-field resume-auto-field">
+                      <span>{% ui "resume_work_format" %}</span>
+                      <textarea name="work_format" rows="2" data-autogrow placeholder="Remote / hybrid / relocation"></textarea>
+                      <small>{% ui "resume_work_format_hint" %}</small>
+                    </label>
+                    <label class="field field-wide resume-smart-field">
+                      <span>{% ui "resume_value_offer" %}</span>
+                      <textarea name="value_offer" rows="4" placeholder="{% ui "resume_value_offer_placeholder" %}"></textarea>
+                      <button class="resume-example" type="button" data-fill-field="value_offer" data-fill-text="{% ui "resume_example_value_offer" %}">{% ui "resume_use_example" %}</button>
+                    </label>
+                    <div class="resume-target-ideas field-wide" data-resume-target-ideas>
+                      <strong>{% ui "resume_smart_variants" %}</strong>
+                      <div></div>
+                    </div>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_coach_target_title" %}</strong>
+                  <p>{% ui "resume_coach_target_copy" %}</p>
+                  <ul>
+                    <li>{% ui "resume_target_tip_match" %}</li>
+                    <li>{% ui "resume_target_tip_specific" %}</li>
+                    <li>{% ui "resume_target_tip_salary" %}</li>
+                  </ul>
+                </aside>
+              </div>
+            </section>
+            <section class="resume-step" data-step="3">
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_content_title" %}</strong>
+                    <small>{% ui "resume_step_content_copy" %}</small>
+                  </div>
+                  <div class="resume-grid resume-content-grid">
+                    <label class="field field-wide resume-smart-field resume-content-field" data-resume-content="summary" data-content-icon="sparkles">
+                      <span>{% ui "summary" %}</span>
+                      <small>{% ui "resume_content_summary_hint" %}</small>
+                      <textarea name="summary" rows="4" data-autogrow placeholder="{% ui "resume_placeholder_summary" %}"></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                      <button class="resume-example" type="button" data-fill-field="summary" data-fill-text="{% ui "resume_example_summary" %}">{% ui "resume_use_example" %}</button>
+                    </label>
+                    <label class="field field-wide resume-smart-field resume-content-field" data-resume-content="experience" data-content-icon="briefcase-business">
+                      <span>{% ui "experience" %}</span>
+                      <small>{% ui "resume_content_experience_hint" %}</small>
+                      <textarea name="experience" rows="6" data-autogrow placeholder="{% ui "resume_placeholder_experience" %}"></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                      <button class="resume-example" type="button" data-fill-field="experience" data-fill-text="{% ui "resume_example_experience" %}">{% ui "resume_use_example" %}</button>
+                    </label>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_coach_content_title" %}</strong>
+                  <p>{% ui "resume_content_coach_copy" %}</p>
+                  <ul>
+                    <li>{% ui "resume_tip_numbers" %}</li>
+                    <li>{% ui "resume_tip_stack" %}</li>
+                    <li>{% ui "resume_tip_lines" %}</li>
+                  </ul>
+                </aside>
+              </div>
+            </section>
+            <section class="resume-step resume-wide-step" data-step="4">
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_details_title" %}</strong>
+                    <small>{% ui "resume_step_details_copy" %}</small>
+                  </div>
+                  <div class="resume-grid resume-content-grid resume-details-grid">
+                    <label class="field resume-smart-field resume-content-field" data-resume-content="education" data-content-icon="graduation-cap">
+                      <span>{% ui "education" %}</span>
+                      <small>{% ui "resume_content_education_hint" %}</small>
+                      <textarea name="education" rows="4" data-autogrow placeholder="{% ui "resume_placeholder_education" %}"></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                    </label>
+                    <label class="field resume-smart-field resume-content-field" data-resume-content="skills" data-content-icon="badge-check">
+                      <span>{% ui "skills" %}</span>
+                      <small>{% ui "resume_content_skills_hint" %}</small>
+                      <textarea name="skills" rows="4" data-autogrow placeholder="Figma, Python, Strategy..."></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                      <button class="resume-example" type="button" data-fill-field="skills" data-fill-text="{% ui "resume_example_skills" %}">{% ui "resume_use_example" %}</button>
+                    </label>
+                    <label class="field resume-smart-field resume-content-field" data-resume-content="achievements" data-content-icon="trophy">
+                      <span>{% ui "achievements" %}</span>
+                      <small>{% ui "resume_content_achievements_hint" %}</small>
+                      <textarea name="achievements" rows="4" data-autogrow placeholder="{% ui "resume_placeholder_achievements" %}"></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                    </label>
+                    <label class="field resume-smart-field resume-content-field" data-resume-content="additional" data-content-icon="languages">
+                      <span>{% ui "additional" %}</span>
+                      <small>{% ui "resume_content_additional_hint" %}</small>
+                      <textarea name="additional" rows="4" data-autogrow placeholder="{% ui "resume_placeholder_additional" %}"></textarea>
+                      <div class="resume-content-suggestions" data-content-suggestions></div>
+                    </label>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_coach_content_title" %}</strong>
+                  <p>{% ui "resume_content_coach_copy" %}</p>
+                  <ul>
+                    <li>{% ui "resume_tip_numbers" %}</li>
+                    <li>{% ui "resume_tip_stack" %}</li>
+                    <li>{% ui "resume_tip_lines" %}</li>
+                  </ul>
+                  <div class="resume-content-quality" data-resume-content-quality>
+                    <span>{% ui "resume_content_quality" %}</span>
+                    <strong>0%</strong>
+                    <div><i style="width: 0%"></i></div>
+                    <small>{% ui "resume_content_quality_empty" %}</small>
+                  </div>
+                </aside>
+              </div>
+            </section>
+            <section class="resume-step" data-step="5">
               <div class="resume-step-head">
                 <strong>{% ui "resume_step_appearance_title" %}</strong>
                 <small>{% ui "resume_step_appearance_copy" %}</small>
               </div>
               <div class="resume-grid">
+                <input type="hidden" name="use_account_avatar" value="0" data-use-account-avatar>
                 {% for value, label in resume_templates %}
                   {% if forloop.first %}
                     <input type="hidden" name="template" value="{{ value }}" data-template-select>
@@ -609,6 +777,7 @@
                 <label class="field file-field compact-upload">
                   <span>{% ui "photo" %}</span>
                   <input type="file" name="photo" accept="image/*" data-preview="resume-preview-wizard">
+                  <input type="hidden" name="photo_crop" data-resume-photo-crop>
                   <span class="file-dropzone">
                     <span class="file-icon">IMG</span>
                     <span class="file-copy">
@@ -622,14 +791,96 @@
                 <div class="media-preview" id="resume-preview-wizard">
                   <span>{% ui "photo" %}</span>
                 </div>
+                {% if resume_prefill.can_use_avatar %}
+                  <div class="resume-account-avatar-option field-wide" data-account-avatar-option>
+                    <img src="{{ avatar_url }}" alt="">
+                    <div>
+                      <strong>{% ui "resume_use_account_avatar_title" %}</strong>
+                      <small>{% ui "resume_use_account_avatar_copy" %}</small>
+                    </div>
+                    <button class="secondary-action" type="button" data-resume-use-account-avatar>{% ui "resume_use_avatar" %}</button>
+                  </div>
+                {% endif %}
+                <div class="resume-photo-editor field-wide" data-resume-photo-editor hidden>
+                  <div class="resume-photo-copy">
+                    <strong>{% ui "resume_photo_editor_title" %}</strong>
+                    <small>{% ui "resume_photo_editor_copy" %}</small>
+                  </div>
+                  <div class="resume-photo-workbench">
+                    <div class="resume-photo-stage" data-resume-photo-stage>
+                      <canvas width="320" height="320" data-resume-photo-canvas></canvas>
+                      <span class="resume-photo-crosshair" aria-hidden="true"></span>
+                    </div>
+                    <div class="resume-photo-controls">
+                      <label class="field">
+                        <span>{% ui "resume_photo_zoom" %}</span>
+                        <input type="range" min="1" max="3" step="0.01" value="1" data-resume-photo-zoom>
+                      </label>
+                      <button class="secondary-action" type="button" data-resume-photo-center>{% ui "resume_photo_center" %}</button>
+                      <small>{% ui "resume_photo_drag_hint" %}</small>
+                      <ul class="resume-photo-checklist" data-resume-photo-checklist></ul>
+                    </div>
+                  </div>
+                </div>
               </div>
             </section>
-            <section class="resume-step" data-step="3">
+            <section class="resume-step" data-step="6">
+              <div class="resume-step-layout">
+                <div class="resume-step-main">
+                  <div class="resume-step-head">
+                    <strong>{% ui "resume_step_match_title" %}</strong>
+                    <small>{% ui "resume_step_match_copy" %}</small>
+                  </div>
+                  <div class="resume-grid">
+                    <label class="field field-wide resume-smart-field">
+                      <span>{% ui "resume_vacancy_text" %}</span>
+                      <textarea name="vacancy_text" rows="7" data-vacancy-text placeholder="{% ui "resume_vacancy_placeholder" %}"></textarea>
+                      <small>{% ui "resume_vacancy_hint" %}</small>
+                    </label>
+                    <div class="resume-ats-panel field-wide" data-resume-ats-panel>
+                      <div class="resume-ats-score">
+                        <span>{% ui "resume_ats_score" %}</span>
+                        <strong data-resume-ats-score>0%</strong>
+                      </div>
+                      <div class="resume-score"><span data-resume-ats-bar style="width: 0%"></span></div>
+                      <div class="resume-keyword-cloud" data-resume-keywords></div>
+                      <ul data-resume-ats-checklist></ul>
+                    </div>
+                    <label class="field field-wide resume-smart-field">
+                      <span>{% ui "resume_cover_letter" %}</span>
+                      <textarea name="cover_letter" rows="7" data-cover-letter placeholder="{% ui "resume_cover_letter_placeholder" %}"></textarea>
+                      <div class="resume-inline-actions">
+                        <button class="resume-example" type="button" data-generate-cover-letter>{% ui "resume_generate_cover_letter" %}</button>
+                        <button class="resume-example" type="button" data-copy-cover-letter>{% ui "copy_result_link" %}</button>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+                <aside class="resume-coach">
+                  <strong>{% ui "resume_match_coach_title" %}</strong>
+                  <p>{% ui "resume_match_coach_copy" %}</p>
+                  <ul>
+                    <li>{% ui "resume_match_tip_keywords" %}</li>
+                    <li>{% ui "resume_match_tip_truth" %}</li>
+                    <li>{% ui "resume_match_tip_letter" %}</li>
+                  </ul>
+                </aside>
+              </div>
+            </section>
+            <section class="resume-step" data-step="7">
               <div class="resume-step-head">
                 <strong>{% ui "resume_step_finish_title" %}</strong>
                 <small>{% ui "resume_step_finish_copy" %}</small>
               </div>
               <div class="resume-finish">
+                <div class="resume-live-preview" data-resume-live-preview>
+                  <div>
+                    <strong data-preview-name>Alex Morgan</strong>
+                    <span data-preview-role>Product profile</span>
+                  </div>
+                  <p data-preview-summary>{% ui "resume_finish_note" %}</p>
+                  <small data-preview-tags></small>
+                </div>
                 <span>{% ui "resume_finish_note" %}</span>
                 <button class="primary-action" type="submit">{% ui "build_pdf" %}</button>
               </div>
@@ -713,10 +964,16 @@
       </aside>
     </main>
     {{ app_messages|json_script:"app-messages" }}
+    {{ resume_prefill|json_script:"resume-prefill" }}
     <script>
       window.STUDIO_ACCESS = {
         hasAccess: {{ has_access|yesno:"true,false" }},
         checkoutUrl: "{{ checkout_url|escapejs }}"
+      };
+      window.STUDIO_RESUME_AI = {
+        rewriteUrl: "{% url 'studio:resume_ai_rewrite' %}",
+        matchUrl: "{% url 'studio:resume_ai_match' %}",
+        coverLetterUrl: "{% url 'studio:resume_ai_cover_letter' %}"
       };
     </script>
     {{ initial_jobs|json_script:"initial-jobs" }}

@@ -7,6 +7,13 @@
   <div class="stats-list">
     {% for job in jobs %}
       <article class="stats-row stats-job-row is-{{ job.status }}" data-stats-job-row data-job-title="{{ job.title }}">
+        <figure class="stats-task-thumb is-{{ job.thumbnail.kind|default:'file' }}">
+          {% if job.thumbnail.url %}
+            <img src="{{ job.thumbnail.url }}" alt="">
+          {% else %}
+            <span>{{ job.thumbnail.label|default:job.kind|default:"File" }}</span>
+          {% endif %}
+        </figure>
         <span>
           <b>{{ job.title }}</b>
           <small>{{ job.message }}{% if job.error %} · {{ job.error }}{% endif %}</small>
