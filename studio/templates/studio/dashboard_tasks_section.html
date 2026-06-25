@@ -53,7 +53,14 @@
               <button type="submit">{% ui "repeat" %}</button>
             </form>
           {% endif %}
-          {% if job.status == "failed" or job.status == "cancelled" %}
+          {% if job.status == "failed" %}
+            {% if job.repeatable %}
+              <form method="post" action="{{ job.resume_url }}">
+                {% csrf_token %}
+                <button type="submit">{% ui "retry" %}</button>
+              </form>
+            {% endif %}
+          {% elif job.status == "cancelled" %}
             {% if job.repeatable %}
               <form method="post" action="{{ job.repeat_url }}">
                 {% csrf_token %}

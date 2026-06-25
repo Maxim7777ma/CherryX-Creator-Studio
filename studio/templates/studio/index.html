@@ -5,8 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-strong-icons">
-    <script defer src="{% static 'studio/app.js' %}?v=20260622-youtube-mode-hints"></script>
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260624-reset-flow-after-submit">
+    <script defer src="{% static 'studio/app.js' %}?v=20260624-reset-flow-after-submit"></script>
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }}" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar">
@@ -216,64 +216,72 @@
             <h2>{% ui "converter" %}</h2>
             <span>PNG JPG WEBP PDF BMP TIFF GIF MP4 WEBM</span>
           </div>
-          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_convert' %}">
+          <form class="job-form convert-compose" data-endpoint="{% url 'studio:start_convert' %}">
             {% csrf_token %}
-            <label class="field field-wide file-field">
-              <span>{% ui "file" %}</span>
-              <input type="file" name="file" accept="image/*,video/*" data-preview="convert-preview" required>
-              <span class="file-dropzone">
-                <span class="file-icon">+</span>
-                <span class="file-copy">
-                  <strong>{% ui "drag_file" %}</strong>
-                  <small>{% ui "file_hint" %} {{ max_video_mb }} MB. Preview.</small>
+            <div class="convert-file-stack">
+              <label class="field file-field convert-file-field">
+                <span>{% ui "file" %}</span>
+                <input type="file" name="file" accept="image/*,video/*" data-preview="convert-preview" required>
+                <span class="file-dropzone">
+                  <span class="file-icon" data-icon="upload-cloud"></span>
+                  <span class="file-copy">
+                    <strong>{% ui "drag_file" %}</strong>
+                    <small>{% ui "file_hint" %} {{ max_video_mb }} MB. Preview.</small>
+                  </span>
+                  <span class="file-button">{% ui "choose_file" %}</span>
                 </span>
-                <span class="file-button">{% ui "choose_file" %}</span>
-              </span>
-              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
-            </label>
-            <div class="media-preview field-wide" id="convert-preview">
-              <span>{% ui "preview_file" %}</span>
-            </div>
-            <div class="field format-field" data-format-picker>
-              <span>{% ui "result_format" %}</span>
-              <input type="hidden" name="target_format" value="{{ image_formats.0.0 }}" data-format-input>
-              <button class="format-current" type="button" data-format-current>
-                <b>{{ image_formats.0.1 }}</b>
-                <small>{% ui "images" %}</small>
-              </button>
-              <div class="format-menu" data-format-menu>
-                <section data-format-group="image">
-                  <strong>{% ui "images" %}</strong>
-                  <div>
-                    {% for value, label in image_formats %}
-                      <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-format-value="{{ value }}" data-format-kind="image">{{ label }}</button>
-                    {% endfor %}
-                  </div>
-                </section>
-                <section data-format-group="video" hidden>
-                  <strong>{% ui "video" %}</strong>
-                  <div>
-                    {% for value, label in video_formats %}
-                      <button type="button" data-format-value="{{ value }}" data-format-kind="video">{{ label }}</button>
-                    {% endfor %}
-                  </div>
-                </section>
+                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+              </label>
+              <div class="media-preview convert-preview" id="convert-preview">
+                <span>{% ui "preview_file" %}</span>
               </div>
             </div>
-            <label class="field">
-              <span>{% ui "result_name" %}</span>
-              <input type="text" name="output_name" placeholder="converted" maxlength="80">
-            </label>
-            <fieldset class="segmented field-wide">
-              <legend>{% ui "image_compression" %}</legend>
-              {% for value, label in image_modes %}
-                <label>
-                  <input type="radio" name="image_mode" value="{{ value }}" {% if value == "balanced" %}checked{% endif %}>
-                  <span>{{ label }}</span>
+            <div class="convert-settings">
+              <div class="convert-settings-grid">
+                <div class="field format-field convert-format-field" data-format-picker>
+                  <span>{% ui "result_format" %}</span>
+                  <input type="hidden" name="target_format" value="{{ image_formats.0.0 }}" data-format-input>
+                  <button class="format-current" type="button" data-format-current>
+                    <b>{{ image_formats.0.1 }}</b>
+                    <small>{% ui "images" %}</small>
+                  </button>
+                  <div class="format-menu" data-format-menu>
+                    <section data-format-group="image">
+                      <strong>{% ui "images" %}</strong>
+                      <div>
+                        {% for value, label in image_formats %}
+                          <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-format-value="{{ value }}" data-format-kind="image">{{ label }}</button>
+                        {% endfor %}
+                      </div>
+                    </section>
+                    <section data-format-group="video" hidden>
+                      <strong>{% ui "video" %}</strong>
+                      <div>
+                        {% for value, label in video_formats %}
+                          <button type="button" data-format-value="{{ value }}" data-format-kind="video">{{ label }}</button>
+                        {% endfor %}
+                      </div>
+                    </section>
+                  </div>
+                </div>
+                <label class="field convert-name-field">
+                  <span>{% ui "result_name" %}</span>
+                  <input type="text" name="output_name" placeholder="converted" maxlength="80">
                 </label>
-              {% endfor %}
-            </fieldset>
-            <button class="primary-action" type="submit">{% ui "start_task" %}</button>
+              </div>
+              <fieldset class="segmented convert-compression">
+                <legend>{% ui "image_compression" %}</legend>
+                {% for value, label in image_modes %}
+                  <label data-compression-icon="{% if value == 'small' or value == 'light' %}light{% elif value == 'quality' %}quality{% else %}balanced{% endif %}">
+                    <input type="radio" name="image_mode" value="{{ value }}" {% if value == "balanced" %}checked{% endif %}>
+                    <span>{{ label }}</span>
+                  </label>
+                {% endfor %}
+              </fieldset>
+              <div class="convert-action-row">
+                <button class="primary-action" type="submit">{% ui "start_task" %}</button>
+              </div>
+            </div>
           </form>
         </section>
 
@@ -282,7 +290,7 @@
             <h2>YouTube / TikTok</h2>
             <span>Shorts Preview MP4 Cover</span>
           </div>
-          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_youtube' %}">
+          <form class="job-form form-grid youtube-prepare-form" data-endpoint="{% url 'studio:start_youtube' %}">
             {% csrf_token %}
             <label class="field field-wide">
               <span>{% ui "link" %}</span>
@@ -295,25 +303,44 @@
                   <input type="hidden" name="mode" value="{{ value }}" data-custom-select-input>
                   <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false" data-mode-icon="classic">
                     <b>{{ label }}</b>
-                    <small>Balanced shorts for most videos</small>
+                    <small>{% ui "youtube_mode_regular_hint" %}</small>
                   </button>
                 {% endif %}
               {% endfor %}
-              <div class="custom-select-menu" data-custom-select-menu>
+              <div class="custom-select-menu youtube-mode-menu" data-custom-select-menu>
                 {% for value, label in youtube_modes %}
-                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}" data-mode-icon="{% if value == 'dynamic' %}dynamic{% elif value == 'podcast' %}podcast{% elif value == 'calm' %}calm{% else %}classic{% endif %}" data-select-hint="{% if value == 'dynamic' %}Fast cuts, stronger hooks and more motion{% elif value == 'podcast' %}Keeps speech flow for interviews and talk videos{% elif value == 'calm' %}Softer pacing for lessons, stories and quiet clips{% else %}Balanced shorts for most videos{% endif %}">
+                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}" data-mode-icon="{% if value == 'dynamic' %}dynamic{% elif value == 'podcast' %}podcast{% elif value == 'calm' %}calm{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}backstage{% elif value == 'download' %}download{% elif value == 'cover' %}cover{% else %}classic{% endif %}" data-select-hint="{% if value == 'dynamic' %}{% ui "youtube_mode_dynamic_hint" %}{% elif value == 'podcast' %}{% ui "youtube_mode_podcast_hint" %}{% elif value == 'calm' %}{% ui "youtube_mode_calm_hint" %}{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}{% ui "youtube_mode_backstage_hint" %}{% elif value == 'download' %}{% ui "youtube_mode_download_hint" %}{% elif value == 'cover' %}{% ui "youtube_mode_cover_hint" %}{% else %}{% ui "youtube_mode_regular_hint" %}{% endif %}">
                     <b>{{ label }}</b>
-                    <small>{% if value == 'dynamic' %}Fast cuts, stronger hooks and more motion{% elif value == 'podcast' %}Keeps speech flow for interviews and talk videos{% elif value == 'calm' %}Softer pacing for lessons, stories and quiet clips{% else %}Balanced shorts for most videos{% endif %}</small>
+                    <small>{% if value == 'dynamic' %}{% ui "youtube_mode_dynamic_hint" %}{% elif value == 'podcast' %}{% ui "youtube_mode_podcast_hint" %}{% elif value == 'calm' %}{% ui "youtube_mode_calm_hint" %}{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}{% ui "youtube_mode_backstage_hint" %}{% elif value == 'download' %}{% ui "youtube_mode_download_hint" %}{% elif value == 'cover' %}{% ui "youtube_mode_cover_hint" %}{% else %}{% ui "youtube_mode_regular_hint" %}{% endif %}</small>
                   </button>
                 {% endfor %}
               </div>
             </div>
+            <fieldset class="choice-row field-wide youtube-speed-field">
+              <legend>{% ui "youtube_processing_speed" %}</legend>
+              <label data-speed-icon="auto">
+                <input type="radio" name="processing_speed" value="auto" checked>
+                <span>{% ui "youtube_speed_auto" %}</span>
+              </label>
+              <label data-speed-icon="fast">
+                <input type="radio" name="processing_speed" value="fast">
+                <span>{% ui "youtube_speed_fast" %}</span>
+              </label>
+              <label data-speed-icon="smart">
+                <input type="radio" name="processing_speed" value="smart">
+                <span>{% ui "youtube_speed_smart" %}</span>
+              </label>
+              <label data-speed-icon="pro">
+                <input type="radio" name="processing_speed" value="pro">
+                <span>{% ui "youtube_speed_pro" %}</span>
+              </label>
+            </fieldset>
             <label class="field ai-option">
               <input type="checkbox" name="ai_improve" {% if openai_ready %}checked{% endif %}>
-              <span>AI improve cuts</span>
+              <span>{% ui "youtube_ai_improve_cuts" %}</span>
             </label>
             <label class="field">
-              <span>Shorts count</span>
+              <span>{% ui "youtube_shorts_count" %}</span>
               <input type="number" name="clip_count" value="10" min="1" max="{{ youtube_max_shorts }}" step="1">
             </label>
             <button class="primary-action" type="submit">{% ui "prepare" %}</button>
@@ -325,37 +352,45 @@
             <h2>{% ui "png_covers" %}</h2>
             <span>1280 x 720 &middot; {% ui "variants" %}</span>
           </div>
-          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_cover' %}">
+          <form class="job-form cover-compose" data-endpoint="{% url 'studio:start_cover' %}">
             {% csrf_token %}
-            <label class="field field-wide file-field">
-              <span>{% ui "video" %}</span>
-              <input type="file" name="file" accept="video/*" data-preview="cover-preview" required>
-              <span class="file-dropzone">
-                <span class="file-icon">MP4</span>
-                <span class="file-copy">
-                  <strong>{% ui "cover_video" %}</strong>
-                  <small>{% ui "cover_hint" %}</small>
+            <div class="cover-file-stack">
+              <label class="field file-field cover-file-field">
+                <span>{% ui "video" %}</span>
+                <input type="file" name="file" accept="video/*" data-preview="cover-preview" required>
+                <span class="file-dropzone">
+                  <span class="file-icon" data-icon="clapperboard"></span>
+                  <span class="file-copy">
+                    <strong>{% ui "cover_video" %}</strong>
+                    <small>{% ui "cover_hint" %}</small>
+                  </span>
+                  <span class="file-button">{% ui "choose_file" %}</span>
                 </span>
-                <span class="file-button">{% ui "choose_file" %}</span>
-              </span>
-              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
-            </label>
-            <div class="media-preview field-wide" id="cover-preview">
-              <span>{% ui "preview_video" %}</span>
+                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+              </label>
+              <div class="media-preview cover-preview" id="cover-preview">
+                <span>{% ui "preview_video" %}</span>
+              </div>
             </div>
-            <label class="field">
-              <span>{% ui "title" %}</span>
-              <input type="text" name="title" placeholder="{% ui "title" %}" maxlength="120">
-            </label>
-            <label class="field">
-              <span>{% ui "variants" %}</span>
-              <input type="number" name="variants" value="1" min="1" max="6">
-            </label>
-            <label class="field ai-option">
-              <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
-              <span>AI cover variant</span>
-            </label>
-            <button class="primary-action" type="submit">{% ui "make_covers" %}</button>
+            <div class="cover-settings">
+              <div class="cover-settings-grid">
+                <label class="field cover-title-field">
+                  <span>{% ui "title" %}</span>
+                  <input type="text" name="title" placeholder="{% ui "title" %}" maxlength="120">
+                </label>
+                <label class="field cover-variants-field">
+                  <span>{% ui "variants" %}</span>
+                  <input type="number" name="variants" value="1" min="1" max="6">
+                </label>
+              </div>
+              <label class="field ai-option cover-ai-option">
+                <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
+                <span>{% ui "ai_cover" %}</span>
+              </label>
+              <div class="cover-action-row">
+                <button class="primary-action" type="submit">{% ui "make_covers" %}</button>
+              </div>
+            </div>
           </form>
         </section>
 
@@ -364,74 +399,100 @@
             <h2>{% ui "subtitles" %}</h2>
             <span>MP4 + ASS</span>
           </div>
-          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_subtitles' %}">
+          <form class="job-form subtitles-compose tool-flow" data-endpoint="{% url 'studio:start_subtitles' %}" data-step-flow>
             {% csrf_token %}
-            <label class="field field-wide file-field">
-              <span>{% ui "video" %}</span>
-              <input type="file" name="file" accept="video/*" data-preview="subtitles-preview" required>
-              <span class="file-dropzone">
-                <span class="file-icon">CC</span>
-                <span class="file-copy">
-                  <strong>{% ui "video_with_sound" %}</strong>
-                  <small>{% ui "subtitle_hint" %}</small>
-                </span>
-                <span class="file-button">{% ui "choose_file" %}</span>
-              </span>
-              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
-            </label>
-            <div class="media-preview field-wide" id="subtitles-preview">
-              <span>{% ui "preview_video" %}</span>
+            <div class="tool-flow-steps" aria-label="{% ui "subtitles" %}">
+              <button class="is-active" type="button" data-flow-target="0"><span>1</span><b>{% ui "video" %}</b></button>
+              <button type="button" data-flow-target="1"><span>2</span><b>{% ui "style" %}</b></button>
+              <button type="button" data-flow-target="2"><span>3</span><b>{% ui "add_subtitles" %}</b></button>
             </div>
-            <label class="field">
-              <span>{% ui "name" %}</span>
-              <input type="text" name="title" placeholder="subtitled" maxlength="80">
-            </label>
-            <fieldset class="subtitle-style-picker field-wide" data-subtitle-style-picker>
-              <legend>{% ui "style" %}</legend>
-              <input type="hidden" name="style" value="pop" data-subtitle-style-input>
-              <button class="subtitle-style-current" type="button" data-subtitle-style-current aria-expanded="false">
-                <span class="subtitle-style-swatch is-pop"><b>Pop</b></span>
-                <span>
-                  <b>Pop</b>
-                  <small>Bright, punchy and easy to read.</small>
+            <section class="tool-flow-step is-active" data-flow-step="0">
+            <div class="subtitles-file-stack">
+              <label class="field file-field subtitles-file-field">
+                <span>{% ui "video" %}</span>
+                <input type="file" name="file" accept="video/*" data-preview="subtitles-preview" required>
+                <span class="file-dropzone">
+                  <span class="file-icon" data-icon="captions"></span>
+                  <span class="file-copy">
+                    <strong>{% ui "video_with_sound" %}</strong>
+                    <small>{% ui "subtitle_hint" %}</small>
+                  </span>
+                  <span class="file-button">{% ui "choose_file" %}</span>
                 </span>
-              </button>
-              <div class="subtitle-style-menu" data-subtitle-style-menu>
-                {% for style in subtitle_styles %}
-                  <article class="subtitle-style-card{% if style.code == 'pop' %} is-selected{% endif %}" data-subtitle-style-value="{{ style.code }}">
-                    <button type="button" data-subtitle-style-choice>
-                      <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
-                      <span class="subtitle-style-copy">
-                        <b>{{ style.label }}</b>
-                        <small>{{ style.short }}</small>
-                      </span>
-                    </button>
-                    <a href="{{ style.detail_url }}" target="_blank" rel="noopener" data-subtitle-style-details>{% ui "details" %}</a>
-                  </article>
-                {% endfor %}
+                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+              </label>
+              <div class="media-preview subtitles-preview" id="subtitles-preview">
+                <span>{% ui "preview_video" %}</span>
               </div>
-            </fieldset>
-            <fieldset class="subtitle-language-picker field-wide">
-              <legend>{% ui "language" %}</legend>
-              <div class="subtitle-language-grid">
-                {% for language in subtitle_languages %}
-                  <label class="subtitle-language-option">
-                    <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
-                    {% if language.flag %}
-                      <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
-                    {% else %}
-                      <span class="subtitle-language-auto" aria-hidden="true">A</span>
-                    {% endif %}
-                    <span>{{ language.label }}</span>
-                  </label>
-                {% endfor %}
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-next>{% ui "next" %}</button>
               </div>
-            </fieldset>
-            <label class="field ai-option">
-              <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
-              <span>AI transcription</span>
-            </label>
-            <button class="primary-action" type="submit">{% ui "add_subtitles" %}</button>
+            </section>
+            <section class="tool-flow-step" data-flow-step="1">
+            <div class="subtitles-settings">
+              <label class="field subtitles-name-field">
+                <span>{% ui "name" %}</span>
+                <input type="text" name="title" placeholder="subtitled" maxlength="80">
+              </label>
+              <fieldset class="subtitle-style-choice">
+                <legend>{% ui "style" %}</legend>
+                <div class="subtitle-style-choice-grid">
+                  {% for style in subtitle_styles %}
+                    <article class="subtitle-style-choice-card">
+                      <label>
+                        <input type="radio" name="style" value="{{ style.code }}" {% if style.code == "pop" %}checked{% endif %}>
+                        <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
+                        <span class="subtitle-style-choice-copy">
+                          <b>{{ style.label }}</b>
+                          <small>{{ style.short }}</small>
+                        </span>
+                      </label>
+                      <a href="{{ style.detail_url }}" target="_blank" rel="noopener">{% ui "details" %}</a>
+                    </article>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <fieldset class="subtitle-language-picker subtitles-language-picker">
+                <legend>{% ui "language" %}</legend>
+                <div class="subtitle-language-grid">
+                  {% for language in subtitle_languages %}
+                    <label class="subtitle-language-option">
+                      <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
+                      {% if language.flag %}
+                        <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
+                      {% else %}
+                        <span class="subtitle-language-auto" aria-hidden="true">A</span>
+                      {% endif %}
+                      <span>{{ language.label }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-prev>{% ui "back" %}</button>
+                <button class="secondary-action" type="button" data-flow-next>{% ui "next" %}</button>
+              </div>
+            </section>
+            <section class="tool-flow-step" data-flow-step="2">
+            <div class="subtitles-settings subtitles-final-step">
+              <label class="field subtitles-name-field">
+                <span>{% ui "name" %}</span>
+                <input type="text" name="title_preview" value="subtitled" maxlength="80" disabled>
+              </label>
+              <label class="field ai-option subtitles-ai-option">
+                <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
+                <span>AI transcription</span>
+              </label>
+              <div class="subtitles-action-row">
+                <button class="primary-action" type="submit">{% ui "add_subtitles" %}</button>
+              </div>
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-prev>{% ui "back" %}</button>
+              </div>
+            </section>
           </form>
         </section>
 
@@ -440,78 +501,102 @@
             <h2>{% ui "publication_package" %}</h2>
             <span>Video Cover Description ZIP</span>
           </div>
-          <form class="job-form form-grid" data-endpoint="{% url 'studio:start_package' %}">
+          <form class="job-form package-compose tool-flow" data-endpoint="{% url 'studio:start_package' %}" data-step-flow>
             {% csrf_token %}
-            <label class="field field-wide file-field">
-              <span>{% ui "video" %}</span>
-              <input type="file" name="file" accept="video/*" data-preview="package-preview" required>
-              <span class="file-dropzone">
-                <span class="file-icon">ZIP</span>
-                <span class="file-copy">
-                  <strong>{% ui "publication_material" %}</strong>
-                  <small>{% ui "package_hint" %}</small>
-                </span>
-                <span class="file-button">{% ui "choose_file" %}</span>
-              </span>
-              <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
-            </label>
-            <div class="media-preview field-wide" id="package-preview">
-              <span>{% ui "preview_video" %}</span>
+            <div class="tool-flow-steps" aria-label="{% ui "publication_package" %}">
+              <button class="is-active" type="button" data-flow-target="0"><span>1</span><b>{% ui "video" %}</b></button>
+              <button type="button" data-flow-target="1"><span>2</span><b>{% ui "subtitle_style" %}</b></button>
+              <button type="button" data-flow-target="2"><span>3</span><b>{% ui "assemble_package" %}</b></button>
             </div>
-            <label class="field">
-              <span>{% ui "name" %}</span>
-              <input type="text" name="title" placeholder="{% ui "publication_package" %}" maxlength="120">
-            </label>
-            <fieldset class="subtitle-style-picker field-wide" data-subtitle-style-picker>
-              <legend>{% ui "subtitle_style" %}</legend>
-              <input type="hidden" name="style" value="pop" data-subtitle-style-input>
-              <button class="subtitle-style-current" type="button" data-subtitle-style-current aria-expanded="false">
-                <span class="subtitle-style-swatch is-pop"><b>Pop</b></span>
-                <span>
-                  <b>Pop</b>
-                  <small>Bright, punchy and easy to read.</small>
+            <section class="tool-flow-step is-active" data-flow-step="0">
+            <div class="package-file-stack">
+              <label class="field file-field package-file-field">
+                <span>{% ui "video" %}</span>
+                <input type="file" name="file" accept="video/*" data-preview="package-preview" required>
+                <span class="file-dropzone">
+                  <span class="file-icon" data-icon="package"></span>
+                  <span class="file-copy">
+                    <strong>{% ui "publication_material" %}</strong>
+                    <small>{% ui "package_hint" %}</small>
+                  </span>
+                  <span class="file-button">{% ui "choose_file" %}</span>
                 </span>
-              </button>
-              <div class="subtitle-style-menu" data-subtitle-style-menu>
-                {% for style in subtitle_styles %}
-                  <article class="subtitle-style-card{% if style.code == 'pop' %} is-selected{% endif %}" data-subtitle-style-value="{{ style.code }}">
-                    <button type="button" data-subtitle-style-choice>
-                      <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
-                      <span class="subtitle-style-copy">
-                        <b>{{ style.label }}</b>
-                        <small>{{ style.short }}</small>
-                      </span>
-                    </button>
-                    <a href="{{ style.detail_url }}" target="_blank" rel="noopener" data-subtitle-style-details>{% ui "details" %}</a>
-                  </article>
-                {% endfor %}
+                <span class="file-meta" aria-live="polite">{% ui "file_not_selected" %}</span>
+              </label>
+              <div class="media-preview package-preview" id="package-preview">
+                <span>{% ui "preview_video" %}</span>
               </div>
-            </fieldset>
-            <fieldset class="subtitle-language-picker field-wide">
-              <legend>{% ui "language" %}</legend>
-              <div class="subtitle-language-grid">
-                {% for language in subtitle_languages %}
-                  <label class="subtitle-language-option">
-                    <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
-                    {% if language.flag %}
-                      <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
-                    {% else %}
-                      <span class="subtitle-language-auto" aria-hidden="true">A</span>
-                    {% endif %}
-                    <span>{{ language.label }}</span>
-                  </label>
-                {% endfor %}
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-next>{% ui "next" %}</button>
               </div>
-            </fieldset>
-            <label class="field ai-option">
-              <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
-              <span>AI transcription</span>
-            </label>
-            <label class="field ai-option">
-              <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
-              <span>AI cover variant</span>
-            </label>
-            <button class="primary-action" type="submit">{% ui "assemble_package" %}</button>
+            </section>
+            <section class="tool-flow-step" data-flow-step="1">
+            <div class="package-settings">
+              <label class="field package-name-field">
+                <span>{% ui "name" %}</span>
+                <input type="text" name="title" placeholder="{% ui "publication_package" %}" maxlength="120">
+              </label>
+              <fieldset class="subtitle-style-choice package-style-choice">
+                <legend>{% ui "subtitle_style" %}</legend>
+                <div class="subtitle-style-choice-grid">
+                  {% for style in subtitle_styles %}
+                    <article class="subtitle-style-choice-card">
+                      <label>
+                        <input type="radio" name="style" value="{{ style.code }}" {% if style.code == "pop" %}checked{% endif %}>
+                        <span class="subtitle-style-swatch is-{{ style.preview_class }}"><b>{{ style.preview_text }}</b></span>
+                        <span class="subtitle-style-choice-copy">
+                          <b>{{ style.label }}</b>
+                          <small>{{ style.short }}</small>
+                        </span>
+                      </label>
+                      <a href="{{ style.detail_url }}" target="_blank" rel="noopener">{% ui "details" %}</a>
+                    </article>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <fieldset class="subtitle-language-picker package-language-picker">
+                <legend>{% ui "language" %}</legend>
+                <div class="subtitle-language-grid">
+                  {% for language in subtitle_languages %}
+                    <label class="subtitle-language-option">
+                      <input type="radio" name="language" value="{{ language.code }}" {% if language.code == "auto" %}checked{% endif %}>
+                      {% if language.flag %}
+                        <img class="subtitle-language-flag" src="{{ language.flag }}" alt="">
+                      {% else %}
+                        <span class="subtitle-language-auto" aria-hidden="true">A</span>
+                      {% endif %}
+                      <span>{{ language.label }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-prev>{% ui "back" %}</button>
+                <button class="secondary-action" type="button" data-flow-next>{% ui "next" %}</button>
+              </div>
+            </section>
+            <section class="tool-flow-step" data-flow-step="2">
+            <div class="package-settings package-final-step">
+              <div class="package-ai-grid">
+                <label class="field ai-option package-ai-option" data-package-ai="transcription">
+                  <input type="checkbox" name="ai_transcription" {% if openai_ready %}checked{% endif %}>
+                  <span>AI transcription</span>
+                </label>
+                <label class="field ai-option package-ai-option" data-package-ai="cover">
+                  <input type="checkbox" name="ai_cover" {% if openai_ready %}checked{% endif %}>
+                  <span>{% ui "ai_cover" %}</span>
+                </label>
+              </div>
+              <div class="package-action-row">
+                <button class="primary-action" type="submit">{% ui "assemble_package" %}</button>
+              </div>
+            </div>
+              <div class="tool-flow-actions">
+                <button class="secondary-action" type="button" data-flow-prev>{% ui "back" %}</button>
+              </div>
+            </section>
           </form>
         </section>
 
@@ -558,9 +643,15 @@
                       <input type="text" name="position" placeholder="Product Designer">
                       <small>{% ui "resume_hint_position" %}</small>
                     </label>
-                    <label class="field resume-smart-field">
-                      <span>{% ui "contacts" %}</span>
-                      <input type="text" name="contact" placeholder="email, phone">
+                    <label class="field resume-smart-field resume-contact-field">
+                      <span>{% ui "merchant_phone" %}</span>
+                      <input type="tel" name="contact_phone" placeholder="+1 555 123 4567" inputmode="tel" autocomplete="tel">
+                      <small>{% ui "resume_hint_contacts" %}</small>
+                    </label>
+                    <label class="field resume-smart-field resume-contact-field">
+                      <span>{% ui "email" %}</span>
+                      <input type="email" name="contact_email" placeholder="name@example.com" autocomplete="email">
+                      <input type="hidden" name="contact" value="" data-resume-contact-combined>
                       <small>{% ui "resume_hint_contacts" %}</small>
                     </label>
                     <label class="field resume-smart-field">
@@ -571,8 +662,16 @@
                   </div>
                 </div>
                 <aside class="resume-coach">
-                  <strong>{% ui "resume_coach_title" %}</strong>
-                  <p>{% ui "resume_coach_profile" %}</p>
+                  <div class="resume-coach-head">
+                    <div>
+                      <strong>{% ui "resume_coach_title" %}</strong>
+                      <p>{% ui "resume_coach_profile" %}</p>
+                    </div>
+                    <div class="resume-score-block">
+                      <div class="resume-score" data-resume-score><span style="width: 0%"></span></div>
+                      <small data-resume-score-text>{% ui "resume_score_empty" %}</small>
+                    </div>
+                  </div>
                   {% if not is_guest %}
                     <div class="resume-account-card" data-resume-account-card>
                       <img src="{{ avatar_url }}" alt="">
@@ -583,8 +682,6 @@
                       <button class="secondary-action" type="button" data-resume-fill-account>{% ui "resume_fill_account" %}</button>
                     </div>
                   {% endif %}
-                  <div class="resume-score" data-resume-score><span style="width: 0%"></span></div>
-                  <small data-resume-score-text>{% ui "resume_score_empty" %}</small>
                 </aside>
               </div>
             </section>
@@ -597,15 +694,15 @@
                   </div>
                   <input type="hidden" name="resume_mode" value="" data-resume-mode-input>
                   <div class="resume-mode-picker" data-resume-mode-picker aria-label="{% ui "resume_mode_title" %}">
-                    <button type="button" data-resume-mode="it" data-mode-icon="code-2"><strong>IT</strong><small>Stack, API, systems</small></button>
-                    <button type="button" data-resume-mode="design" data-mode-icon="pen-tool"><strong>Design</strong><small>UX, product, UI</small></button>
-                    <button type="button" data-resume-mode="marketing" data-mode-icon="rocket"><strong>Marketing</strong><small>Growth, content, ads</small></button>
-                    <button type="button" data-resume-mode="management" data-mode-icon="clipboard-check"><strong>Management</strong><small>Delivery, teams, roadmap</small></button>
-                    <button type="button" data-resume-mode="student" data-mode-icon="graduation-cap"><strong>Student</strong><small>Junior, intern, learning</small></button>
-                    <button type="button" data-resume-mode="executive" data-mode-icon="landmark"><strong>Executive</strong><small>Leadership, strategy</small></button>
-                    <button type="button" data-resume-mode="data" data-mode-icon="chart-no-axes-column"><strong>Data</strong><small>Analytics, BI, insights</small></button>
-                    <button type="button" data-resume-mode="sales" data-mode-icon="hand-coins"><strong>Sales</strong><small>Clients, pipeline, revenue</small></button>
-                    <button type="button" data-resume-mode="content" data-mode-icon="file-pen-line"><strong>Content</strong><small>Copy, social, editorial</small></button>
+                    <button type="button" data-resume-mode="it" data-mode-icon="code-2"><strong>{% ui "resume_mode_it" %}</strong><small>{% ui "resume_mode_it_hint" %}</small></button>
+                    <button type="button" data-resume-mode="design" data-mode-icon="pen-tool"><strong>{% ui "resume_mode_design" %}</strong><small>{% ui "resume_mode_design_hint" %}</small></button>
+                    <button type="button" data-resume-mode="marketing" data-mode-icon="rocket"><strong>{% ui "resume_mode_marketing" %}</strong><small>{% ui "resume_mode_marketing_hint" %}</small></button>
+                    <button type="button" data-resume-mode="management" data-mode-icon="clipboard-check"><strong>{% ui "resume_mode_management" %}</strong><small>{% ui "resume_mode_management_hint" %}</small></button>
+                    <button type="button" data-resume-mode="student" data-mode-icon="graduation-cap"><strong>{% ui "resume_mode_student" %}</strong><small>{% ui "resume_mode_student_hint" %}</small></button>
+                    <button type="button" data-resume-mode="executive" data-mode-icon="landmark"><strong>{% ui "resume_mode_executive" %}</strong><small>{% ui "resume_mode_executive_hint" %}</small></button>
+                    <button type="button" data-resume-mode="data" data-mode-icon="chart-no-axes-column"><strong>{% ui "resume_mode_data" %}</strong><small>{% ui "resume_mode_data_hint" %}</small></button>
+                    <button type="button" data-resume-mode="sales" data-mode-icon="hand-coins"><strong>{% ui "resume_mode_sales" %}</strong><small>{% ui "resume_mode_sales_hint" %}</small></button>
+                    <button type="button" data-resume-mode="content" data-mode-icon="file-pen-line"><strong>{% ui "resume_mode_content" %}</strong><small>{% ui "resume_mode_content_hint" %}</small></button>
                   </div>
                 </div>
                 <aside class="resume-coach">

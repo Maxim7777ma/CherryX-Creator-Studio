@@ -1,0 +1,296 @@
+{% load static ui_i18n %}
+<!doctype html>
+<html lang="{{ interface_language }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ seo_title }} - CherryX Creator Studio</title>
+    <meta name="description" content="{{ seo_description }}">
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_my_works' %}">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260623-my-listings-7">
+  </head>
+  <body class="community-page community-manage-page">
+    <header class="community-nav">
+      <a class="section-home-link" href="{% url 'studio:landing' %}" data-icon="home" aria-label="CherryX home"></a>
+      <nav>
+        <a href="{% url 'studio:index' %}" data-icon="workspace">Live workspace</a>
+        <a href="{% url 'studio:community_market' %}" data-icon="store">{% ui "community_nav_market" %}</a>
+        <a href="{% url 'studio:community_publish' %}" data-icon="upload-cloud">{% ui "community_nav_publish" %}</a>
+        <a class="is-active" href="{% url 'studio:community_my_works' %}" data-icon="list-checks" aria-current="page">{% ui "community_my_listings" %}</a>
+      </nav>
+    </header>
+
+    <main class="community-shell community-manage-shell">
+      <section class="manage-topline">
+        <div>
+          <p>{% ui "community_creator_desk" %}</p>
+          <h1>{% ui "community_my_listings" %}</h1>
+          <span>{% ui "community_my_listings_copy" %}</span>
+        </div>
+        <a href="{% url 'studio:community_publish' %}" data-icon="plus">{% ui "community_new_listing" %}</a>
+      </section>
+
+      <section class="manage-metrics" aria-label="Listing stats">
+        <article><span>{% ui "community_metric_listings" %}</span><strong data-total-works>{{ totals.works }}</strong><small>{{ totals.published }} {% ui "community_status_public" %} / {{ totals.hidden }} {% ui "community_status_hidden" %}</small></article>
+        <article><span>{% ui "community_metric_views" %}</span><strong>{{ totals.views }}</strong><small>{% ui "community_metric_views_hint" %}</small></article>
+        <article><span>{% ui "community_metric_sales" %}</span><strong>{{ totals.purchases }}</strong><small>{{ totals.revenue }} CherryX {% ui "community_metric_earned" %}</small></article>
+        <article><span>{% ui "community_metric_downloads" %}</span><strong>{{ totals.downloads }}</strong><small>{% ui "community_metric_downloads_hint" %}</small></article>
+      </section>
+
+      <section class="manage-list" aria-label="Your community listings">
+        {% for item in items %}
+          <article
+            class="manage-listing {% if not item.is_published %}is-hidden{% endif %}"
+            data-listing-card
+            data-title="{{ item.work.title }}"
+            data-kind="{{ item.work.get_kind_display }}"
+            data-public-url="{{ item.public_url }}"
+            data-public-path="{{ item.public_path }}"
+            data-visibility-url="{% url 'studio:community_work_visibility' item.work.slug %}"
+            data-delete-url="{% url 'studio:community_work_delete' item.work.slug %}"
+            data-visibility-action="{{ item.visibility_action }}"
+            data-visibility-label="{% if item.is_published %}{% ui "community_action_hide" %}{% else %}{% ui "community_action_publish_again" %}{% endif %}"
+          >
+            <div class="manage-thumb" data-kind="{{ item.work.kind }}">
+              {% if item.preview_url %}
+                <img src="{{ item.preview_url }}" alt="">
+              {% else %}
+                <span>{{ item.work.get_kind_display }}</span>
+              {% endif %}
+            </div>
+            <div class="manage-copy">
+              <div class="manage-title-row">
+                <span class="manage-status" tabindex="0" data-status data-icon="{% if item.is_published %}globe-2{% else %}eye-off{% endif %}" data-label="{% if item.is_published %}{% ui "community_status_public" %}{% else %}{% ui "community_status_hidden" %}{% endif %}" aria-label="{% if item.is_published %}{% ui "community_status_public" %}{% else %}{% ui "community_status_hidden" %}{% endif %}"></span>
+                <span tabindex="0" data-icon="{% if item.work.kind == 'video' %}video{% elif item.work.kind == 'image' %}image{% elif item.work.kind == 'music' %}music-2{% else %}captions{% endif %}" data-label="{{ item.work.get_kind_display }}" aria-label="{{ item.work.get_kind_display }}"></span>
+                <span tabindex="0" data-icon="{% if item.work.is_paid %}badge-dollar-sign{% else %}gift{% endif %}" data-label="{% if item.work.is_paid %}{{ item.work.price_cherryx }} CherryX{% else %}{% ui "community_access_free" %}{% endif %}" aria-label="{% if item.work.is_paid %}{{ item.work.price_cherryx }} CherryX{% else %}{% ui "community_access_free" %}{% endif %}"></span>
+              </div>
+              <h2>{{ item.work.title }}</h2>
+              {% if item.work.excerpt %}<p>{{ item.work.excerpt|truncatechars:160 }}</p>{% endif %}
+              <dl>
+                <div><dt>{% ui "community_metric_views" %}</dt><dd data-stat="views">{{ item.work.view_count }}</dd></div>
+                <div><dt>{% ui "community_metric_sales" %}</dt><dd data-stat="sales">{{ item.purchases }}</dd></div>
+                <div><dt>{% ui "community_metric_revenue" %}</dt><dd data-stat="revenue">{{ item.revenue }} CX</dd></div>
+                <div><dt>{% ui "community_metric_downloads" %}</dt><dd data-stat="downloads">{{ item.work.download_count }}</dd></div>
+              </dl>
+            </div>
+            <div class="manage-actions">
+              <button type="button" data-open-listing-modal="stats" data-icon="bar-chart-3">{% ui "community_action_stats" %}</button>
+              <button type="button" data-open-listing-modal="visibility" data-icon="{% if item.is_published %}eye-off{% else %}eye{% endif %}" data-visibility-button>{% if item.is_published %}{% ui "community_action_hide" %}{% else %}{% ui "community_action_publish_again" %}{% endif %}</button>
+              <button class="is-danger" type="button" data-open-listing-modal="delete" data-icon="trash-2">{% ui "delete" %}</button>
+            </div>
+          </article>
+        {% empty %}
+          <article class="community-empty manage-empty">
+            <strong>{% ui "community_empty_title" %}</strong>
+            <p>{% ui "community_empty_copy" %}</p>
+            <a href="{% url 'studio:community_publish' %}">{% ui "community_empty_action" %}</a>
+          </article>
+        {% endfor %}
+      </section>
+    </main>
+
+    <div class="listing-modal" data-listing-modal hidden>
+      <button class="listing-modal-backdrop" type="button" data-close-listing-modal aria-label="Close"></button>
+      <section class="listing-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="listing-modal-title">
+        <header>
+          <div>
+            <span data-modal-kicker>{% ui "community_listing" %}</span>
+            <h2 id="listing-modal-title" data-modal-title>{% ui "community_listing_action" %}</h2>
+          </div>
+          <button type="button" data-close-listing-modal aria-label="Close"></button>
+        </header>
+        <div class="listing-modal-body" data-modal-body></div>
+        <footer hidden>
+          <button type="button" data-modal-primary></button>
+        </footer>
+      </section>
+    </div>
+    <div class="listing-toast" data-listing-toast hidden></div>
+
+    <script>
+      (() => {
+        const csrfToken = "{{ csrf_token }}";
+        const modal = document.querySelector("[data-listing-modal]");
+        const modalTitle = modal?.querySelector("[data-modal-title]");
+        const modalKicker = modal?.querySelector("[data-modal-kicker]");
+        const modalBody = modal?.querySelector("[data-modal-body]");
+        const modalPrimary = modal?.querySelector("[data-modal-primary]");
+        const toast = document.querySelector("[data-listing-toast]");
+        const i18n = {
+          pageOpens: "{% ui "community_metric_page_opens" %}",
+          purchases: "{% ui "community_metric_purchases" %}",
+          netCherryx: "{% ui "community_metric_net_cherryx" %}",
+          originalFiles: "{% ui "community_metric_original_files" %}",
+          publicUrl: "{% ui "community_public_url" %}",
+          copy: "{% ui "copy" %}",
+          copied: "{% ui "community_link_copied" %}",
+          copyFailed: "{% ui "community_copy_failed" %}",
+          hideCopy: "{% ui "community_hide_copy" %}",
+          publishCopy: "{% ui "community_publish_again_copy" %}",
+          deleteCopy: "{% ui "community_delete_copy" %}",
+          public: "{% ui "community_status_public" %}",
+          hidden: "{% ui "community_status_hidden" %}",
+          hideAction: "{% ui "community_action_hide" %}",
+          publishAction: "{% ui "community_action_publish_again" %}",
+          hiddenToast: "{% ui "community_hidden_toast" %}",
+          publishedToast: "{% ui "community_published_toast" %}",
+          deletedToast: "{% ui "community_deleted_toast" %}",
+        };
+        let activeCard = null;
+        let activeMode = "";
+
+        const showToast = (message, isError = false) => {
+          if (!toast) return;
+          toast.textContent = message;
+          toast.classList.toggle("is-error", isError);
+          toast.hidden = false;
+          clearTimeout(showToast.timer);
+          showToast.timer = setTimeout(() => { toast.hidden = true; }, 3200);
+        };
+
+        const closeModal = () => {
+          if (!modal) return;
+          modal.hidden = true;
+          document.body.classList.remove("listing-modal-open");
+          activeCard = null;
+          activeMode = "";
+        };
+
+        const copyText = async (value) => {
+          try {
+            await navigator.clipboard.writeText(value);
+            showToast(i18n.copied);
+          } catch (error) {
+            showToast(i18n.copyFailed, true);
+          }
+        };
+
+        const statsMarkup = (card) => {
+          const stat = (name) => card.querySelector(`[data-stat="${name}"]`)?.textContent || "0";
+          const status = card.querySelector("[data-status]")?.dataset.label || "Listing";
+          const price = [...card.querySelectorAll(".manage-title-row span")].at(-1)?.dataset.label || "";
+          return `
+            <div class="listing-modal-summary">
+              <span>${status}</span>
+              <span>${card.dataset.kind || "Listing"}</span>
+              ${price ? `<span>${price}</span>` : ""}
+            </div>
+            <div class="listing-stat-grid">
+              <article><span>{% ui "community_metric_views" %}</span><strong>${stat("views")}</strong><small>${i18n.pageOpens}</small></article>
+              <article><span>{% ui "community_metric_sales" %}</span><strong>${stat("sales")}</strong><small>${i18n.purchases}</small></article>
+              <article><span>{% ui "community_metric_revenue" %}</span><strong>${stat("revenue")}</strong><small>${i18n.netCherryx}</small></article>
+              <article><span>{% ui "community_metric_downloads" %}</span><strong>${stat("downloads")}</strong><small>${i18n.originalFiles}</small></article>
+            </div>
+            <label class="listing-link-field">
+              <span>${i18n.publicUrl}</span>
+              <div>
+                <input readonly value="${card.dataset.publicUrl || ""}">
+                <button type="button" data-copy-inline>${i18n.copy}</button>
+              </div>
+            </label>
+          `;
+        };
+
+        const openModal = (card, mode) => {
+          if (!modal || !modalTitle || !modalBody || !modalPrimary || !modalKicker) return;
+          activeCard = card;
+          activeMode = mode;
+          modalKicker.textContent = card.dataset.kind || "Listing";
+          modalTitle.textContent = card.dataset.title || "Listing";
+          modalPrimary.className = "";
+          modalPrimary.hidden = false;
+
+          if (mode === "stats") {
+            modalBody.innerHTML = statsMarkup(card);
+            modalPrimary.closest("footer").hidden = true;
+          } else if (mode === "visibility") {
+            const hiding = card.dataset.visibilityAction === "hide";
+            modalBody.innerHTML = `<p class="listing-modal-note">${hiding ? i18n.hideCopy : i18n.publishCopy}</p>`;
+            modalPrimary.textContent = card.dataset.visibilityLabel || "Update visibility";
+          } else if (mode === "delete") {
+            modalBody.innerHTML = `<p class="listing-modal-note is-danger">${i18n.deleteCopy}</p>`;
+            modalPrimary.textContent = "{% ui "community_delete_forever" %}";
+            modalPrimary.classList.add("is-danger");
+          }
+
+          if (mode !== "stats") {
+            modalPrimary.closest("footer").hidden = false;
+          }
+
+          modal.hidden = false;
+          document.body.classList.add("listing-modal-open");
+          modalBody.querySelector("[data-copy-inline]")?.addEventListener("click", () => copyText(card.dataset.publicUrl || ""));
+          modalPrimary.focus();
+        };
+
+        const postAction = async (url, formData = new FormData()) => {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "X-CSRFToken": csrfToken, "X-Requested-With": "XMLHttpRequest" },
+            body: formData,
+          });
+          const payload = await response.json().catch(() => ({ ok: false, message: "Server returned an invalid response." }));
+          if (!response.ok || !payload.ok) throw new Error(payload.message || "Action failed.");
+          return payload;
+        };
+
+        document.querySelectorAll("[data-open-listing-modal]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const card = button.closest("[data-listing-card]");
+            if (card) openModal(card, button.dataset.openListingModal);
+          });
+        });
+
+        modal?.querySelectorAll("[data-close-listing-modal]").forEach((button) => button.addEventListener("click", closeModal));
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && modal && !modal.hidden) closeModal();
+        });
+
+        modalPrimary?.addEventListener("click", async () => {
+          if (!activeCard || !activeMode) return;
+          if (activeMode === "stats") {
+            copyText(activeCard.dataset.publicUrl || "");
+            return;
+          }
+          modalPrimary.disabled = true;
+          try {
+            if (activeMode === "visibility") {
+              const formData = new FormData();
+              formData.append("action", activeCard.dataset.visibilityAction || "hide");
+              const payload = await postAction(activeCard.dataset.visibilityUrl, formData);
+              activeCard.classList.toggle("is-hidden", !payload.is_published);
+              activeCard.dataset.visibilityAction = payload.visibility_action;
+              activeCard.dataset.visibilityLabel = payload.is_published ? i18n.hideAction : i18n.publishAction;
+              activeCard.dataset.publicUrl = payload.public_url || activeCard.dataset.publicUrl;
+              const status = activeCard.querySelector("[data-status]");
+              if (status) {
+                const label = payload.is_published ? i18n.public : i18n.hidden;
+                status.dataset.label = label;
+                status.dataset.icon = payload.is_published ? "globe-2" : "eye-off";
+                status.setAttribute("aria-label", label);
+              }
+              const button = activeCard.querySelector("[data-visibility-button]");
+              if (button) {
+                button.textContent = activeCard.dataset.visibilityLabel;
+                button.dataset.icon = payload.is_published ? "eye-off" : "eye";
+              }
+              showToast(payload.is_published ? i18n.publishedToast : i18n.hiddenToast);
+              closeModal();
+            } else if (activeMode === "delete") {
+              const payload = await postAction(activeCard.dataset.deleteUrl);
+              activeCard.remove();
+              const total = document.querySelector("[data-total-works]");
+              if (total) total.textContent = String(Math.max(0, Number(total.textContent || "0") - 1));
+              showToast(i18n.deletedToast);
+              closeModal();
+            }
+          } catch (error) {
+            showToast(error.message || "Action failed.", true);
+          } finally {
+            modalPrimary.disabled = false;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

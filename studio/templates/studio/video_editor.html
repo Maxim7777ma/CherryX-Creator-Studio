@@ -5,7 +5,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% ui "video_editor_nav" %} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Bitter:wght@400;700;900&family=Caveat:wght@400;700&family=Cinzel:wght@400;700;900&family=Comfortaa:wght@400;700&family=DM+Sans:wght@400;700;900&family=Fira+Code:wght@400;700&family=IBM+Plex+Sans:wght@400;700;900&family=IBM+Plex+Serif:wght@400;700&family=Inter:wght@400;700;900&family=Josefin+Sans:wght@400;700&family=Lato:wght@400;700;900&family=Lora:wght@400;700&family=Manrope:wght@400;700;900&family=Merriweather:wght@400;700;900&family=Montserrat:wght@400;700;900&family=Nunito:wght@400;700;900&family=Open+Sans:wght@400;700;800&family=Oswald:wght@400;700&family=Pacifico&family=Playfair+Display:wght@400;700;900&family=Poppins:wght@400;700;900&family=Raleway:wght@400;700;900&family=Roboto:wght@400;700;900&family=Roboto+Condensed:wght@400;700;900&family=Roboto+Mono:wght@400;700&family=Rubik:wght@400;700;900&family=Russo+One&family=Source+Sans+3:wght@400;700;900&family=Space+Grotesk:wght@400;700&family=Ubuntu:wght@400;700&display=swap">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260625-tab-nav-no-scrollbar">
     <script defer src="{% static 'studio/sharing.js' %}"></script>
   </head>
   <body class="theme-{{ theme_mode }} detail-page video-editor-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
@@ -120,12 +123,17 @@
           <span>{% ui "clip" %}</span>
           <strong data-tool-title>{% ui "project" %}</strong>
         </div>
-        <div class="editor-property-tabs">
-          <button class="is-active" type="button" data-panel-tab="trim">{% ui "clip" %}</button>
-          <button type="button" data-panel-tab="filter">{% ui "style" %}</button>
-          <button type="button" data-panel-tab="animation">{% ui "animation" %}</button>
-          <button type="button" data-panel-tab="audio">{% ui "audio" %}</button>
-          <button type="button" data-panel-tab="media">{% ui "media" %}</button>
+        <div class="editor-property-tab-strip">
+          <button class="editor-property-tab-nav" type="button" data-tab-scroll="-1" data-icon="chevron-left" aria-label="Previous"></button>
+          <div class="editor-property-tabs" data-property-tabs>
+            <button class="is-active" type="button" data-panel-tab="trim">{% ui "clip" %}</button>
+            <button type="button" data-panel-tab="text">{% ui "text" %}</button>
+            <button type="button" data-panel-tab="filter">{% ui "style" %}</button>
+            <button type="button" data-panel-tab="animation">{% ui "animation" %}</button>
+            <button type="button" data-panel-tab="audio">{% ui "audio" %}</button>
+            <button type="button" data-panel-tab="media">{% ui "media" %}</button>
+          </div>
+          <button class="editor-property-tab-nav" type="button" data-tab-scroll="1" data-icon="chevron-right" aria-label="Next"></button>
         </div>
 
         <section class="editor-tool-panel is-active" data-tool-panel="trim">
@@ -142,8 +150,8 @@
             <label><span>{% ui "start" %}</span><input type="number" min="0" step="0.05" data-clip-start></label>
             <label><span>{% ui "duration" %}</span><input type="number" min="0.25" step="0.05" data-clip-duration></label>
             <label><span>{% ui "end" %}</span><input type="number" min="0" step="0.05" data-clip-end></label>
-            <label><span>{% ui "position_x" %}</span><input type="number" min="0" max="100" step="1" data-clip-x></label>
-            <label><span>{% ui "position_y" %}</span><input type="number" min="0" max="100" step="1" data-clip-y></label>
+            <label><span>{% ui "position_x" %}</span><input type="number" min="-140" max="240" step="1" data-clip-x></label>
+            <label><span>{% ui "position_y" %}</span><input type="number" min="-140" max="240" step="1" data-clip-y></label>
             <label><span>{% ui "zoom" %}</span><input type="number" min="8" max="300" step="1" data-clip-scale></label>
             <label><span>{% ui "rotation" %}</span><input type="number" min="-360" max="360" step="1" data-clip-rotation></label>
           </div>
@@ -207,11 +215,19 @@
           </button>
           <label class="editor-auto-subtitle-language">
             <span>{% ui "language" %}</span>
-            <select data-auto-subtitles-language>
-              {% for language in subtitle_languages %}
-                <option value="{{ language.code }}">{{ language.label }}</option>
-              {% endfor %}
-            </select>
+            <input type="hidden" value="{{ subtitle_languages.0.code }}" data-auto-subtitles-language>
+            <div class="editor-language-choice" data-auto-subtitle-language-choice>
+              <button type="button" data-language-current aria-haspopup="listbox" aria-expanded="false">
+                <b>{{ subtitle_languages.0.label }}</b>
+              </button>
+              <div data-language-options role="listbox">
+                {% for language in subtitle_languages %}
+                  <button type="button" role="option" data-language-value="{{ language.code }}" aria-selected="{% if forloop.first %}true{% else %}false{% endif %}" class="{% if forloop.first %}is-selected{% endif %}">
+                    {{ language.label }}
+                  </button>
+                {% endfor %}
+              </div>
+            </div>
           </label>
           <small class="editor-auto-caption-status" data-auto-subtitles-status>{% ui "auto_subtitles_hint" %}</small>
           <label class="editor-audio-picker editor-file-picker">
@@ -235,12 +251,61 @@
           </label>
           <label>
             <span>{% ui "font" %}</span>
-            <select data-text-font>
-              <option value="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">{% ui "system_font" %}</option>
-              <option value="Arial, sans-serif">Arial</option>
-              <option value="Georgia, serif">Georgia</option>
-              <option value="'Courier New', monospace">{% ui "mono" %}</option>
-            </select>
+            <input type="hidden" value="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" data-text-font>
+            <div class="editor-font-choice" data-text-font-choice>
+              <button type="button" data-font-current aria-haspopup="listbox" aria-expanded="false">
+                <b>{% ui "system_font" %}</b>
+              </button>
+              <div data-font-menu>
+                <input type="search" placeholder="{% ui "search" %}" data-font-search aria-label="{% ui "search" %}">
+                <div data-font-options role="listbox">
+                  <button type="button" role="option" data-font-value="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" data-font-label="{% ui "system_font" %}" class="is-selected" aria-selected="true" style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">{% ui "system_font" %}</button>
+                  <button type="button" role="option" data-font-value="'Segoe UI', Arial, sans-serif" data-font-label="Segoe UI" style="font-family: 'Segoe UI', Arial, sans-serif;">Segoe UI</button>
+                  <button type="button" role="option" data-font-value="Arial, sans-serif" data-font-label="Arial" style="font-family: Arial, sans-serif;">Arial</button>
+                  <button type="button" role="option" data-font-value="Verdana, Geneva, sans-serif" data-font-label="Verdana" style="font-family: Verdana, Geneva, sans-serif;">Verdana</button>
+                  <button type="button" role="option" data-font-value="Tahoma, Geneva, sans-serif" data-font-label="Tahoma" style="font-family: Tahoma, Geneva, sans-serif;">Tahoma</button>
+                  <button type="button" role="option" data-font-value="'Trebuchet MS', Arial, sans-serif" data-font-label="Trebuchet MS" style="font-family: 'Trebuchet MS', Arial, sans-serif;">Trebuchet MS</button>
+                  <button type="button" role="option" data-font-value="Inter, system-ui, sans-serif" data-font-label="Inter" style="font-family: Inter, system-ui, sans-serif;">Inter</button>
+                  <button type="button" role="option" data-font-value="'DM Sans', Arial, sans-serif" data-font-label="DM Sans" style="font-family: 'DM Sans', Arial, sans-serif;">DM Sans</button>
+                  <button type="button" role="option" data-font-value="Manrope, Arial, sans-serif" data-font-label="Manrope" style="font-family: Manrope, Arial, sans-serif;">Manrope</button>
+                  <button type="button" role="option" data-font-value="Roboto, Arial, sans-serif" data-font-label="Roboto" style="font-family: Roboto, Arial, sans-serif;">Roboto</button>
+                  <button type="button" role="option" data-font-value="'Open Sans', Arial, sans-serif" data-font-label="Open Sans" style="font-family: 'Open Sans', Arial, sans-serif;">Open Sans</button>
+                  <button type="button" role="option" data-font-value="'Source Sans 3', Arial, sans-serif" data-font-label="Source Sans 3" style="font-family: 'Source Sans 3', Arial, sans-serif;">Source Sans 3</button>
+                  <button type="button" role="option" data-font-value="Lato, Arial, sans-serif" data-font-label="Lato" style="font-family: Lato, Arial, sans-serif;">Lato</button>
+                  <button type="button" role="option" data-font-value="Montserrat, Arial, sans-serif" data-font-label="Montserrat" style="font-family: Montserrat, Arial, sans-serif;">Montserrat</button>
+                  <button type="button" role="option" data-font-value="Poppins, Arial, sans-serif" data-font-label="Poppins" style="font-family: Poppins, Arial, sans-serif;">Poppins</button>
+                  <button type="button" role="option" data-font-value="Raleway, Arial, sans-serif" data-font-label="Raleway" style="font-family: Raleway, Arial, sans-serif;">Raleway</button>
+                  <button type="button" role="option" data-font-value="Rubik, Arial, sans-serif" data-font-label="Rubik" style="font-family: Rubik, Arial, sans-serif;">Rubik</button>
+                  <button type="button" role="option" data-font-value="Nunito, Arial, sans-serif" data-font-label="Nunito" style="font-family: Nunito, Arial, sans-serif;">Nunito</button>
+                  <button type="button" role="option" data-font-value="Ubuntu, Arial, sans-serif" data-font-label="Ubuntu" style="font-family: Ubuntu, Arial, sans-serif;">Ubuntu</button>
+                  <button type="button" role="option" data-font-value="'IBM Plex Sans', Arial, sans-serif" data-font-label="IBM Plex Sans" style="font-family: 'IBM Plex Sans', Arial, sans-serif;">IBM Plex Sans</button>
+                  <button type="button" role="option" data-font-value="'Space Grotesk', Arial, sans-serif" data-font-label="Space Grotesk" style="font-family: 'Space Grotesk', Arial, sans-serif;">Space Grotesk</button>
+                  <button type="button" role="option" data-font-value="'Josefin Sans', Arial, sans-serif" data-font-label="Josefin Sans" style="font-family: 'Josefin Sans', Arial, sans-serif;">Josefin Sans</button>
+                  <button type="button" role="option" data-font-value="'Roboto Condensed', Arial, sans-serif" data-font-label="Roboto Condensed" style="font-family: 'Roboto Condensed', Arial, sans-serif;">Roboto Condensed</button>
+                  <button type="button" role="option" data-font-value="Oswald, Arial, sans-serif" data-font-label="Oswald" style="font-family: Oswald, Arial, sans-serif;">Oswald</button>
+                  <button type="button" role="option" data-font-value="'Bebas Neue', Impact, sans-serif" data-font-label="Bebas Neue" style="font-family: 'Bebas Neue', Impact, sans-serif;">Bebas Neue</button>
+                  <button type="button" role="option" data-font-value="Anton, Impact, sans-serif" data-font-label="Anton" style="font-family: Anton, Impact, sans-serif;">Anton</button>
+                  <button type="button" role="option" data-font-value="'Russo One', Impact, sans-serif" data-font-label="Russo One" style="font-family: 'Russo One', Impact, sans-serif;">Russo One</button>
+                  <button type="button" role="option" data-font-value="Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" data-font-label="Impact" style="font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;">Impact</button>
+                  <button type="button" role="option" data-font-value="Georgia, serif" data-font-label="Georgia" style="font-family: Georgia, serif;">Georgia</button>
+                  <button type="button" role="option" data-font-value="'Times New Roman', Times, serif" data-font-label="Times New Roman" style="font-family: 'Times New Roman', Times, serif;">Times New Roman</button>
+                  <button type="button" role="option" data-font-value="Playfair Display, Georgia, serif" data-font-label="Playfair Display" style="font-family: Playfair Display, Georgia, serif;">Playfair Display</button>
+                  <button type="button" role="option" data-font-value="Merriweather, Georgia, serif" data-font-label="Merriweather" style="font-family: Merriweather, Georgia, serif;">Merriweather</button>
+                  <button type="button" role="option" data-font-value="Lora, Georgia, serif" data-font-label="Lora" style="font-family: Lora, Georgia, serif;">Lora</button>
+                  <button type="button" role="option" data-font-value="Bitter, Georgia, serif" data-font-label="Bitter" style="font-family: Bitter, Georgia, serif;">Bitter</button>
+                  <button type="button" role="option" data-font-value="'IBM Plex Serif', Georgia, serif" data-font-label="IBM Plex Serif" style="font-family: 'IBM Plex Serif', Georgia, serif;">IBM Plex Serif</button>
+                  <button type="button" role="option" data-font-value="Cinzel, Georgia, serif" data-font-label="Cinzel" style="font-family: Cinzel, Georgia, serif;">Cinzel</button>
+                  <button type="button" role="option" data-font-value="Comfortaa, Arial, sans-serif" data-font-label="Comfortaa" style="font-family: Comfortaa, Arial, sans-serif;">Comfortaa</button>
+                  <button type="button" role="option" data-font-value="Pacifico, cursive" data-font-label="Pacifico" style="font-family: Pacifico, cursive;">Pacifico</button>
+                  <button type="button" role="option" data-font-value="Caveat, cursive" data-font-label="Caveat" style="font-family: Caveat, cursive;">Caveat</button>
+                  <button type="button" role="option" data-font-value="'Courier New', monospace" data-font-label="{% ui "mono" %}" style="font-family: 'Courier New', monospace;">{% ui "mono" %}</button>
+                  <button type="button" role="option" data-font-value="Consolas, 'Courier New', monospace" data-font-label="Consolas" style="font-family: Consolas, 'Courier New', monospace;">Consolas</button>
+                  <button type="button" role="option" data-font-value="'Lucida Console', Monaco, monospace" data-font-label="Lucida Console" style="font-family: 'Lucida Console', Monaco, monospace;">Lucida Console</button>
+                  <button type="button" role="option" data-font-value="'Roboto Mono', 'Courier New', monospace" data-font-label="Roboto Mono" style="font-family: 'Roboto Mono', 'Courier New', monospace;">Roboto Mono</button>
+                  <button type="button" role="option" data-font-value="'Fira Code', 'Courier New', monospace" data-font-label="Fira Code" style="font-family: 'Fira Code', 'Courier New', monospace;">Fira Code</button>
+                </div>
+              </div>
+            </div>
           </label>
           <label><span>{% ui "font_size" %} <b data-text-size-label>22</b></span><input type="range" min="12" max="72" value="22" data-text-size></label>
           <div class="editor-color-row">
@@ -343,11 +408,15 @@
       </aside>
       <div class="editor-asset-preview" data-asset-preview hidden></div>
       <div class="editor-context-menu" data-clip-menu hidden>
-        <button type="button" data-menu-action="duplicate">{% ui "duplicate" %}</button>
-        <button type="button" data-menu-action="split">{% ui "split_clip" %}</button>
-        <button type="button" data-menu-action="front">{% ui "bring_forward" %}</button>
-        <button type="button" data-menu-action="back">{% ui "send_backward" %}</button>
-        <button type="button" data-menu-action="delete">{% ui "delete" %}</button>
+        <button type="button" data-menu-action="edit-text" data-text-menu-only data-icon="type">{% ui "text" %}</button>
+        <button type="button" data-menu-action="preset-caption" data-text-menu-only data-icon="captions">CC</button>
+        <button type="button" data-menu-action="preset-clean" data-text-menu-only data-icon="sparkles">Clean</button>
+        <span data-text-menu-only></span>
+        <button type="button" data-menu-action="duplicate" data-icon="copy-plus">{% ui "duplicate" %}</button>
+        <button type="button" data-menu-action="split" data-non-text-menu-only data-icon="scissors">{% ui "split_clip" %}</button>
+        <button type="button" data-menu-action="front" data-icon="bring-to-front">{% ui "bring_forward" %}</button>
+        <button type="button" data-menu-action="back" data-icon="send-to-back">{% ui "send_backward" %}</button>
+        <button type="button" data-menu-action="delete" data-icon="trash-2">{% ui "delete" %}</button>
       </div>
     </main>
 
@@ -368,6 +437,6 @@
     {{ app_messages|json_script:"app-messages" }}
     {% include "studio/_share_modal.html" with share_resource_type="video_project" share_resource_id=current_video_project.id %}
     <input type="file" accept="image/*,application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.txt" data-image-file hidden>
-    <script defer src="{% static 'studio/video_editor.js' %}?v=20260622-video-reframe-fit"></script>
+    <script defer src="{% static 'studio/video_editor.js' %}?v=20260625-tab-nav-no-scrollbar"></script>
   </body>
 </html>

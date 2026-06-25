@@ -313,6 +313,61 @@ DOCS_CONTENT["hy"].update({
 })
 
 
+_MARKETPLACE_DOC_SECTION: dict[str, tuple[str, list[str], list[tuple[str, str]]]] = {
+    "en": (
+        "13. CherryX market and selling works",
+        [
+            "CherryX market is the public area where creators can publish digital works from the workspace and sell paid originals with CherryX.",
+            "Use it for videos, images, music, text works, learning materials or prepared publication assets when you want a public listing, protected preview, stats and account-based sales tracking.",
+        ],
+        [
+            ("Publish", "Open the publish page, choose the work type, add a clear title, description, preview, price and license notes."),
+            ("Protect originals", "Free works can be open; paid works should use a preview while original files stay available after purchase where supported."),
+            ("Manage", "Use My listings to view stats, copy the public link, hide a listing, publish again or delete the work from the system."),
+        ],
+    ),
+    "ru": (
+        "13. Маркет CherryX и продажа работ",
+        [
+            "CherryX market - публичный раздел, где авторы могут публиковать цифровые работы из рабочего пространства и продавать платные оригиналы за CherryX.",
+            "Используйте его для видео, изображений, музыки, текстовых работ, обучающих материалов или подготовленных публикационных пакетов, когда нужны публичное объявление, защищённое превью, статистика и учёт продаж в аккаунте.",
+        ],
+        [
+            ("Публикация", "Откройте страницу публикации, выберите тип работы, добавьте понятное название, описание, превью, цену и условия лицензии."),
+            ("Защита оригиналов", "Бесплатные работы можно открыть полностью; для платных работ лучше показывать превью, а оригинальные файлы выдавать после покупки, если функция поддерживается."),
+            ("Управление", "В Моих объявлениях можно смотреть статистику, копировать публичную ссылку, скрывать объявление, публиковать повторно или удалять работу из системы."),
+        ],
+    ),
+    "uk": (
+        "13. Маркет CherryX і продаж робіт",
+        [
+            "CherryX market - публічний розділ, де автори можуть публікувати цифрові роботи з робочого простору та продавати платні оригінали за CherryX.",
+            "Використовуйте його для відео, зображень, музики, текстових робіт, навчальних матеріалів або підготовлених публікаційних пакетів, коли потрібні публічне оголошення, захищене прев'ю, статистика та облік продажів в акаунті.",
+        ],
+        [
+            ("Публікація", "Відкрийте сторінку публікації, виберіть тип роботи, додайте зрозумілу назву, опис, прев'ю, ціну та умови ліцензії."),
+            ("Захист оригіналів", "Безкоштовні роботи можна відкривати повністю; для платних робіт краще показувати прев'ю, а оригінальні файли видавати після покупки, якщо функція підтримується."),
+            ("Керування", "У Моїх оголошеннях можна дивитися статистику, копіювати публічне посилання, приховувати оголошення, публікувати повторно або видаляти роботу із системи."),
+        ],
+    ),
+}
+
+
+_MARKETPLACE_DOC_ACTIONS: dict[str, dict[str, str]] = {
+    "en": {"market": "Open marketplace", "publish": "Publish work", "manage": "My listings"},
+    "ru": {"market": "Открыть маркет", "publish": "Опубликовать", "manage": "Мои объявления"},
+    "uk": {"market": "Відкрити маркет", "publish": "Опублікувати", "manage": "Мої оголошення"},
+}
+
+
 def documentation_content(language: str | None) -> dict[str, object]:
     language = clean_language(language)
-    return DOCS_CONTENT.get(language) or DOCS_CONTENT["en"]
+    base = DOCS_CONTENT.get(language) or DOCS_CONTENT["en"]
+    content = {**base}
+    sections = list(content.get("sections", []))
+    marketplace_section = _MARKETPLACE_DOC_SECTION.get(language) or _MARKETPLACE_DOC_SECTION["en"]
+    if not any("market" in str(section[0]).lower() for section in sections):
+        sections.append(marketplace_section)
+    content["sections"] = sections
+    content["marketplace_actions"] = _MARKETPLACE_DOC_ACTIONS.get(language) or _MARKETPLACE_DOC_ACTIONS["en"]
+    return content

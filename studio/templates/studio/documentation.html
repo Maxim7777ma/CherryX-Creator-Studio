@@ -44,6 +44,11 @@
           <div class="docs-actions">
             <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
             <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+            {% if docs.marketplace_actions %}
+              <a class="secondary-link" data-icon="store" href="{% url 'studio:community_market' %}">{{ docs.marketplace_actions.market }}</a>
+              <a class="secondary-link" data-icon="upload-cloud" href="{% url 'studio:community_publish' %}">{{ docs.marketplace_actions.publish }}</a>
+              <a class="secondary-link" data-icon="list-checks" href="{% url 'studio:community_my_works' %}">{{ docs.marketplace_actions.manage }}</a>
+            {% endif %}
           </div>
         </div>
         <div class="docs-hero-visual" aria-hidden="true">
@@ -55,7 +60,7 @@
             <span data-icon="video">Video</span>
             <span data-icon="image">Covers</span>
             <span data-icon="captions">Subtitles</span>
-            <span data-icon="file-text">PDF</span>
+            <span data-icon="store">Market</span>
           </div>
         </div>
       </section>

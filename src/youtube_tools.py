@@ -11,9 +11,12 @@ import random
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Callable
 import zipfile
 
 import cv2
@@ -295,9 +298,28 @@ def calculate_smart_clip_starts(
     )
     if not ranked_starts:
         return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
+    return select_smart_clip_starts_from_candidates(ranked_starts, duration_seconds, max_clips, clip_seconds)
+
+
+def select_smart_clip_starts_from_candidates(
+    ranked_starts: list[dict[str, object]],
+    duration_seconds: float,
+    max_clips: int,
+    clip_seconds: int,
+) -> list[int]:
+    if not ranked_starts:
+        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
     min_gap = max(int(clip_seconds * 0.82), min(clip_seconds + 12, 65))
+    scored_starts: list[tuple[int, float]] = []
+    for item in ranked_starts:
+        try:
+            scored_starts.append((int(item["start"]), float(item.get("score") or 0.0)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not scored_starts:
+        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
     selected = _select_diverse_ranked_starts(
-        [(int(item["start"]), float(item["score"])) for item in ranked_starts],
+        scored_starts,
         max_clips,
         min_gap,
         int(duration_seconds),
@@ -321,6 +343,8 @@ def rank_smart_clip_candidates(
     sample_limit: int = 360,
     face_detection_enabled: bool = True,
     selection_mode: str = "regular",
+    progress_callback: Callable[[int, int], None] | None = None,
+    max_analysis_seconds: float | None = None,
 ) -> list[dict[str, object]]:
     duration = int(duration_seconds)
     if duration < 10:
@@ -330,9 +354,9 @@ def rank_smart_clip_candidates(
     if duration <= max_candidates * clip_seconds:
         return [{"start": start, "score": round(1000.0 - index, 3), "source": "sequential"} for index, start in enumerate(base_starts)]
 
-    sample_limit = max(120, min(1200, sample_limit))
+    sample_limit = max(80, min(260 if face_detection_enabled else 420, sample_limit))
     step = max(2, int(duration / sample_limit))
-    scores = _score_video_moments(source, duration, step, face_detection_enabled, selection_mode)
+    scores = _score_video_moments(source, duration, step, face_detection_enabled, selection_mode, progress_callback, max_analysis_seconds)
     ranked_starts = _rank_clip_windows(
         scores,
         duration,
@@ -740,8 +764,8 @@ def _select_cover_start(
     if not capture.isOpened():
         return starts[0]
     frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
-    profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
-    detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+    profile_detector = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+    detectors = [detector for detector in (frontal, profile_detector) if not detector.empty()]
     best: tuple[float, int] | None = None
     try:
         for index, start in enumerate(starts):
@@ -1029,35 +1053,77 @@ def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: 
     normalized_language = normalize_subtitle_language(language)
     prompt = SUBTITLE_LANGUAGE_PROMPTS.get(normalized_language or "", "")
     model = WhisperModel(model_size or "small", device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(
-        str(source),
-        language=normalized_language,
-        initial_prompt=prompt or None,
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 420, "speech_pad_ms": 280},
-        word_timestamps=True,
-        beam_size=7,
-        best_of=5,
-        patience=1.05,
-        temperature=(0.0, 0.2, 0.4),
-        condition_on_previous_text=False,
-        compression_ratio_threshold=2.35,
-        log_prob_threshold=-1.0,
-        no_speech_threshold=0.55,
-    )
+    audio_source = _extract_whisper_audio(source)
+    try:
+        segments, _info = model.transcribe(
+            str(audio_source),
+            language=normalized_language,
+            initial_prompt=prompt or None,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 420, "speech_pad_ms": 280},
+            word_timestamps=True,
+            beam_size=7,
+            best_of=5,
+            patience=1.05,
+            temperature=(0.0, 0.2, 0.4),
+            condition_on_previous_text=False,
+            compression_ratio_threshold=2.35,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.55,
+        )
 
-    cues: list[SubtitleCue] = []
-    for segment in segments:
-        words = getattr(segment, "words", None) or []
-        if words:
-            cues.extend(_word_cues(words))
-        else:
-            text = _normalize_caption_text(getattr(segment, "text", ""))
-            start = float(getattr(segment, "start", 0.0) or 0.0)
-            end = float(getattr(segment, "end", start + 1.0) or start + 1.0)
-            if text and end > start:
-                cues.extend(_split_segment_text_into_cues(start, end, text))
-    return _polish_subtitle_cues(_merge_short_cues(cues))
+        cues: list[SubtitleCue] = []
+        for segment in segments:
+            words = getattr(segment, "words", None) or []
+            if words:
+                cues.extend(_word_cues(words))
+            else:
+                text = _normalize_caption_text(getattr(segment, "text", ""))
+                start = float(getattr(segment, "start", 0.0) or 0.0)
+                end = float(getattr(segment, "end", start + 1.0) or start + 1.0)
+                if text and end > start:
+                    cues.extend(_split_segment_text_into_cues(start, end, text))
+        return _polish_subtitle_cues(_merge_short_cues(cues))
+    finally:
+        if audio_source != source:
+            try:
+                audio_source.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _extract_whisper_audio(source: Path) -> Path:
+    if not has_audio_stream(source):
+        raise SubtitleUnavailableError("No audio stream found for subtitle transcription")
+    temp = tempfile.NamedTemporaryFile(prefix="cherryx_whisper_", suffix=".wav", delete=False)
+    temp_path = Path(temp.name)
+    temp.close()
+    args = [
+        ffmpeg_path(),
+        "-y",
+        "-i",
+        str(source),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(temp_path),
+    ]
+    try:
+        completed = subprocess.run(args, capture_output=True, text=True, timeout=600)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    if completed.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size <= 44:
+        detail = completed.stderr.strip().splitlines()[-1:] or ["Could not extract audio for subtitle transcription"]
+        temp_path.unlink(missing_ok=True)
+        raise SubtitleUnavailableError(detail[0])
+    return temp_path
 
 
 def _word_cues(words) -> list[SubtitleCue]:
@@ -2702,7 +2768,7 @@ def _run_ffmpeg(args: list[str], timeout_seconds: int) -> None:
 def _youtube_options(output_dir: Path, timeout_seconds: int) -> dict:
     return {
         "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
-        "format": "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[ext=mp4][height<=1080]/b[height<=1080]/b",
+        "format": "bv*[ext=mp4][height<=720]+ba[ext=m4a]/bv*[height<=720]+ba/b[ext=mp4][height<=720]/b[height<=720]/b",
         "merge_output_format": "mp4",
         "ffmpeg_location": ffmpeg_path(),
         "noplaylist": True,
@@ -2729,7 +2795,7 @@ def _estimate_download_size(info: dict) -> int | None:
         height = item.get("height") or 0
         vcodec = item.get("vcodec")
         acodec = item.get("acodec")
-        if vcodec and vcodec != "none" and height <= 1080:
+        if vcodec and vcodec != "none" and height <= 720:
             best_video = max(best_video, int(size))
         if acodec and acodec != "none" and (not vcodec or vcodec == "none"):
             best_audio = max(best_audio, int(size))
@@ -2816,8 +2882,8 @@ def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10) 
             return points
 
     frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
-    profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
-    detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+    profile_detector = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+    detectors = [detector for detector in (frontal, profile_detector) if not detector.empty()]
     if not detectors:
         return []
 
@@ -2868,15 +2934,23 @@ def _detect_frame_faces(
     frame: np.ndarray,
     detectors: list[cv2.CascadeClassifier],
 ) -> list[tuple[int, int, int, int]]:
+    scale = 1.0
+    frame_width = int(frame.shape[1])
+    if frame_width > 480:
+        scale = 480.0 / max(1, frame_width)
+        frame = cv2.resize(frame, (480, max(1, int(frame.shape[0] * scale))))
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     faces: list[tuple[int, int, int, int]] = []
+    min_size = max(24, int(42 * scale))
+    inv_scale = 1.0 / scale
     for detector in detectors:
-        faces.extend(tuple(map(int, face)) for face in detector.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)))
+        for x, y, w, h in detector.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(min_size, min_size)):
+            faces.append((int(x * inv_scale), int(y * inv_scale), int(w * inv_scale), int(h * inv_scale)))
         flipped = cv2.flip(gray, 1)
         frame_width = gray.shape[1]
-        for fx, fy, fw, fh in detector.detectMultiScale(flipped, scaleFactor=1.08, minNeighbors=4, minSize=(42, 42)):
-            faces.append((int(frame_width - fx - fw), int(fy), int(fw), int(fh)))
+        for fx, fy, fw, fh in detector.detectMultiScale(flipped, scaleFactor=1.08, minNeighbors=4, minSize=(min_size, min_size)):
+            faces.append((int((frame_width - fx - fw) * inv_scale), int(fy * inv_scale), int(fw * inv_scale), int(fh * inv_scale)))
     return faces
 
 
@@ -3225,13 +3299,17 @@ def _score_video_moments(
     step_seconds: int,
     face_detection_enabled: bool,
     selection_mode: str = "regular",
+    progress_callback: Callable[[int, int], None] | None = None,
+    max_analysis_seconds: float | None = None,
 ) -> list[tuple[int, float]]:
-    profile = _moment_selection_profile(selection_mode)
+    score_profile = _moment_selection_profile(selection_mode)
     native_visual = native_tools.visual_moment_scores(source, duration_seconds, step_seconds)
     if native_visual:
         if face_detection_enabled:
-            native_visual = _add_python_face_scores(source, native_visual)
+            native_visual = _add_python_face_scores(source, native_visual, min(float(max_analysis_seconds or 45.0), 45.0))
         audio_scores = _score_audio_moments(source, duration_seconds, step_seconds, selection_mode)
+        if progress_callback:
+            progress_callback(1, 1)
         return _smooth_scores(
             _combine_moment_scores(_smooth_scores(native_visual, step_seconds), audio_scores, selection_mode),
             step_seconds,
@@ -3242,14 +3320,21 @@ def _score_video_moments(
         return []
 
     frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
-    profile = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
-    detectors = [detector for detector in (frontal, profile) if not detector.empty()]
+    profile_detector = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_profileface.xml"))
+    detectors = [detector for detector in (frontal, profile_detector) if not detector.empty()]
     previous_small = None
     previous_hist = None
     previous_motion_score = 0.0
     scores: list[tuple[int, float]] = []
+    deadline = time.monotonic() + float(max_analysis_seconds or (70.0 if face_detection_enabled else 45.0))
+    sample_seconds = range(0, max(1, duration_seconds - 2), step_seconds)
+    total_samples = max(1, len(sample_seconds))
     try:
-        for second in range(0, max(1, duration_seconds - 2), step_seconds):
+        for sample_index, second in enumerate(sample_seconds, start=1):
+            if time.monotonic() > deadline and (scores or sample_index > 12):
+                if progress_callback:
+                    progress_callback(sample_index, total_samples)
+                break
             capture.set(cv2.CAP_PROP_POS_MSEC, second * 1000)
             ok, frame = capture.read()
             if not ok:
@@ -3280,14 +3365,16 @@ def _score_video_moments(
             # Prefer moments with visible people and some visual change, but avoid pure random noise dominating.
             score = (
                 min(32.0, motion_score)
-                + motion_rise_score * profile["motion_rise"]
-                + scene_score * profile["scene"]
+                + motion_rise_score * score_profile["motion_rise"]
+                + scene_score * score_profile["scene"]
                 + sharpness_score
                 + visual_interest_score
-                + face_score * profile["face"]
+                + face_score * score_profile["face"]
             )
             if score > 0:
                 scores.append((second, score))
+            if progress_callback and (sample_index == total_samples or sample_index % 8 == 0):
+                progress_callback(sample_index, total_samples)
     finally:
         capture.release()
     visual_scores = _smooth_scores(scores, step_seconds)
@@ -3295,7 +3382,11 @@ def _score_video_moments(
     return _smooth_scores(_combine_moment_scores(visual_scores, audio_scores, selection_mode), step_seconds)
 
 
-def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]) -> list[tuple[int, float]]:
+def _add_python_face_scores(
+    source: Path,
+    visual_scores: list[tuple[int, float]],
+    max_analysis_seconds: float | None = None,
+) -> list[tuple[int, float]]:
     if not visual_scores:
         return visual_scores
     frontal = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
@@ -3308,8 +3399,12 @@ def _add_python_face_scores(source: Path, visual_scores: list[tuple[int, float]]
     if not capture.isOpened():
         return visual_scores
     boosted: list[tuple[int, float]] = []
+    deadline = time.monotonic() + float(max_analysis_seconds or 45.0)
     try:
-        for second, score in visual_scores:
+        for index, (second, score) in enumerate(visual_scores):
+            if time.monotonic() > deadline and index > 0:
+                boosted.extend(visual_scores[index:])
+                break
             capture.set(cv2.CAP_PROP_POS_MSEC, second * 1000)
             ok, frame = capture.read()
             if not ok:

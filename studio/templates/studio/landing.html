@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260625-landing-clean-slider">
     <link rel="stylesheet" href="{% static 'studio/landing_public.css' %}?v=20260619-console-links">
   </head>
   <body class="landing-page">
@@ -21,64 +21,279 @@
       </nav>
     </header>
 
-    <main class="landing-hero">
-      <section class="landing-copy">
-        <p class="eyebrow">{% ui "digital_product_studio" %}</p>
-        <h1>CherryX Creator Studio</h1>
-        <p>{% ui "landing_copy" %}</p>
-        <div class="landing-actions">
-          <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
-          <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
-        </div>
-        <div class="brand-pills">
-          <button type="button" data-icon="box" data-landing-pill="product">{% ui "landing_pill_product_label" %}</button>
-          <button type="button" data-icon="palette" data-landing-pill="design">{% ui "landing_pill_design_label" %}</button>
-          <button type="button" data-icon="code-2" data-landing-pill="engineering">{% ui "landing_pill_engineering_label" %}</button>
-          <button type="button" data-icon="rocket" data-landing-pill="launch">{% ui "landing_pill_launch_label" %}</button>
-        </div>
-        <nav class="merchant-link-strip" aria-label="{% ui "merchant_legal_title" %}">
-          <a href="{% url 'studio:legal_terms' %}" data-icon="file-text">{% ui "merchant_terms_title" %}</a>
-          <a href="{% url 'studio:legal_refund' %}" data-icon="undo-2">{% ui "merchant_refund_title" %}</a>
-          <a href="{% url 'studio:legal_contacts' %}" data-icon="badge-info">{% ui "merchant_contacts_title" %}</a>
-          <a href="{% url 'studio:documentation' %}" data-icon="book-open">{% ui "documentation_title" %}</a>
-        </nav>
-      </section>
+    <main class="landing-hero" data-landing-slider>
+      <div class="landing-hero-viewport">
+        <div class="landing-hero-track" data-landing-slider-track>
+          <section class="landing-hero-slide is-active" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">{% ui "digital_product_studio" %}</p>
+              <h1>CherryX Creator Studio</h1>
+              <p>{% ui "landing_copy" %}</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="play-circle" href="{% url 'studio:index' %}">{% ui "start_without_account" %}</a>
+                <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">{% ui "see_pricing" %}</a>
+              </div>
+              <div class="brand-pills">
+                <button type="button" data-icon="box" data-landing-pill="product">{% ui "landing_pill_product_label" %}</button>
+                <button type="button" data-icon="palette" data-landing-pill="design">{% ui "landing_pill_design_label" %}</button>
+                <button type="button" data-icon="code-2" data-landing-pill="engineering">{% ui "landing_pill_engineering_label" %}</button>
+                <button type="button" data-icon="rocket" data-landing-pill="launch">{% ui "landing_pill_launch_label" %}</button>
+              </div>
+              <nav class="merchant-link-strip" aria-label="{% ui "merchant_legal_title" %}">
+                <a href="{% url 'studio:legal_terms' %}" data-icon="file-text">{% ui "merchant_terms_title" %}</a>
+                <a href="{% url 'studio:legal_refund' %}" data-icon="undo-2">{% ui "merchant_refund_title" %}</a>
+                <a href="{% url 'studio:legal_contacts' %}" data-icon="badge-info">{% ui "merchant_contacts_title" %}</a>
+                <a href="{% url 'studio:documentation' %}" data-icon="book-open">{% ui "documentation_title" %}</a>
+              </nav>
+            </section>
 
-      <section class="landing-console" aria-label="Studio modules">
-        <div class="console-top">
-          <span></span><span></span><span></span>
-          <nav class="console-top-links" aria-label="CherryX public links">
-            <a href="{% url 'studio:index' %}">{% ui "live_workspace_label" %}</a>
-            <a href="{% url 'studio:learn_index' %}">{% ui "learning_label" %}</a>
-          </nav>
+            <section class="landing-console" aria-label="Studio modules">
+              <div class="console-top">
+                <span></span><span></span><span></span>
+                <nav class="console-top-links" aria-label="CherryX public links">
+                  <a href="{% url 'studio:index' %}">{% ui "live_workspace_label" %}</a>
+                  <a href="{% url 'studio:learn_index' %}">{% ui "learning_label" %}</a>
+                </nav>
+              </div>
+              <div class="console-orbit">
+                <a href="{% url 'studio:community_videos' %}" aria-label="{% ui "community_videos_label" %}" title="{% ui "community_videos_label" %}"><i data-icon="video"></i></a>
+                <a href="{% url 'studio:community_images' %}" aria-label="{% ui "community_images_label" %}" title="{% ui "community_images_label" %}"><i data-icon="image"></i></a>
+                <a href="{% url 'studio:community_music' %}" aria-label="Music market" title="Music market"><i data-icon="music-2"></i></a>
+                <a href="{% url 'studio:community_texts' %}" aria-label="{% ui "community_texts_label" %}" title="{% ui "community_texts_label" %}"><i data-icon="captions"></i></a>
+              </div>
+              <div class="console-grid">
+                <article data-icon="wand-2">
+                  <strong>01</strong>
+                  <h2>{% ui "try_first" %}</h2>
+                  <p>{% ui "try_first_copy" %}</p>
+                  <span>Ready</span>
+                </article>
+                <article data-icon="layers">
+                  <strong>02</strong>
+                  <h2>{% ui "see_value" %}</h2>
+                  <p>{% ui "see_value_copy" %}</p>
+                  <span>Preview</span>
+                </article>
+                <article data-icon="sparkles">
+                  <strong>03</strong>
+                  <h2>{% ui "pay_to_deliver" %}</h2>
+                  <p>{% ui "pay_to_deliver_copy" %}</p>
+                  <span>Launch</span>
+                </article>
+              </div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">WORKFLOW</p>
+              <h1>From raw file to ready package</h1>
+              <p>Upload once, prepare the visual, subtitles, metadata and download bundle in one flow. The workspace keeps the process visible instead of hiding it behind a single spinner.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="panels-top-left" href="{% url 'studio:index' %}">Open workspace</a>
+                <a class="secondary-link" data-icon="book-open" href="{% url 'studio:documentation' %}">Read docs</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="upload-cloud">Upload video, image, text or source files</span>
+                <span data-icon="scan-search">Preview before paying or downloading</span>
+                <span data-icon="archive">Export clean files and ZIP packages</span>
+              </div>
+            </section>
+            <section class="landing-feature-board" aria-label="Workflow preview">
+              <div class="feature-board-top"><span></span><strong>Pipeline</strong><small>Live</small></div>
+              <div class="feature-flow">
+                <article data-icon="upload-cloud"><b>Input</b><small>Source files</small></article>
+                <article data-icon="image"><b>Visuals</b><small>Covers and frames</small></article>
+                <article data-icon="captions"><b>Text</b><small>Subtitles and docs</small></article>
+                <article data-icon="package"><b>Export</b><small>ZIP, PDF, media</small></article>
+              </div>
+              <div class="feature-progress"><span style="width: 74%"></span></div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">CREATOR BUSINESS</p>
+              <h1>Resume, market and payments together</h1>
+              <p>Build a PDF resume, publish paid work, manage links and keep CherryX balance in the same account. It is designed for repeat work, not one-off landing-page promises.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="file-user" href="{% url 'studio:index' %}?tool=resume">Build resume</a>
+                <a class="secondary-link" data-icon="store" href="{% url 'studio:community_market' %}">Open market</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="file-user">Create focused PDF resumes</span>
+                <span data-icon="list-checks">Manage your public listings</span>
+                <span data-icon="coins">Sell with CherryX balance</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-market" aria-label="Creator business preview">
+              <div class="feature-board-top"><span></span><strong>Creator desk</strong><small>Account</small></div>
+              <div class="feature-stats">
+                <article><span>Resume</span><b>PDF</b></article>
+                <article><span>Listings</span><b>12</b></article>
+                <article><span>Views</span><b>1.8k</b></article>
+                <article><span>CherryX</span><b>840</b></article>
+              </div>
+              <div class="feature-list">
+                <span data-icon="eye">Public preview ready</span>
+                <span data-icon="shield-check">Protected paid originals</span>
+                <span data-icon="link">Shareable public links</span>
+              </div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">VIDEO EDITOR</p>
+              <h1>Edit short videos without leaving Studio</h1>
+              <p>Trim clips, prepare social formats, keep project files organized and publish the final result into your workspace or marketplace flow.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="clapperboard" href="{% url 'studio:video_editor' %}">Open video editor</a>
+                <a class="secondary-link" data-icon="layers" href="{% url 'studio:video_project_list' %}">Video projects</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="scissors">Trim and arrange scenes</span>
+                <span data-icon="captions">Prepare captions and readable layouts</span>
+                <span data-icon="upload-cloud">Export files for publication</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-video" aria-label="Video editor preview">
+              <div class="feature-board-top"><span></span><strong>Video editor</strong><small>Timeline</small></div>
+              <div class="feature-flow">
+                <article data-icon="clapperboard"><b>Canvas</b><small>Preview frame</small></article>
+                <article data-icon="scissors"><b>Cut</b><small>Clip timing</small></article>
+                <article data-icon="captions"><b>Text</b><small>Captions</small></article>
+                <article data-icon="upload-cloud"><b>Export</b><small>Ready media</small></article>
+              </div>
+              <div class="feature-progress"><span style="width: 62%"></span></div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">DESIGN MODE</p>
+              <h1>Design covers, boards and assets in one canvas</h1>
+              <p>Use the design workspace for covers, previews, resume visuals and reusable brand assets. Keep design projects linked to the files you generate.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="palette" href="{% url 'studio:designer' %}">Open design mode</a>
+                <a class="secondary-link" data-icon="image" href="{% url 'studio:index' %}?tool=cover">Create cover</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="palette">Visual canvas for assets</span>
+                <span data-icon="layers">Reusable project layers</span>
+                <span data-icon="image">Export polished previews</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-design-board" aria-label="Design mode preview">
+              <div class="feature-board-top"><span></span><strong>Design board</strong><small>Canvas</small></div>
+              <div class="feature-stats">
+                <article><span>Assets</span><b>24</b></article>
+                <article><span>Layers</span><b>8</b></article>
+                <article><span>Export</span><b>PNG</b></article>
+                <article><span>Reuse</span><b>On</b></article>
+              </div>
+              <div class="feature-list">
+                <span data-icon="palette">Brand-safe visual layout</span>
+                <span data-icon="image">Covers and previews</span>
+                <span data-icon="link">Shareable project workflow</span>
+              </div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">MUSIC EDITOR</p>
+              <h1>Build audio projects and publish sounds</h1>
+              <p>Arrange tracks, keep music assets together, then open the same project for marketplace publishing or protected downloads.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="music-2" href="{% url 'studio:music_editor' %}">Open music editor</a>
+                <a class="secondary-link" data-icon="store" href="{% url 'studio:community_music' %}">Music market</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="music-2">Organize tracks and sounds</span>
+                <span data-icon="audio-waveform">Preview audio before publishing</span>
+                <span data-icon="shield-check">Protect paid originals</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-music" aria-label="Music editor preview">
+              <div class="feature-board-top"><span></span><strong>Music project</strong><small>Audio</small></div>
+              <div class="feature-flow">
+                <article data-icon="music-2"><b>Tracks</b><small>Audio clips</small></article>
+                <article data-icon="audio-waveform"><b>Wave</b><small>Preview</small></article>
+                <article data-icon="sliders-horizontal"><b>Mix</b><small>Levels</small></article>
+                <article data-icon="store"><b>Sell</b><small>Marketplace</small></article>
+              </div>
+              <div class="feature-progress"><span style="width: 68%"></span></div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">WORK MARKET</p>
+              <h1>Publish work with previews, links and sales stats</h1>
+              <p>Share videos, images, music or text works. Free items stay open, paid originals stay protected, and your account keeps the management view.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="store" href="{% url 'studio:community_market' %}">Open marketplace</a>
+                <a class="secondary-link" data-icon="upload-cloud" href="{% url 'studio:community_publish' %}">Publish work</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="eye">Public preview pages</span>
+                <span data-icon="shopping-bag">Paid and free listings</span>
+                <span data-icon="bar-chart-3">Stats for your work</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-market" aria-label="Marketplace preview">
+              <div class="feature-board-top"><span></span><strong>Marketplace</strong><small>Public</small></div>
+              <div class="feature-stats">
+                <article><span>Works</span><b>Video</b></article>
+                <article><span>Access</span><b>Paid</b></article>
+                <article><span>Views</span><b>2.4k</b></article>
+                <article><span>Sales</span><b>138</b></article>
+              </div>
+              <div class="feature-list">
+                <span data-icon="shield-check">Protected originals</span>
+                <span data-icon="link">Public share links</span>
+                <span data-icon="list-checks">Creator management page</span>
+              </div>
+            </section>
+          </section>
+
+          <section class="landing-hero-slide landing-detail-slide" data-landing-slide>
+            <section class="landing-copy">
+              <p class="eyebrow">CHERRYX PAY</p>
+              <h1>Balance, purchases and payouts in one account</h1>
+              <p>Use CherryX for marketplace purchases, paid works, transfers and Telegram payout workflows. The finance layer stays connected to the tools.</p>
+              <div class="landing-actions">
+                <a class="primary-link" data-icon="wallet" href="{% url 'studio:cherryx_pay' %}">Open CherryX Pay</a>
+                <a class="secondary-link" data-icon="coins" href="{% url 'billing:pricing' %}">See pricing</a>
+              </div>
+              <div class="landing-slide-points">
+                <span data-icon="wallet">Internal creator balance</span>
+                <span data-icon="send">Transfers and withdrawals</span>
+                <span data-icon="receipt">Purchases connected to work</span>
+              </div>
+            </section>
+            <section class="landing-feature-board is-pay" aria-label="CherryX Pay preview">
+              <div class="feature-board-top"><span></span><strong>CherryX Pay</strong><small>Wallet</small></div>
+              <div class="feature-stats">
+                <article><span>Balance</span><b>2,640</b></article>
+                <article><span>Sales</span><b>840</b></article>
+                <article><span>Transfer</span><b>Ready</b></article>
+                <article><span>Payout</span><b>Stars</b></article>
+              </div>
+              <div class="feature-list">
+                <span data-icon="badge-dollar-sign">Marketplace payments</span>
+                <span data-icon="send">User transfers</span>
+                <span data-icon="shield-check">Controlled account flow</span>
+              </div>
+            </section>
+          </section>
         </div>
-        <div class="console-orbit">
-          <a href="{% url 'studio:community_videos' %}" aria-label="{% ui "community_videos_label" %}" title="{% ui "community_videos_label" %}"><i data-icon="video"></i></a>
-          <a href="{% url 'studio:community_images' %}" aria-label="{% ui "community_images_label" %}" title="{% ui "community_images_label" %}"><i data-icon="image"></i></a>
-          <a href="{% url 'studio:community_music' %}" aria-label="Music market" title="Music market"><i data-icon="music-2"></i></a>
-          <a href="{% url 'studio:community_texts' %}" aria-label="{% ui "community_texts_label" %}" title="{% ui "community_texts_label" %}"><i data-icon="captions"></i></a>
-        </div>
-        <div class="console-grid">
-          <article data-icon="wand-2">
-            <strong>01</strong>
-            <h2>{% ui "try_first" %}</h2>
-            <p>{% ui "try_first_copy" %}</p>
-            <span>Ready</span>
-          </article>
-          <article data-icon="layers">
-            <strong>02</strong>
-            <h2>{% ui "see_value" %}</h2>
-            <p>{% ui "see_value_copy" %}</p>
-            <span>Preview</span>
-          </article>
-          <article data-icon="sparkles">
-            <strong>03</strong>
-            <h2>{% ui "pay_to_deliver" %}</h2>
-            <p>{% ui "pay_to_deliver_copy" %}</p>
-            <span>Launch</span>
-          </article>
-        </div>
-      </section>
+      </div>
+
+      <button class="landing-slide-arrow is-prev" type="button" data-landing-slide-prev aria-label="Previous slide"></button>
+      <button class="landing-slide-arrow is-next" type="button" data-landing-slide-next aria-label="Next slide"></button>
+      <div class="landing-slide-dots" data-landing-slide-dots aria-label="Hero slides"></div>
     </main>
 
     <footer class="landing-dock" aria-label="CherryX tools">
@@ -206,8 +421,9 @@
         const body = document.body;
         const nav = document.querySelector(".landing-nav");
         const revealItems = [
-          document.querySelector(".landing-copy"),
-          document.querySelector(".landing-console"),
+          ...document.querySelectorAll(".landing-copy"),
+          ...document.querySelectorAll(".landing-console"),
+          ...document.querySelectorAll(".landing-feature-board"),
           document.querySelector(".landing-dock"),
         ].filter(Boolean);
         const consoleGrid = document.querySelector(".console-grid");
@@ -218,11 +434,64 @@
         const pillDialog = pillModal?.querySelector(".landing-pill-dialog");
         const pillPanels = [...document.querySelectorAll("[data-landing-pill-panel]")];
         const pillCloseButtons = [...document.querySelectorAll("[data-landing-pill-close]")];
+        const slider = document.querySelector("[data-landing-slider]");
+        const sliderTrack = document.querySelector("[data-landing-slider-track]");
+        const sliderSlides = [...document.querySelectorAll("[data-landing-slide]")];
+        const sliderPrev = document.querySelector("[data-landing-slide-prev]");
+        const sliderNext = document.querySelector("[data-landing-slide-next]");
+        const sliderDots = document.querySelector("[data-landing-slide-dots]");
+        let slideIndex = 0;
+        let touchStartX = 0;
+        let touchStartY = 0;
         let carouselIndex = 0;
         let carouselTimer = 0;
         let lastPillTrigger = null;
 
         if (!nav || !revealItems.length) return;
+
+        const setHeroSlide = (index) => {
+          if (!slider || !sliderTrack || !sliderSlides.length) return;
+          slideIndex = (index + sliderSlides.length) % sliderSlides.length;
+          slider.style.setProperty("--landing-slide-index", slideIndex);
+          sliderSlides.forEach((slide, currentIndex) => {
+            const active = currentIndex === slideIndex;
+            slide.classList.toggle("is-active", active);
+            slide.setAttribute("aria-hidden", active ? "false" : "true");
+          });
+          sliderDots?.querySelectorAll("button").forEach((dot, currentIndex) => {
+            const active = currentIndex === slideIndex;
+            dot.classList.toggle("is-active", active);
+            dot.setAttribute("aria-current", active ? "true" : "false");
+          });
+        };
+
+        if (slider && sliderSlides.length > 1 && sliderDots) {
+          sliderSlides.forEach((_, index) => {
+            const dot = document.createElement("button");
+            dot.type = "button";
+            dot.setAttribute("aria-label", `Open slide ${index + 1}`);
+            dot.addEventListener("click", () => setHeroSlide(index));
+            sliderDots.append(dot);
+          });
+          sliderPrev?.addEventListener("click", () => setHeroSlide(slideIndex - 1));
+          sliderNext?.addEventListener("click", () => setHeroSlide(slideIndex + 1));
+          slider.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowLeft") setHeroSlide(slideIndex - 1);
+            if (event.key === "ArrowRight") setHeroSlide(slideIndex + 1);
+          });
+          slider.addEventListener("pointerdown", (event) => {
+            touchStartX = event.clientX;
+            touchStartY = event.clientY;
+          }, { passive: true });
+          slider.addEventListener("pointerup", (event) => {
+            const dx = event.clientX - touchStartX;
+            const dy = event.clientY - touchStartY;
+            if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+              setHeroSlide(slideIndex + (dx < 0 ? 1 : -1));
+            }
+          }, { passive: true });
+          setHeroSlide(0);
+        }
 
         const setActivePill = (name) => {
           pillButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.landingPill === name));

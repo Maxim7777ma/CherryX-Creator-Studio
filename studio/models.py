@@ -519,6 +519,7 @@ class CommunityWork(models.Model):
     source_music_project = models.ForeignKey(MusicEditorProject, related_name="published_works", null=True, blank=True, on_delete=models.SET_NULL)
     access = models.CharField(max_length=16, choices=ACCESS_CHOICES, default=ACCESS_FREE, db_index=True)
     price_cherryx = models.PositiveIntegerField(default=0)
+    view_count = models.PositiveIntegerField(default=0)
     download_count = models.PositiveIntegerField(default=0)
     purchase_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)

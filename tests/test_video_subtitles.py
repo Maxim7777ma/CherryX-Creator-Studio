@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from django.test import SimpleTestCase
+from pathlib import Path
+from unittest.mock import patch
 
 from studio import views
-from src.youtube_tools import SubtitleCue, _normalize_caption_text, _split_segment_text_into_cues, normalize_subtitle_language
+from src.youtube_tools import SubtitleCue, SubtitleUnavailableError, _extract_whisper_audio, _normalize_caption_text, _split_segment_text_into_cues, normalize_subtitle_language
 
 
 class VideoSubtitleFormatTests(SimpleTestCase):
@@ -26,11 +28,53 @@ class VideoSubtitleFormatTests(SimpleTestCase):
         self.assertEqual(cues, [{"start": 2.1, "end": 4.35, "text": "First\nSecond"}])
         self.assertIn("00:00:02,100 --> 00:00:04,350", views._render_srt(cues))
 
+    def test_rich_caption_cues_keep_editor_style(self) -> None:
+        state = {
+            "aspect": "9 / 16",
+            "subtitleWorkflow": {"style": "kinetic"},
+            "clips": [
+                {
+                    "type": "caption",
+                    "start": 1,
+                    "duration": 2,
+                    "text": "Editable caption",
+                    "x": 52,
+                    "y": 76,
+                    "boxWidth": 44,
+                    "style": {"size": 36, "color": "#ffffff", "stroke": "#db2777", "strokeWidth": 2, "bgAlpha": 0},
+                    "subtitleSource": {"kind": "generated", "jobId": "job1", "style": "kinetic"},
+                }
+            ],
+        }
+
+        cues = views._video_project_caption_cues(state, rich=True)
+        self.assertEqual(cues[0]["x"], 52)
+        self.assertEqual(cues[0]["boxWidth"], 44)
+        self.assertEqual(cues[0]["style"]["stroke"], "#db2777")
+        self.assertEqual(cues[0]["source"]["kind"], "generated")
+
+        ass = views._render_ass(cues, state)
+        self.assertIn(r"\pos(", ass)
+        self.assertIn(r"\3c&H00", ass)
+        self.assertIn(r"\t(0,160,\fscx108\fscy108)", ass)
+
     def test_video_clip_base_filter_uses_reframe_values(self) -> None:
         clip = {"x": 82, "y": 18, "scale": 145, "style": {"fit": "crop"}}
         filter_text = views._video_clip_base_filter(clip, 720, 1280)
         self.assertIn("scale=1044:1856:force_original_aspect_ratio=increase", filter_text)
         self.assertIn("crop=720:1280:(iw-ow)*0.820000:(ih-oh)*0.180000", filter_text)
+
+    def test_mp4_drawtext_position_uses_editor_coordinates(self) -> None:
+        x_expr, y_expr = views._ffmpeg_drawtext_xy({"x": 25, "y": 84}, 1080, 1920)
+
+        self.assertEqual(x_expr, "270-text_w/2")
+        self.assertEqual(y_expr, "1612-text_h/2")
+
+    def test_mp4_drawtext_position_allows_off_canvas_text(self) -> None:
+        x_expr, y_expr = views._ffmpeg_drawtext_xy({"x": -20, "y": 128}, 1080, 1920)
+
+        self.assertEqual(x_expr, "-216-text_w/2")
+        self.assertEqual(y_expr, "2457-text_h/2")
 
     def test_auto_subtitles_maps_asset_cues_to_timeline(self) -> None:
         cues = views._normalize_auto_subtitle_cues(
@@ -62,6 +106,11 @@ class VideoSubtitleFormatTests(SimpleTestCase):
         self.assertGreaterEqual(len(cues), 2)
         self.assertTrue(all(cue.end > cue.start for cue in cues))
         self.assertEqual(cues[0].text, "Hello world.")
+
+    def test_whisper_audio_extract_reports_missing_audio(self) -> None:
+        with patch("src.youtube_tools.has_audio_stream", return_value=False):
+            with self.assertRaisesMessage(SubtitleUnavailableError, "No audio stream found"):
+                _extract_whisper_audio(Path("silent.mp4"))
 
 
 if __name__ == "__main__":

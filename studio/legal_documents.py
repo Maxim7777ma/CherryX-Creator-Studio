@@ -657,6 +657,112 @@ _BALANCE_POLICY_TEXT: dict[str, dict[str, dict[str, list[str] | str]]] = {
 }
 
 
+_MARKETPLACE_POLICY_TEXT: dict[str, dict[str, dict[str, list[str] | str]]] = {
+    "en": {
+        "terms": {
+            "title": "CherryX market and paid works",
+            "paragraphs": ["CherryX market lets account holders publish their own digital works, including videos, images, music, text materials, learning articles and other supported files."],
+            "items": ["The author is responsible for the uploaded work, title, description, preview, price, license notes and rights to publish or sell the material.", "Free works may be opened publicly; paid works can use protected previews while original files remain available only after purchase where supported.", "Sales are credited to the seller's CherryX balance after a successful marketplace purchase, subject to service checks, technical limits and account rules.", "CherryX may hide, restrict or remove listings that violate service rules, intellectual property rights, payment rules, safety requirements or applicable law."],
+        },
+        "refund": {
+            "title": "Marketplace purchases",
+            "paragraphs": ["Marketplace works are digital items. A buyer receives access, previews, files or download rights digitally after a successful purchase."],
+            "items": ["A completed purchase of a digital marketplace work is generally not refundable after access to the paid work is provided.", "Support can review duplicate purchases, technical delivery errors, unauthorized payment claims or cases where paid access was not delivered.", "A dispute about creative preference, subjective quality or buyer expectations is not by itself a refund reason after the digital item was delivered.", "If a seller's listing is removed for violation, CherryX may restrict further sales and review affected purchases individually."],
+        },
+        "contacts": {
+            "title": "Marketplace support",
+            "paragraphs": ["For listing moderation, paid work delivery, sales balance, buyer access or public link questions, contact support and include the listing link, account email and purchase or sale details."],
+            "items": ["Open marketplace: /community/.", "Publish work: /community/publish/.", "Manage your listings: /community/my/."],
+        },
+    },
+    "ru": {
+        "terms": {
+            "title": "Маркет CherryX и платные работы",
+            "paragraphs": ["Маркет CherryX позволяет владельцам аккаунтов публиковать собственные цифровые работы: видео, изображения, музыку, текстовые материалы, обучающие статьи и другие поддерживаемые файлы."],
+            "items": ["Автор отвечает за загруженную работу, название, описание, превью, цену, условия лицензии и право публиковать или продавать материал.", "Бесплатные работы могут открываться публично; платные работы могут использовать защищённые превью, а оригинальные файлы доступны после покупки, если функция поддерживается.", "Продажи зачисляются на CherryX-баланс продавца после успешной покупки в маркете с учётом проверок сервиса, технических ограничений и правил аккаунта.", "CherryX может скрывать, ограничивать или удалять объявления, нарушающие правила сервиса, права интеллектуальной собственности, платёжные правила, требования безопасности или закон."],
+        },
+        "refund": {
+            "title": "Покупки в маркете",
+            "paragraphs": ["Работы в маркете являются цифровыми товарами. Покупатель получает доступ, превью, файлы или права на скачивание в цифровом виде после успешной покупки."],
+            "items": ["Завершённая покупка цифровой работы в маркете обычно не возвращается после предоставления доступа к платной работе.", "Поддержка может рассмотреть дублирующую покупку, техническую ошибку выдачи, несанкционированное списание или ситуацию, когда платный доступ не был предоставлен.", "Спор о творческом вкусе, субъективном качестве или ожиданиях покупателя сам по себе не является причиной возврата после выдачи цифровой работы.", "Если объявление продавца удалено из-за нарушения, CherryX может ограничить дальнейшие продажи и отдельно рассмотреть затронутые покупки."],
+        },
+        "contacts": {
+            "title": "Поддержка маркета",
+            "paragraphs": ["По вопросам модерации объявлений, выдачи платных работ, баланса продаж, доступа покупателя или публичной ссылки обращайтесь в поддержку и указывайте ссылку на объявление, email аккаунта и детали покупки или продажи."],
+            "items": ["Открыть маркет: /community/.", "Опубликовать работу: /community/publish/.", "Управлять объявлениями: /community/my/."],
+        },
+    },
+    "uk": {
+        "terms": {
+            "title": "Маркет CherryX і платні роботи",
+            "paragraphs": ["Маркет CherryX дозволяє власникам акаунтів публікувати власні цифрові роботи: відео, зображення, музику, текстові матеріали, навчальні статті та інші підтримувані файли."],
+            "items": ["Автор відповідає за завантажену роботу, назву, опис, прев'ю, ціну, умови ліцензії та право публікувати або продавати матеріал.", "Безкоштовні роботи можуть відкриватися публічно; платні роботи можуть використовувати захищені прев'ю, а оригінальні файли доступні після покупки, якщо функція підтримується.", "Продажі зараховуються на CherryX-баланс продавця після успішної покупки в маркеті з урахуванням перевірок сервісу, технічних обмежень і правил акаунта.", "CherryX може приховувати, обмежувати або видаляти оголошення, що порушують правила сервісу, права інтелектуальної власності, платіжні правила, вимоги безпеки або закон."],
+        },
+        "refund": {
+            "title": "Покупки в маркеті",
+            "paragraphs": ["Роботи в маркеті є цифровими товарами. Покупець отримує доступ, прев'ю, файли або права на завантаження в цифровому вигляді після успішної покупки."],
+            "items": ["Завершена покупка цифрової роботи в маркеті зазвичай не повертається після надання доступу до платної роботи.", "Підтримка може розглянути дубльовану покупку, технічну помилку видачі, несанкціоноване списання або ситуацію, коли платний доступ не був наданий.", "Спір щодо творчого смаку, суб'єктивної якості або очікувань покупця сам по собі не є причиною повернення після видачі цифрової роботи.", "Якщо оголошення продавця видалено через порушення, CherryX може обмежити подальші продажі та окремо розглянути зачеплені покупки."],
+        },
+        "contacts": {
+            "title": "Підтримка маркету",
+            "paragraphs": ["З питань модерації оголошень, видачі платних робіт, балансу продажів, доступу покупця або публічного посилання звертайтеся в підтримку та вказуйте посилання на оголошення, email акаунта і деталі покупки або продажу."],
+            "items": ["Відкрити маркет: /community/.", "Опублікувати роботу: /community/publish/.", "Керувати оголошеннями: /community/my/."],
+        },
+    },
+}
+
+
+_MARKETPLACE_CARD_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "kicker": "Creator market",
+        "title": "Sell your digital works in CherryX",
+        "copy": "Publish previews, set free or paid access, share a public listing and track views, sales, downloads and CherryX earnings from your account.",
+        "market": "Open marketplace",
+        "publish": "Publish work",
+        "manage": "My listings",
+    },
+    "ru": {
+        "kicker": "Маркет авторов",
+        "title": "Продавайте свои цифровые работы в CherryX",
+        "copy": "Публикуйте превью, выбирайте бесплатный или платный доступ, делитесь публичным объявлением и отслеживайте просмотры, продажи, скачивания и доход CherryX в аккаунте.",
+        "market": "Открыть маркет",
+        "publish": "Опубликовать",
+        "manage": "Мои объявления",
+    },
+    "uk": {
+        "kicker": "Маркет авторів",
+        "title": "Продавайте свої цифрові роботи в CherryX",
+        "copy": "Публікуйте прев'ю, обирайте безкоштовний або платний доступ, діліться публічним оголошенням і відстежуйте перегляди, продажі, завантаження та дохід CherryX в акаунті.",
+        "market": "Відкрити маркет",
+        "publish": "Опублікувати",
+        "manage": "Мої оголошення",
+    },
+}
+
+
+def _marketplace_policy_section(document_type: str, language: str) -> dict[str, object] | None:
+    localized = _MARKETPLACE_POLICY_TEXT.get(language) or _MARKETPLACE_POLICY_TEXT["en"]
+    section = localized.get(document_type) or _MARKETPLACE_POLICY_TEXT["en"].get(document_type)
+    if not section:
+        return None
+    return {
+        "title": section["title"],
+        "paragraphs": section.get("paragraphs", []),
+        "items": section.get("items", []),
+        "after": [],
+    }
+
+
+def _marketplace_card(language: str) -> dict[str, str]:
+    text = _MARKETPLACE_CARD_TEXT.get(language) or _MARKETPLACE_CARD_TEXT["en"]
+    return {
+        **text,
+        "market_url": "/community/",
+        "publish_url": "/community/publish/",
+        "manage_url": "/community/my/",
+    }
+
+
 def _balance_policy_section(document_type: str, language: str) -> dict[str, object] | None:
     localized = _BALANCE_POLICY_TEXT.get(language) or _BALANCE_POLICY_TEXT["en"]
     section = localized.get(document_type) or _BALANCE_POLICY_TEXT["en"].get(document_type)
@@ -683,10 +789,14 @@ def legal_document_content(document_type: str, language: str | None) -> dict[str
         }
         for section in document.get("sections", [])
     ]
+    marketplace_policy = _marketplace_policy_section(document_type, language)
+    if marketplace_policy:
+        sections.append(marketplace_policy)
     balance_policy = _balance_policy_section(document_type, language)
     if balance_policy:
         sections.append(balance_policy)
     return {
         "meta_service_type": document.get("meta_service_type", "Digital services"),
         "sections": sections,
+        "marketplace_card": _marketplace_card(language),
     }

@@ -7,7 +7,7 @@
     <title>{{ seo_title }} - CherryX Creator Studio</title>
     <meta name="description" content="{{ seo_description }}">
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_publish' %}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260622-strong-icons">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260623-my-listings-7">
   </head>
   <body class="community-page community-publish-page">
     <header class="community-nav">
@@ -20,6 +20,7 @@
         <a href="{% url 'studio:community_music' %}" data-icon="music-2">Music</a>
         <a href="{% url 'studio:community_texts' %}" data-icon="captions">Texts</a>
         <a class="is-active" href="{% url 'studio:community_publish' %}" data-icon="upload-cloud" aria-current="page">Publish</a>
+        <a href="{% url 'studio:community_my_works' %}" data-icon="list-checks">My listings</a>
       </nav>
     </header>
     <main class="community-detail-shell">
@@ -174,6 +175,7 @@
           </div>
           <button type="submit" data-publish-submit>Publish from my account</button>
           <a href="{% url 'studio:community_market' %}">Open marketplace</a>
+          <a href="{% url 'studio:community_my_works' %}">Manage my listings</a>
         </footer>
       </form>
     </main>

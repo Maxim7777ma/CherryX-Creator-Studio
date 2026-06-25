@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import asyncio
+import hashlib
 import json
 import mimetypes
 import os
@@ -21,7 +22,6 @@ from .config import get_settings
 from .image_tools import SUPPORTED_IMAGE_FORMATS, clean_base_name, convert_image, human_size
 from .video_tools import VIDEO_FORMATS, convert_video, format_duration, inspect_video
 from .youtube_tools import (
-    calculate_smart_clip_starts,
     create_backstage_montage,
     create_business_cover,
     create_premium_cover_from_image,
@@ -37,8 +37,10 @@ from .youtube_tools import (
     planned_clip_count,
     rank_smart_clip_candidates,
     render_subtitle_assets,
+    select_smart_clip_starts_from_candidates,
     transcribe_subtitle_cues,
     video_source_label,
+    YouTubeDownload,
     zip_clips,
 )
 
@@ -183,6 +185,17 @@ class YouTubeProfile:
     sample_limit: int
 
 
+@dataclass(frozen=True)
+class YouTubeProcessingPlan:
+    code: str
+    label: str
+    sample_limit: int
+    face_detection: bool
+    analysis_seconds: float
+    render_workers: int
+    focus_mode: str
+
+
 _jobs: dict[str, WebJob] = {}
 _pending_jobs: deque[tuple[WebJob, object]] = deque()
 _running_job_ids: set[str] = set()
@@ -193,6 +206,7 @@ _executor = ThreadPoolExecutor(max_workers=max(1, settings.job_max_workers))
 ACTIVE_JOB_STATUSES = {"queued", "running", "processing", "paused"}
 INTERRUPTIBLE_JOB_STATUSES = {"queued", "running", "processing"}
 INTERRUPT_REQUEST_STATUSES = {"cancelled", "paused"}
+RECOVERABLE_JOB_STATUSES = {"paused", "failed"}
 
 
 class JobCancelled(RuntimeError):
@@ -315,10 +329,12 @@ def start_youtube_job(
     guest_key: str = "",
     ai_improve: bool = False,
     clip_count: int | None = None,
+    processing_speed: str = "auto",
     job_id: str | None = None,
     run_inline: bool = False,
 ) -> dict:
     clean_url = _normalize_video_url(url)
+    requested_processing_speed = _normalize_processing_speed(processing_speed)
     if mode == "download":
         return start_video_download_job(clean_url, owner_id, guest_key, job_id=job_id, run_inline=run_inline)
     if mode == "cover":
@@ -342,6 +358,7 @@ def start_youtube_job(
                 f"Лимит: {settings.youtube_max_duration_minutes} мин."
             )
 
+        initial_plan = _youtube_processing_plan(requested_processing_speed, profile, metadata.duration_seconds)
         plan_text = _youtube_plan_text(profile, metadata.duration_seconds)
         size_text = human_size(metadata.estimated_size_bytes) if metadata.estimated_size_bytes else "размер заранее не найден"
         _update_job(
@@ -350,7 +367,8 @@ def start_youtube_job(
             f"{metadata.title}. {format_duration(metadata.duration_seconds)}. "
             f"{size_text}. {plan_text}. Загрузка: {estimate_download_time(metadata.estimated_size_bytes)}",
         )
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
+        _update_job(job, 19, f"Processing plan: {initial_plan.label}")
+        download = _download_youtube_video_cached(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes, metadata)
         actual_duration = float(download.duration_seconds or metadata.duration_seconds or 0)
         if actual_duration <= 0:
             actual_duration = float(inspect_video(download.path).duration_seconds or 0)
@@ -363,6 +381,7 @@ def start_youtube_job(
             _update_job(job, 24, f"Duration after download: {format_duration(actual_duration)}. {_youtube_plan_text(profile, actual_duration)}")
 
         if profile.is_backstage:
+            processing_plan = _youtube_processing_plan(requested_processing_speed, profile, actual_duration)
             if not settings.youtube_backstage_enabled:
                 raise RuntimeError("Preview-монтаж выключен в настройках")
             _update_job(job, 45, "Собираю широкий Preview-монтаж")
@@ -375,9 +394,9 @@ def start_youtube_job(
                 profile.backstage_output_seconds,
                 profile.backstage_segment_seconds,
                 profile.backstage_intro_seconds,
-                profile.sample_limit,
+                processing_plan.sample_limit,
                 profile.min_gap_seconds,
-                settings.face_detection_enabled,
+                processing_plan.face_detection,
             )
             _add_output(job, montage.path, "Preview MP4")
             _update_job(job, 78, "Генерирую PNG-обложку")
@@ -387,41 +406,121 @@ def start_youtube_job(
                 download.title,
                 montage.duration_seconds,
                 settings.video_timeout_seconds,
-                settings.face_detection_enabled,
+                processing_plan.face_detection,
             )
             _add_output(job, cover, "PNG-обложка")
             _update_job(job, 94, f"Preview готов: {human_size(montage.path.stat().st_size)}")
             return
 
         _update_job(job, 34, "Ищу сильные моменты для Shorts")
-        clip_candidates = rank_smart_clip_candidates(
-            download.path,
-            actual_duration,
-            max(profile.max_shorts * 8, 24),
-            profile.short_seconds,
-            profile.sample_limit,
-            settings.face_detection_enabled,
-            profile.mode,
-        )
-        starts = calculate_smart_clip_starts(
-            download.path,
+        processing_plan = _youtube_processing_plan(requested_processing_speed, profile, actual_duration)
+        max_candidates = max(profile.max_shorts * 8, 24)
+        cache_key = _youtube_analysis_cache_key(clean_url, profile.mode, actual_duration, profile.short_seconds, max_candidates, processing_plan)
+        clip_candidates = _load_youtube_analysis_cache(cache_key)
+        if clip_candidates:
+            _update_job(job, 46, f"Moments from cache: {len(clip_candidates)}")
+        else:
+            last_analysis_progress = {"value": -1, "time": 0.0}
+
+            def on_analysis_progress(done: int, total: int) -> None:
+                total = max(1, int(total or 1))
+                percent = max(0, min(100, int(done / total * 100)))
+                progress = 34 + int(percent * 0.12)
+                now = time.time()
+                if progress <= last_analysis_progress["value"] and now - last_analysis_progress["time"] < 4:
+                    return
+                last_analysis_progress["value"] = progress
+                last_analysis_progress["time"] = now
+                _update_job(job, progress, f"Analyzing moments: {percent}% ({processing_plan.label})")
+
+            _update_job(job, 34, f"Analyzing moments ({processing_plan.label})")
+            clip_candidates = rank_smart_clip_candidates(
+                download.path,
+                actual_duration,
+                max_candidates,
+                profile.short_seconds,
+                processing_plan.sample_limit,
+                processing_plan.face_detection,
+                profile.mode,
+                progress_callback=on_analysis_progress,
+                max_analysis_seconds=processing_plan.analysis_seconds,
+            )
+            _save_youtube_analysis_cache(cache_key, clip_candidates)
+            _update_job(job, 46, f"Shorts candidates found: {len(clip_candidates)}")
+        starts = select_smart_clip_starts_from_candidates(
+            clip_candidates,
             actual_duration,
             profile.max_shorts,
             profile.short_seconds,
-            profile.sample_limit,
-            settings.face_detection_enabled,
-            profile.mode,
         )
         if not starts:
             raise ValueError("Не получилось подобрать фрагменты для Shorts")
 
         if ai_improve:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
+        selected_starts = list(starts)
 
         source_info = inspect_video(download.path)
         clips = []
         base_name = clean_base_name(download.title, "youtube_short")
         editor_source_path = _prepare_youtube_editor_source(download.path, output_dir, base_name)
+        if processing_plan.render_workers > 1 and len(starts) > 1:
+            render_items = list(enumerate(starts, start=1))
+
+            def render_clip(item: tuple[int, int]):
+                index, start_second = item
+                return index, make_short_clip(
+                    download.path,
+                    output_dir,
+                    base_name,
+                    actual_duration,
+                    start_second,
+                    index,
+                    profile.short_seconds,
+                    settings.video_timeout_seconds,
+                    processing_plan.focus_mode,
+                    processing_plan.face_detection,
+                    source_info.width,
+                    source_info.height,
+                )
+
+            rendered: dict[int, object] = {}
+            _update_job(job, 50, f"Rendering Shorts in parallel: {len(render_items)}")
+            with ThreadPoolExecutor(max_workers=processing_plan.render_workers) as render_pool:
+                futures = {render_pool.submit(render_clip, item): item for item in render_items}
+                for done_count, future in enumerate(as_completed(futures), start=1):
+                    index, clip = future.result()
+                    rendered[index] = clip
+                    progress = 50 + int(done_count / max(1, len(render_items)) * 28)
+                    _update_job(job, progress, f"Short {done_count}/{len(render_items)} rendered")
+            for index in sorted(rendered):
+                clip = rendered[index]
+                clips.append(clip)
+                try:
+                    clip.path.with_suffix(".edit.json").write_text(
+                        json.dumps(
+                            {
+                                "kind": "youtube_short_source",
+                                "source_path": str(editor_source_path),
+                                "fallback_source_path": str(download.path),
+                                "source_title": download.title,
+                                "source_url": clean_url,
+                                "source_start": float(clip.start_seconds),
+                                "clip_duration": float(clip.duration_seconds),
+                                "source_width": source_info.width,
+                                "source_height": source_info.height,
+                                "mode": profile.mode,
+                                "aspect": "9 / 16",
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+                _add_output(job, clip.path, f"Short {index}")
+            starts = []
         for index, start_second in enumerate(starts, start=1):
             progress = 38 + int((index - 1) / max(1, len(starts)) * 38)
             _update_job(job, progress, f"Режу клип {index}/{len(starts)}: старт {format_duration(start_second)}")
@@ -434,8 +533,8 @@ def start_youtube_job(
                 index,
                 profile.short_seconds,
                 settings.video_timeout_seconds,
-                settings.shorts_focus_mode,
-                settings.face_detection_enabled,
+                processing_plan.focus_mode,
+                processing_plan.face_detection,
                 source_info.width,
                 source_info.height,
             )
@@ -475,8 +574,9 @@ def start_youtube_job(
                 output_dir / "cover",
                 download.title,
                 actual_duration,
-                settings.video_timeout_seconds,
-                settings.face_detection_enabled,
+                timeout_seconds=settings.video_timeout_seconds,
+                face_detection_enabled=processing_plan.face_detection,
+                avoid_seconds=selected_starts,
             )
             _add_output(job, cover, "PNG-обложка")
         except Exception:
@@ -487,7 +587,14 @@ def start_youtube_job(
         "youtube",
         youtube_render_profile(mode).label,
         worker,
-        {"action": "youtube", "url": clean_url, "mode": mode, "ai_improve": bool(ai_improve), "clip_count": requested_clip_count},
+        {
+            "action": "youtube",
+            "url": clean_url,
+            "mode": mode,
+            "ai_improve": bool(ai_improve),
+            "clip_count": requested_clip_count,
+            "processing_speed": requested_processing_speed,
+        },
         owner_id,
         guest_key,
         job_id=job_id,
@@ -503,7 +610,7 @@ def start_video_download_job(url: str, owner_id: int | None = None, guest_key: s
         output_dir = WEB_OUTPUT_ROOT / job.id / "source_download"
         _update_job(job, 15, "Скачиваю исходное видео")
         metadata = get_youtube_metadata(clean_url, settings.youtube_download_timeout_seconds)
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
+        download = _download_youtube_video_cached(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes, metadata)
         output_path = download.path
         if output_path.suffix.lower() != ".mp4":
             _update_job(job, 65, "Конвертирую в MP4")
@@ -528,7 +635,7 @@ def start_youtube_cover_job(url: str, owner_id: int | None = None, guest_key: st
         output_dir = WEB_OUTPUT_ROOT / job.id / "youtube_cover"
         _update_job(job, 15, "Скачиваю видео для обложки")
         metadata = get_youtube_metadata(clean_url, settings.youtube_download_timeout_seconds)
-        download = download_youtube_video(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes)
+        download = _download_youtube_video_cached(clean_url, source_dir, settings.youtube_download_timeout_seconds, metadata.estimated_size_bytes, metadata)
         _update_job(job, 70, "Генерирую PNG-обложку")
         cover = create_business_cover(
             download.path,
@@ -923,6 +1030,7 @@ def repeat_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
             guest_key,
             bool(params.get("ai_improve")),
             int(params.get("clip_count") or 10),
+            str(params.get("processing_speed") or "auto"),
         )
     if action == "video_download":
         return start_video_download_job(str(params.get("url") or ""), owner_id, guest_key)
@@ -1014,6 +1122,7 @@ def run_persisted_job(job_id: str) -> dict:
             guest_key,
             bool(params.get("ai_improve")),
             int(params.get("clip_count") or 10),
+            str(params.get("processing_speed") or "auto"),
             job_id=record.job_id,
             run_inline=True,
         )
@@ -1159,11 +1268,12 @@ def resume_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
         if active_job and not _access_matches(active_job.owner_id, active_job.guest_key, owner_id, guest_key):
             raise ValueError("Task not found")
         if active_job:
-            if active_job.status == "paused":
+            if active_job.status in RECOVERABLE_JOB_STATUSES:
                 active_job.status = "queued"
                 active_job.progress = 0
                 active_job.message = "Queued"
                 active_job.error = ""
+                active_job.outputs.clear()
                 active_job.updated_at = time.time()
                 if active_job.runner and not any(job.id == job_id for job, _worker in _pending_jobs):
                     _pending_jobs.append((active_job, active_job.runner))
@@ -1182,19 +1292,126 @@ def resume_job(job_id: str, owner_id: int | None = None, guest_key: str = "") ->
         record = _owned_records(JobRecord, owner_id, guest_key).prefetch_related("outputs").filter(job_id=job_id).first()
         if not record:
             raise ValueError("Task not found")
-        if record.status != "paused":
+        if record.status not in RECOVERABLE_JOB_STATUSES:
             return _serialize_job_record(record)
+        params = _loads_record_params(record.params_json)
+        if not params:
+            raise ValueError("Task has no saved parameters to continue")
         record.status = "queued"
         record.progress = 0
         record.message = "Queued"
         record.error = ""
-        record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
+        record.output_count = 0
+        record.total_output_size = 0
+        record.primary_output_type = ""
+        record.outputs.all().delete()
+        record.save(update_fields=["status", "progress", "message", "error", "output_count", "total_output_size", "primary_output_type", "updated_at"])
         JobEventRecord.objects.create(job=record, status="queued", progress=0, message="Queued")
         return _rerun_persisted_job(record)
     except (RuntimeError, ValueError):
         raise
     except Exception as exc:
         raise RuntimeError(str(exc) or "Could not resume task") from exc
+
+
+def _rerun_persisted_job(record) -> dict:
+    if getattr(settings, "persistent_job_queue", False):
+        return _serialize_job_record(record)
+
+    params = _loads_record_params(record.params_json)
+    if not params:
+        raise ValueError("Task has no saved parameters to continue")
+
+    with _lock:
+        _jobs.pop(record.job_id, None)
+        remaining = [(job, worker) for job, worker in _pending_jobs if job.id != record.job_id]
+        _pending_jobs.clear()
+        _pending_jobs.extend(remaining)
+
+    owner_id = record.owner_id
+    guest_key = record.guest_key
+    job_id = record.job_id
+    action = str(params.get("action") or "")
+
+    if action == "convert":
+        source = _existing_source(params.get("source"))
+        return start_conversion_job(
+            source=source,
+            original_name=str(params.get("original_name") or source.name),
+            content_type=str(params.get("content_type") or ""),
+            target_format=str(params.get("target_format") or "webp"),
+            output_name=str(params.get("output_name") or source.stem),
+            image_mode=str(params.get("image_mode") or "balanced"),
+            owner_id=owner_id,
+            guest_key=guest_key,
+            job_id=job_id,
+        )
+    if action == "youtube":
+        return start_youtube_job(
+            str(params.get("url") or ""),
+            str(params.get("mode") or "regular"),
+            owner_id,
+            guest_key,
+            bool(params.get("ai_improve")),
+            int(params.get("clip_count") or 10),
+            str(params.get("processing_speed") or "auto"),
+            job_id=job_id,
+        )
+    if action == "video_download":
+        return start_video_download_job(str(params.get("url") or ""), owner_id, guest_key, job_id=job_id)
+    if action == "youtube_cover":
+        return start_youtube_cover_job(str(params.get("url") or ""), owner_id, guest_key, bool(params.get("ai_cover")), job_id=job_id)
+    if action == "cover":
+        source = _existing_source(params.get("source"))
+        return start_cover_job(
+            source=source,
+            original_name=str(params.get("original_name") or source.name),
+            title=str(params.get("title") or ""),
+            variants=int(params.get("variants") or 1),
+            owner_id=owner_id,
+            guest_key=guest_key,
+            ai_cover=bool(params.get("ai_cover")),
+            job_id=job_id,
+        )
+    if action == "subtitles":
+        source = _existing_source(params.get("source"))
+        return start_subtitle_job(
+            source=source,
+            original_name=str(params.get("original_name") or source.name),
+            title=str(params.get("title") or ""),
+            style=str(params.get("style") or "pop"),
+            language=str(params.get("language") or "auto"),
+            owner_id=owner_id,
+            guest_key=guest_key,
+            ai_transcription=bool(params.get("ai_transcription")),
+            job_id=job_id,
+        )
+    if action == "package":
+        source = _existing_source(params.get("source"))
+        return start_package_job(
+            source=source,
+            original_name=str(params.get("original_name") or source.name),
+            title=str(params.get("title") or ""),
+            style=str(params.get("style") or "pop"),
+            language=str(params.get("language") or "auto"),
+            owner_id=owner_id,
+            guest_key=guest_key,
+            ai_transcription=bool(params.get("ai_transcription")),
+            ai_cover=bool(params.get("ai_cover")),
+            job_id=job_id,
+        )
+    if action == "resume":
+        data = params.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("Saved resume data is damaged")
+        return start_resume_job(
+            {str(key): str(value) for key, value in data.items()},
+            str(params.get("template") or "1"),
+            owner_id,
+            guest_key,
+            job_id=job_id,
+        )
+    raise ValueError("Unsupported persisted task action")
 
 
 def get_job(job_id: str, owner_id: int | None = None, guest_key: str = "") -> dict | None:
@@ -1423,6 +1640,14 @@ def mark_interrupted_jobs() -> None:
         queryset = JobRecord.objects.filter(status__in=["queued", "running", "processing"])
         if active_ids:
             queryset = queryset.exclude(job_id__in=active_ids)
+        for record in queryset:
+            record.status = "paused"
+            record.progress = max(0, min(99, int(record.progress or 0)))
+            record.message = "Interrupted. Press Continue to restore the task."
+            record.error = ""
+            record.updated_at = timezone.now()
+            record.save(update_fields=["status", "progress", "message", "error", "updated_at"])
+        return
         queryset.update(
             status="failed",
             progress=100,
@@ -1505,6 +1730,173 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
         min_gap_seconds=settings.backstage_min_gap_seconds,
         sample_limit=settings.backstage_sample_limit,
     )
+
+
+def _normalize_processing_speed(value: str | None) -> str:
+    normalized = (value or "auto").strip().lower()
+    return normalized if normalized in {"auto", "fast", "smart", "pro"} else "auto"
+
+
+def _youtube_processing_plan(speed: str, profile: YouTubeProfile, duration_seconds: float) -> YouTubeProcessingPlan:
+    duration = max(1, int(duration_seconds or 0))
+    requested = _normalize_processing_speed(speed)
+    if requested == "auto":
+        requested = "fast" if duration >= 45 * 60 else "smart"
+
+    cpu_count = max(1, os.cpu_count() or 1)
+    max_render_workers = max(1, min(2, cpu_count // 2 or 1))
+    base_sample_limit = max(80, int(profile.sample_limit or settings.backstage_sample_limit or 360))
+
+    if requested == "fast":
+        return YouTubeProcessingPlan(
+            code="fast",
+            label="Fast",
+            sample_limit=max(80, min(180, int(base_sample_limit * 0.55))),
+            face_detection=False,
+            analysis_seconds=45.0,
+            render_workers=max_render_workers,
+            focus_mode="center",
+        )
+    if requested == "pro":
+        return YouTubeProcessingPlan(
+            code="pro",
+            label="Pro",
+            sample_limit=max(160, min(520, int(base_sample_limit * 1.18))),
+            face_detection=bool(settings.face_detection_enabled),
+            analysis_seconds=150.0,
+            render_workers=1 if bool(settings.face_detection_enabled) else max_render_workers,
+            focus_mode=settings.shorts_focus_mode,
+        )
+    return YouTubeProcessingPlan(
+        code="smart",
+        label="Smart",
+        sample_limit=max(100, min(300, int(base_sample_limit * 0.78))),
+        face_detection=bool(settings.face_detection_enabled and duration < 90 * 60),
+        analysis_seconds=80.0,
+        render_workers=max_render_workers,
+        focus_mode=settings.shorts_focus_mode,
+    )
+
+
+def _youtube_analysis_cache_key(
+    url: str,
+    mode: str,
+    duration_seconds: float,
+    clip_seconds: int,
+    max_candidates: int,
+    plan: YouTubeProcessingPlan,
+) -> str:
+    payload = {
+        "url": url,
+        "mode": mode,
+        "duration": int(duration_seconds or 0),
+        "clip_seconds": int(clip_seconds),
+        "max_candidates": int(max_candidates),
+        "speed": plan.code,
+        "sample_limit": int(plan.sample_limit),
+        "face_detection": bool(plan.face_detection),
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _youtube_analysis_cache_path(cache_key: str) -> Path:
+    return WEB_STORAGE_ROOT / "_cache" / "youtube_analysis" / f"{cache_key}.json"
+
+
+def _load_youtube_analysis_cache(cache_key: str) -> list[dict[str, object]]:
+    path = _youtube_analysis_cache_path(cache_key)
+    try:
+        if not path.exists() or time.time() - path.stat().st_mtime > 14 * 24 * 60 * 60:
+            return []
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    candidates = payload.get("candidates") if isinstance(payload, dict) else None
+    return candidates if isinstance(candidates, list) else []
+
+
+def _save_youtube_analysis_cache(cache_key: str, candidates: list[dict[str, object]]) -> None:
+    if not candidates:
+        return
+    path = _youtube_analysis_cache_path(cache_key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": 1, "created_at": time.time(), "candidates": candidates}, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _youtube_source_cache_key(url: str) -> str:
+    return hashlib.sha256(f"youtube-source-v2-720|{url.strip()}".encode("utf-8")).hexdigest()[:32]
+
+
+def _youtube_source_cache_dir(cache_key: str) -> Path:
+    return WEB_STORAGE_ROOT / "_cache" / "youtube_sources" / cache_key
+
+
+def _download_youtube_video_cached(
+    url: str,
+    output_dir: Path,
+    timeout_seconds: int,
+    estimated_size_bytes: int | None,
+    metadata,
+) -> YouTubeDownload:
+    cache_dir = _youtube_source_cache_dir(_youtube_source_cache_key(url))
+    cache_meta_path = cache_dir / "source.json"
+    try:
+        cached_files = [path for path in cache_dir.iterdir() if path.is_file() and path.name != cache_meta_path.name and path.stat().st_size > 0]
+    except Exception:
+        cached_files = []
+    if cached_files:
+        cached_source = max(cached_files, key=lambda item: item.stat().st_size)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        target = output_dir / cached_source.name
+        try:
+            if not target.exists() or target.stat().st_size != cached_source.stat().st_size:
+                target.unlink(missing_ok=True)
+                try:
+                    os.link(cached_source, target)
+                except Exception:
+                    shutil.copy2(cached_source, target)
+            return YouTubeDownload(
+                path=target,
+                title=str(getattr(metadata, "title", "") or target.stem),
+                video_id=str(getattr(metadata, "video_id", "") or ""),
+                duration_seconds=float(getattr(metadata, "duration_seconds", 0) or 0),
+                webpage_url=str(getattr(metadata, "webpage_url", "") or url),
+            )
+        except Exception:
+            pass
+
+    download = download_youtube_video(url, output_dir, timeout_seconds, estimated_size_bytes)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached_target = cache_dir / download.path.name
+        if not cached_target.exists() or cached_target.stat().st_size != download.path.stat().st_size:
+            cached_target.unlink(missing_ok=True)
+            try:
+                os.link(download.path, cached_target)
+            except Exception:
+                shutil.copy2(download.path, cached_target)
+        cache_meta_path.write_text(
+            json.dumps(
+                {
+                    "url": url,
+                    "title": download.title,
+                    "video_id": download.video_id,
+                    "duration_seconds": download.duration_seconds,
+                    "webpage_url": download.webpage_url,
+                    "path": cached_target.name,
+                    "created_at": time.time(),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return download
 
 
 def _submit_job(

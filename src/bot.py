@@ -4869,7 +4869,7 @@ def add_resume_section(story: list, title: str, content: str, styles: dict, head
     block = [Paragraph(title, styles[heading_style]), Spacer(1, 4)]
     paragraphs = [line.strip() for line in content.splitlines() if line.strip()]
     for line in paragraphs or [content]:
-        prefix = "вЂў " if line.startswith(("-", "вЂў", "*")) else ""
+        prefix = "- " if line.startswith(("-", "вЂў", "•", "*")) else ""
         clean = line[1:].strip() if prefix else line
         block.append(Paragraph(f"{prefix}{resume_safe_text(clean)}", styles["ResumeBody"]))
         block.append(Spacer(1, 3))
@@ -5052,12 +5052,84 @@ def draw_resume_page(canvas, doc, template: dict[str, str]) -> None:
     canvas.line(doc.leftMargin, 13 * mm, width - doc.rightMargin, 13 * mm)
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(colors.HexColor("#9ca3af"))
-    canvas.drawRightString(width - doc.rightMargin, 8 * mm, resume_clean_text(f"Resume вЂў {template['name']}"))
+    canvas.drawRightString(width - doc.rightMargin, 8 * mm, resume_clean_text(f"Resume - {template['name']}"))
     canvas.restoreState()
 
 
 def resume_section_data(data: dict) -> dict[str, str]:
     return utils_resume_section_data(data)
+
+
+RESUME_PDF_NOISE_RE = re.compile(
+    r"^(?:"
+    r"focus:\s*structured communication,\s*ownership,\s*measurable delivery and clear business value\.?|"
+    r"strengthened outcomes through clearer priorities,\s*practical execution and measurable improvements\.?|"
+    r"local fallback used|"
+    r"add real metrics where possible"
+    r")$",
+    flags=re.IGNORECASE,
+)
+
+
+def clean_resume_pdf_block(value: str, field: str = "") -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw in normalize_resume_text(value).splitlines():
+        has_bullet = raw.lstrip().startswith(("-", "*", "вЂў", "•"))
+        line = " ".join(raw.strip().strip(" -*\tвЂў•").split())
+        if not line:
+            continue
+        line = re.sub(
+            r"\bFocus:\s*structured communication,\s*ownership,\s*measurable delivery and clear business value\.?",
+            "",
+            line,
+            flags=re.IGNORECASE,
+        ).strip(" -")
+        if not line:
+            continue
+        if RESUME_PDF_NOISE_RE.match(line):
+            continue
+        if field in {"contact", "links"} and re.search(r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?(?:/|\b)", line, flags=re.IGNORECASE):
+            continue
+        key = re.sub(r"\s+", " ", line).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        if has_bullet and field in {"experience", "achievements"}:
+            lines.append(f"- {line}")
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def clean_resume_pdf_data(data: dict[str, str]) -> dict[str, str]:
+    cleaned = dict(data)
+    for field in (
+        "name",
+        "position",
+        "contact",
+        "links",
+        "summary",
+        "experience",
+        "education",
+        "skills",
+        "achievements",
+        "additional",
+        "cover_letter",
+    ):
+        cleaned[field] = clean_resume_pdf_block(cleaned.get(field, ""), field)
+    if cleaned.get("skills"):
+        cleaned["skills"] = polish_resume_skills(cleaned["skills"])
+    return cleaned
+
+
+def select_resume_pdf_template(template: dict[str, str], prepared: dict[str, str]) -> dict[str, str]:
+    selected = dict(template)
+    verbose_layouts = {"band", "two", "split", "photo_left", "cards"}
+    if selected.get("layout") in verbose_layouts and resume_content_score(prepared) > 980:
+        selected["layout"] = "single"
+        selected["name"] = f"{selected['name']} Clean"
+    return selected
 
 
 @dataclass(frozen=True)
@@ -5355,14 +5427,12 @@ def build_resume_main_flow(data: dict[str, str], styles: dict, template: dict[st
     story: list = []
     if data["summary"]:
         story.append(Paragraph(resume_safe_text(data["summary"]), styles["ResumeSummary"]))
-    story.extend(build_resume_highlight_strip(data, styles, template, content_width))
     add_resume_section(story, "РћРїС‹С‚ СЂР°Р±РѕС‚С‹", data["experience"], styles)
     add_resume_section(story, "РћР±СЂР°Р·РѕРІР°РЅРёРµ", data["education"], styles)
     add_resume_section(story, "РќР°РІС‹РєРё", data["skills"], styles)
     add_resume_contact_section(story, "РљРѕРЅС‚Р°РєС‚С‹ Рё СЃСЃС‹Р»РєРё", data, styles, template, content_width)
     add_resume_section(story, "Р”РѕСЃС‚РёР¶РµРЅРёСЏ Рё РїСЂРѕРµРєС‚С‹", data["achievements"], styles)
     add_resume_section(story, "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ", data["additional"], styles)
-    story.extend(build_resume_fill_panel(data, styles, template, content_width))
     return story
 
 
@@ -5383,7 +5453,7 @@ def resume_skill_tags(value: str, limit: int = 12) -> list[str]:
 def resume_link_lines(value: str) -> str:
     links = []
     for raw in normalize_resume_text(value).replace(",", "\n").splitlines():
-        item = raw.strip(" вЂў-*")
+        item = raw.strip(" вЂў•-*")
         if item:
             links.append(item)
     return "\n".join(links)
@@ -5458,6 +5528,7 @@ def build_resume_skill_cloud(data: dict[str, str], styles: dict, template: dict[
 
 
 def build_resume_fill_panel(data: dict[str, str], styles: dict, template: dict[str, str], content_width: float) -> list:
+    return []
     if resume_content_score(data) > 780:
         return []
     focus = data.get("position") or "С†РµР»РµРІРѕР№ СЂРѕР»Рё"
@@ -5487,7 +5558,7 @@ def build_resume_fill_panel(data: dict[str, str], styles: dict, template: dict[s
 def paragraph_lines(content: str, styles: dict, style_name: str = "ResumeBody") -> list:
     lines: list = []
     for line in [item.strip() for item in content.splitlines() if item.strip()]:
-        prefix = "вЂў " if line.startswith(("-", "вЂў", "*")) else ""
+        prefix = "- " if line.startswith(("-", "вЂў", "•", "*")) else ""
         clean = line[1:].strip() if prefix else line
         lines.append(Paragraph(f"{prefix}{resume_safe_text(clean)}", styles[style_name]))
         lines.append(Spacer(1, 3))
@@ -5700,8 +5771,8 @@ async def generate_resume_pdf(data: dict, template: str) -> Path:
     filepath = settings.output_dir / filename
     settings.output_dir.mkdir(parents=True, exist_ok=True)
 
-    selected = RESUME_TEMPLATES.get(template, RESUME_TEMPLATES["1"])
-    prepared = resume_section_data(data)
+    prepared = clean_resume_pdf_data(resume_section_data(data))
+    selected = select_resume_pdf_template(RESUME_TEMPLATES.get(template, RESUME_TEMPLATES["1"]), prepared)
     labels = resume_pdf_labels(str(data.get("lang") or "ru"))
     avatar_path = make_resume_avatar(data.get("photo_path"), settings.output_dir, data.get("photo_crop"))
     styles = build_resume_styles(selected)

@@ -9,7 +9,7 @@
     <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{% url 'studio:community_market' %}">
     <meta property="og:title" content="{{ seo_title }} - CherryX Creator Studio">
     <meta property="og:description" content="{{ seo_description }}">
-    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260622-strong-icons">
+    <link rel="stylesheet" href="{% static 'studio/community.css' %}?v=20260623-my-listings-7">
   </head>
   <body class="community-page community-market-page">
     <header class="community-nav">
@@ -22,6 +22,7 @@
         <a href="{% url 'studio:community_music' %}" data-icon="music-2">Music</a>
         <a href="{% url 'studio:community_texts' %}" data-icon="captions">Texts</a>
         <a href="{% url 'studio:community_publish' %}" data-icon="upload-cloud">Publish</a>
+        <a href="{% url 'studio:community_my_works' %}" data-icon="list-checks">My listings</a>
       </nav>
     </header>
     <main class="community-shell">

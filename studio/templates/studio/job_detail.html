@@ -5,32 +5,40 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ job.title }} - CherryX Creator Studio</title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260624-subtitle-readable-preview">
   </head>
   <body class="{% if is_guest %}is-guest{% else %}is-account{% endif %} theme-{{ theme_mode }} detail-page job-detail-page" style="--blue: {{ ui_accent_color }}; --teal: {{ ui_accent_color }}; --raw-accent: {{ accent_color }};">
     <header class="topbar studio-topbar detail-topbar">
       <div class="topbar-copy">
         <p class="eyebrow"><a class="back-link" href="{% url 'studio:index' %}">CherryX Creator Studio</a></p>
         <h1>{{ job.title }}</h1>
+        <p class="topbar-note job-detail-note">
+          <span>{{ job.kind_label }}</span>
+          <span>{{ job.status_label|default:job.status }}</span>
+          <span data-job-progress-text>{{ job.progress }}%</span>
+        </p>
       </div>
-      <div class="limits account-bar">
-        <img class="account-avatar" src="{{ avatar_url }}" alt="">
-        {% if is_guest %}
-          <span>{% ui "guest_session" %}</span>
-          <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
-        {% else %}
-          <span>{{ request.user.email }}</span>
-        {% endif %}
-        <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
-        {% if has_access %}
-          <span>{% ui "download_active" %}</span>
-        {% else %}
-          <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
-        {% endif %}
-        <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
-        <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
-        <span>{{ job.kind_label }}</span>
-        <span data-job-progress-text>{{ job.progress }}%</span>
+      <div class="account-panel" data-account-panel>
+        <button class="account-panel-toggle" type="button" data-account-panel-toggle data-icon="panel-left-open" aria-expanded="false" aria-label="Open account panel"></button>
+        <div class="limits account-bar account-panel-content">
+          {% include "studio/_language_switcher.html" %}
+          {% if is_guest %}
+            <a class="account-avatar account-settings-shortcut" href="{{ login_url }}" data-icon="settings" aria-label="{% ui "settings" %}"></a>
+            <span>{% ui "guest_session" %}</span>
+            <a class="topbar-link" href="{{ login_url }}">{% ui "login" %}</a>
+          {% else %}
+            <img class="account-avatar" src="{{ avatar_url }}" alt="">
+            <span>{{ request.user.email }}</span>
+          {% endif %}
+          <a class="topbar-link detail-workspace-link" href="{% url 'studio:index' %}">{% ui "workspace" %}</a>
+          {% if has_access %}
+            <span>{% ui "download_active" %}</span>
+          {% else %}
+            <a class="topbar-link is-primary" href="{{ checkout_url }}">{% ui "pay_access" %}</a>
+          {% endif %}
+          <a class="topbar-link" href="{{ settings_url }}">{% ui "settings" %}</a>
+          <a class="topbar-link" href="{{ pricing_url }}">{% ui "pricing" %}</a>
+        </div>
       </div>
     </header>
 
@@ -152,7 +160,12 @@
               <p class="detail-status" data-job-status>{{ job.status_label }}</p>
             </div>
             <div class="detail-actions">
-              {% if job.repeatable %}
+              {% if job.repeatable and job.status == "failed" %}
+                <form class="inline-repeat-form" method="post" action="{{ job.resume_url }}">
+                  {% csrf_token %}
+                  <button class="secondary-action" type="submit">{% ui "retry" %}</button>
+                </form>
+              {% elif job.repeatable %}
                 <form class="inline-repeat-form" method="post" action="{{ job.repeat_url }}">
                   {% csrf_token %}
                   <button class="secondary-action" type="submit">{% ui "repeat" %}</button>
@@ -272,7 +285,7 @@
                         <button type="button" class="cx-player-btn" data-player-fullscreen aria-label="Fullscreen">⛶</button>
                       </div>
                     </div>
-                  {% elif output.preview_kind == "embed" %}
+                  {% elif output.preview_kind == "embed" or output.preview_kind == "subtitle" %}
                     <iframe class="result-preview embed-preview" src="{{ output.preview_url }}" title="{{ output.label }}"></iframe>
                   {% else %}
                     <div class="preview-missing">{% ui "preview_unavailable" %}</div>
@@ -333,6 +346,32 @@
     </main>
     <script>
       (() => {
+        const accountPanel = document.querySelector("[data-account-panel]");
+        const accountToggle = document.querySelector("[data-account-panel-toggle]");
+        const mobileMedia = window.matchMedia("(max-width: 760px)");
+        const syncMobile = () => document.body.classList.toggle("is-mobile-workspace", mobileMedia.matches);
+        const setAccountOpen = (open) => {
+          accountPanel?.classList.toggle("is-open", open);
+          document.body.classList.toggle("is-mobile-account-open", open);
+          accountToggle?.setAttribute("aria-expanded", open ? "true" : "false");
+        };
+        syncMobile();
+        mobileMedia.addEventListener?.("change", syncMobile);
+        accountToggle?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setAccountOpen(!accountPanel?.classList.contains("is-open"));
+        });
+        document.addEventListener("click", (event) => {
+          if (!(event.target instanceof Element)) return;
+          if (accountPanel?.classList.contains("is-open") && !event.target.closest("[data-account-panel]")) {
+            setAccountOpen(false);
+          }
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") setAccountOpen(false);
+        });
+
         const root = document.querySelector("[data-detail-job]");
         if (!root) return;
         const jobId = root.dataset.jobId;
@@ -418,7 +457,7 @@
                 </div>
               </div>
             `;
-          } else if (output.preview_kind === "embed") {
+          } else if (output.preview_kind === "embed" || output.preview_kind === "subtitle") {
             body = `<iframe class="result-preview embed-preview" src="${html(output.preview_url)}" title="${label}"></iframe>`;
           }
           return `

@@ -2,6 +2,7 @@ const jobs = new Map();
 const polling = new Set();
 const ACTIVE_TAB_KEY = "studio.activeTab";
 const RESUME_STEP_KEY = "studio.resumeStep";
+const TOOL_FLOW_STEP_PREFIX = "studio.toolFlowStep.";
 const JOB_FILTER_KEY = "studio.jobFilter";
 const JOB_FORM_DRAFT_PREFIX = "studio.jobFormDraft.";
 const DESIGN_MODE_KEY = "studio.designerMode";
@@ -47,7 +48,7 @@ setupSubscriptionDrawer();
 setupAccountPanel();
 setupDesignerModes();
 setupJobFormDrafts();
-setupSubtitleStylePickers();
+setupStepFlows();
 setupJobFilters();
 setupOriginalityChecker();
 setupMobileWorkspace();
@@ -81,6 +82,7 @@ document.querySelectorAll(".job-form").forEach((form) => {
         throw new Error(payload.error || i18n.task_failed || "Task did not start");
       }
       renderJob(payload.job);
+      form.dispatchEvent(new CustomEvent("tool-flow:reset"));
       if (RUNNING_JOB_STATUSES.has(payload.job.status)) pollJob(payload.job.id);
     } catch (error) {
       renderJob({
@@ -362,7 +364,7 @@ function setupJobFormDrafts() {
     }
 
     const controls = [...form.querySelectorAll("input, select, textarea")].filter((control) => {
-      return control.name && control.type !== "file" && (control.type !== "hidden" || control.matches("[data-subtitle-style-input]")) && control.name !== "csrfmiddlewaretoken";
+      return control.name && control.type !== "file" && control.type !== "hidden" && control.name !== "csrfmiddlewaretoken";
     });
 
     controls.forEach((control) => {
@@ -560,59 +562,52 @@ function setupCustomSelects() {
   });
 }
 
-function setupSubtitleStylePickers() {
-  document.querySelectorAll("[data-subtitle-style-picker]").forEach((picker) => {
-    const input = picker.querySelector("[data-subtitle-style-input]");
-    const current = picker.querySelector("[data-subtitle-style-current]");
-    const menu = picker.querySelector("[data-subtitle-style-menu]");
-    const cards = [...picker.querySelectorAll("[data-subtitle-style-value]")];
-    if (!input || !current || !menu || !cards.length) return;
+function setupStepFlows() {
+  document.querySelectorAll("[data-step-flow]").forEach((form, formIndex) => {
+    const steps = [...form.querySelectorAll("[data-flow-step]")];
+    const buttons = [...form.querySelectorAll("[data-flow-target]")];
+    if (!steps.length) return;
+    const key = `${TOOL_FLOW_STEP_PREFIX}${form.id || form.dataset.endpoint || formIndex}`;
+    const savedIndex = Number(localStorage.getItem(key) || 0);
+    let index = Number.isFinite(savedIndex) ? savedIndex : 0;
 
-    const close = () => {
-      picker.classList.remove("is-open");
-      current.setAttribute("aria-expanded", "false");
-    };
-
-    const choose = (card, animate = true) => {
-      const value = card.dataset.subtitleStyleValue || "pop";
-      const swatch = card.querySelector(".subtitle-style-swatch")?.cloneNode(true);
-      const title = card.querySelector(".subtitle-style-copy b")?.textContent?.trim() || value;
-      const hint = card.querySelector(".subtitle-style-copy small")?.textContent?.trim() || "";
-      input.value = value;
-      cards.forEach((item) => item.classList.toggle("is-selected", item === card));
-      current.replaceChildren(
-        swatch || Object.assign(document.createElement("span"), { className: `subtitle-style-swatch is-${value}`, textContent: title }),
-        Object.assign(document.createElement("span"), {
-          innerHTML: `<b>${escapeHtml(title)}</b><small>${escapeHtml(hint)}</small>`,
-        }),
-      );
-      if (animate) {
-        current.classList.remove("is-pulse");
-        void current.offsetWidth;
-        current.classList.add("is-pulse");
+    const validateStep = (step) => {
+      const controls = [...step.querySelectorAll("input, select, textarea")].filter((control) => !control.disabled);
+      for (const control of controls) {
+        if (!control.checkValidity()) {
+          control.reportValidity();
+          return false;
+        }
       }
-      close();
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
     };
 
-    const selected = cards.find((card) => card.dataset.subtitleStyleValue === input.value) || cards[0];
-    choose(selected, false);
+    const show = (target, scrollTop = false, force = false) => {
+      if (!force && target > index && !validateStep(steps[index])) return;
+      index = Math.max(0, Math.min(steps.length - 1, target));
+      localStorage.setItem(key, String(index));
+      steps.forEach((step, stepIndex) => step.classList.toggle("is-active", stepIndex === index));
+      buttons.forEach((button) => button.classList.toggle("is-active", Number(button.dataset.flowTarget || 0) === index));
+      if (scrollTop) {
+        const panel = form.closest(".tool-panel") || form;
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    };
 
-    current.addEventListener("click", () => {
-      const open = !picker.classList.contains("is-open");
-      picker.classList.toggle("is-open", open);
-      current.setAttribute("aria-expanded", open ? "true" : "false");
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => show(Number(button.dataset.flowTarget || 0), true));
     });
-    cards.forEach((card) => {
-      card.querySelector("[data-subtitle-style-choice]")?.addEventListener("click", () => choose(card));
-      card.querySelector("[data-subtitle-style-details]")?.addEventListener("click", () => choose(card, false));
+    form.querySelectorAll("[data-flow-prev]").forEach((button) => {
+      button.addEventListener("click", () => show(index - 1, true));
     });
-    document.addEventListener("click", (event) => {
-      if (!picker.contains(event.target)) close();
+    form.querySelectorAll("[data-flow-next]").forEach((button) => {
+      button.addEventListener("click", () => show(index + 1, true));
     });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") close();
+    form.addEventListener("tool-flow:reset", () => {
+      localStorage.removeItem(key);
+      show(0, false, true);
     });
+    show(index);
   });
 }
 
@@ -872,6 +867,7 @@ function setupResumeWizards() {
     if (next) next.addEventListener("click", () => show(index + 1, { scrollTop: true }));
     setupResumeStepScroller(stepper);
     setupTemplatePicker(form);
+    setupResumeContactFields(form);
     setupResumeCoach(form);
     setupResumePhotoCrop(form);
     setupResumeAccountAssist(form);
@@ -973,6 +969,27 @@ function loadJsonScript(id) {
   }
 }
 
+function setupResumeContactFields(form) {
+  const phone = form.querySelector('[name="contact_phone"]');
+  const email = form.querySelector('[name="contact_email"]');
+  const combined = form.querySelector("[data-resume-contact-combined]");
+  if (!combined) return;
+  const sync = (formData = null) => {
+    const value = [phone?.value, email?.value].map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+    combined.value = value;
+    if (formData) formData.set("contact", value);
+    return value;
+  };
+  [phone, email].filter(Boolean).forEach((field) => {
+    field.addEventListener("input", () => {
+      sync();
+      combined.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
+  form.addEventListener("formdata", (event) => sync(event.formData));
+  sync();
+}
+
 function setupResumeCoach(form) {
   const scoreBar = form.querySelector("[data-resume-score] span");
   const scoreText = form.querySelector("[data-resume-score-text]");
@@ -1019,12 +1036,13 @@ function setupResumeAccountAssist(form) {
   if (fillButton) {
     fillButton.addEventListener("click", () => {
       const name = form.querySelector('[name="name"]');
+      const email = form.querySelector('[name="contact_email"]');
       const contact = form.querySelector('[name="contact"]');
       if (name && prefill.name && !name.value.trim()) name.value = prefill.name;
-      if (contact && prefill.email && !contact.value.includes(prefill.email)) {
-        contact.value = contact.value.trim() ? `${contact.value.trim()}, ${prefill.email}` : prefill.email;
+      if (email && prefill.email && !email.value.trim()) {
+        email.value = prefill.email;
       }
-      [name, contact].filter(Boolean).forEach((field) => field.dispatchEvent(new Event("input", { bubbles: true })));
+      [name, email, contact].filter(Boolean).forEach((field) => field.dispatchEvent(new Event("input", { bubbles: true })));
     });
   }
   if (avatarButton && avatarInput) {
@@ -1465,6 +1483,20 @@ function setupResumeRewriteTools(form) {
     const field = form.querySelector(`[name="${name}"]`);
     const wrapper = field?.closest(".resume-smart-field");
     if (!field || !wrapper || wrapper.querySelector("[data-resume-rewrite-toolbar]")) return;
+    const actions = wrapper.querySelector("[data-resume-field-actions]") || document.createElement("div");
+    actions.className = "resume-field-actions";
+    actions.dataset.resumeFieldActions = "true";
+    const example = wrapper.querySelector(".resume-example");
+    const suggestions = wrapper.querySelector("[data-content-suggestions]");
+    if (example && !example.closest("[data-resume-field-actions]")) actions.appendChild(example);
+    if (suggestions && !suggestions.closest("[data-resume-field-actions]")) actions.appendChild(suggestions);
+    if (!actions.parentElement) {
+      const compactDetails = Boolean(wrapper.closest(".resume-details-grid"));
+      const hint = wrapper.querySelector(":scope > small");
+      if (compactDetails) field.after(actions);
+      else if (hint) hint.after(actions);
+      else wrapper.insertBefore(actions, field);
+    }
     const toolbar = document.createElement("div");
     toolbar.className = "resume-rewrite-toolbar";
     toolbar.dataset.resumeRewriteToolbar = "true";
@@ -1500,7 +1532,7 @@ function setupResumeRewriteTools(form) {
       });
       toolbar.appendChild(button);
     });
-    wrapper.appendChild(toolbar);
+    actions.appendChild(toolbar);
   });
 }
 
@@ -6916,7 +6948,9 @@ function renderJobActionMenu(job) {
   const access = window.STUDIO_ACCESS || {};
   const hasAccess = access.hasAccess === true;
   const checkoutUrl = access.checkoutUrl || "/billing/checkout/";
-  if (job.repeatable && job.repeat_url) {
+  if (job.status === "failed" && job.repeatable && job.resume_url) {
+    actions.push(`<button class="job-action-item" type="button" data-resume-url="${escapeHtml(job.resume_url)}" data-icon="rotate-ccw"><span>${escapeHtml(i18n.retry || i18n.repeat || "Retry")}</span></button>`);
+  } else if (job.repeatable && job.repeat_url) {
     actions.push(`<button class="job-action-item" type="button" data-repeat-url="${escapeHtml(job.repeat_url)}" data-icon="rotate-ccw"><span>${escapeHtml(i18n.repeat || "Repeat")}</span></button>`);
   }
   if (RUNNING_JOB_STATUSES.has(job.status) && job.pause_url) {

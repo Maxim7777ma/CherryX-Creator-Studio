@@ -29,7 +29,7 @@ from django.core.files.base import ContentFile
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, Q, Sum
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -268,6 +268,42 @@ def _community_usd_display(cherryx_amount: int) -> str:
 
 def _community_usd_rate_per_cherryx() -> str:
     return f"{cherryx_to_usd_cents_approx(1) / 100:.6f}"
+
+
+def _community_work_preview_url(work: CommunityWork, request: HttpRequest) -> str:
+    if work.cover_image:
+        return work.cover_image.url
+    if work.kind == CommunityWork.KIND_IMAGE and work.media_file:
+        return work.media_file.url
+    if work.status == CommunityWork.STATUS_PUBLISHED and _community_preview_field(work):
+        return reverse("studio:community_work_preview", args=[work.slug])
+    return ""
+
+
+def _delete_community_work_files(work: CommunityWork) -> None:
+    for field_name in ("cover_image", "media_file"):
+        field = getattr(work, field_name, None)
+        if field and field.name:
+            field.delete(save=False)
+
+
+def _community_manage_payload(work: CommunityWork, request: HttpRequest) -> dict[str, object]:
+    public_path = reverse("studio:community_work_detail", args=[work.slug])
+    purchases = int(getattr(work, "total_purchases", None) or work.purchase_count or 0)
+    revenue = int(getattr(work, "total_revenue", None) or 0)
+    if not revenue and work.is_paid:
+        revenue = purchases * int(work.price_cherryx or 0)
+    return {
+        "work": work,
+        "preview_url": _community_work_preview_url(work, request),
+        "public_url": request.build_absolute_uri(public_path),
+        "public_path": public_path,
+        "purchases": purchases,
+        "revenue": revenue,
+        "is_published": work.status == CommunityWork.STATUS_PUBLISHED,
+        "visibility_action": "hide" if work.status == CommunityWork.STATUS_PUBLISHED else "publish",
+        "visibility_label": "Hide from public" if work.status == CommunityWork.STATUS_PUBLISHED else "Publish again",
+    }
 
 
 @require_GET
@@ -784,6 +820,8 @@ def community_feed(request: HttpRequest, kind: str):
 @require_GET
 def community_work_detail(request: HttpRequest, slug: str):
     work = get_object_or_404(CommunityWork.objects.select_related("owner"), slug=slug, status=CommunityWork.STATUS_PUBLISHED)
+    CommunityWork.objects.filter(pk=work.pk).update(view_count=F("view_count") + 1, updated_at=timezone.now())
+    work.view_count = int(work.view_count or 0) + 1
     has_purchase = bool(request.user.is_authenticated and CommunityPurchase.objects.filter(work=work, buyer=request.user).exists())
     is_owner = bool(request.user.is_authenticated and work.owner_id == request.user.id)
     can_access = _community_work_can_access(work, request.user)
@@ -867,6 +905,76 @@ def community_publish(request: HttpRequest):
             "seo_description": "Share a free or paid CherryX video, image, music or text work with the public community feed.",
         },
     )
+
+
+@login_required
+@require_GET
+def community_my_works(request: HttpRequest):
+    works = (
+        CommunityWork.objects.filter(owner=request.user)
+        .annotate(total_purchases=Count("purchases"), total_revenue=Sum("purchases__price_cherryx"))
+        .order_by("-updated_at", "-created_at")
+    )
+    items = [_community_manage_payload(work, request) for work in works]
+    totals = {
+        "works": len(items),
+        "published": sum(1 for item in items if item["is_published"]),
+        "hidden": sum(1 for item in items if not item["is_published"]),
+        "views": sum(int(item["work"].view_count or 0) for item in items),
+        "purchases": sum(int(item["purchases"] or 0) for item in items),
+        "revenue": sum(int(item["revenue"] or 0) for item in items),
+        "downloads": sum(int(item["work"].download_count or 0) for item in items),
+    }
+    return render(
+        request,
+        "studio/community_my_works.html",
+        {
+            "items": items,
+            "totals": totals,
+            "seo_title": "My community listings",
+            "seo_description": "Manage your CherryX community publications, stats, links and visibility.",
+        },
+    )
+
+
+@login_required
+@require_POST
+def community_work_visibility(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork, slug=slug, owner=request.user)
+    action = request.POST.get("action") or ""
+    if action == "hide":
+        work.status = CommunityWork.STATUS_DRAFT
+        work.save(update_fields=["status", "updated_at"])
+        message = "Listing is hidden from public feeds."
+    elif action == "publish":
+        work.status = CommunityWork.STATUS_PUBLISHED
+        work.save(update_fields=["status", "published_at", "updated_at"])
+        message = "Listing is public again."
+    else:
+        return JsonResponse({"ok": False, "message": "Unknown visibility action."}, status=400)
+    payload = _community_manage_payload(work, request)
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": message,
+            "status": work.status,
+            "is_published": payload["is_published"],
+            "visibility_action": payload["visibility_action"],
+            "visibility_label": payload["visibility_label"],
+            "public_url": payload["public_url"],
+        }
+    )
+
+
+@login_required
+@require_POST
+def community_work_delete(request: HttpRequest, slug: str):
+    work = get_object_or_404(CommunityWork, slug=slug, owner=request.user)
+    work_id = work.pk
+    with transaction.atomic():
+        _delete_community_work_files(work)
+        work.delete()
+    return JsonResponse({"ok": True, "id": work_id, "message": "Listing was deleted from the system and database."})
 
 
 @login_required
@@ -2558,7 +2666,7 @@ def export_video_project_subtitles(request: HttpRequest, project_id: int) -> Htt
     export_format = str(request.GET.get("format") or "srt").strip().lower()
     if export_format not in {"srt", "vtt", "ass", "json"}:
         export_format = "srt"
-    cues = _video_project_caption_cues(project.state_json or {})
+    cues = _video_project_caption_cues(project.state_json or {}, rich=export_format in {"ass", "json"})
     if export_format == "vtt":
         content = _render_vtt(cues)
         media_type = "text/vtt; charset=utf-8"
@@ -2566,7 +2674,16 @@ def export_video_project_subtitles(request: HttpRequest, project_id: int) -> Htt
         content = _render_ass(cues, project.state_json or {})
         media_type = "text/x-ssa; charset=utf-8"
     elif export_format == "json":
-        content = json.dumps({"project_id": project.id, "title": project.title, "cues": cues}, ensure_ascii=False, indent=2)
+        content = json.dumps(
+            {
+                "project_id": project.id,
+                "title": project.title,
+                "subtitleWorkflow": (project.state_json or {}).get("subtitleWorkflow", {}) if isinstance(project.state_json, dict) else {},
+                "cues": cues,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
         media_type = "application/json; charset=utf-8"
     else:
         content = _render_srt(cues)
@@ -3017,6 +3134,7 @@ def start_youtube(request: HttpRequest) -> JsonResponse:
             guest_key=guest_key,
             ai_improve=_post_bool(request, "ai_improve"),
             clip_count=int(request.POST.get("clip_count") or 10),
+            processing_speed=request.POST.get("processing_speed", "auto"),
         )
         return _job_json(job)
     except Exception as exc:
@@ -3361,6 +3479,8 @@ def edit_output_video(request: HttpRequest, job_id: str, index: int) -> JsonResp
     if existing_id:
         existing = _video_project_queryset(owner_id, guest_key).filter(id=existing_id).first()
         if existing:
+            _ensure_project_uses_editable_subtitle_source(existing, record, output.path)
+            _append_job_output_subtitles_to_video_project(existing, record, output.path)
             return JsonResponse(_video_open_payload(existing, owner_id, guest_key))
 
     project = _create_video_project_from_output(request, record, output, job)
@@ -3444,12 +3564,70 @@ def preview_output(request: HttpRequest, job_id: str, index: int) -> HttpRespons
         raise Http404("Output not found")
     if str(output.media_type).startswith("video/"):
         return _range_file_response(request, output.path, output.media_type, output.name)
+    if _is_subtitle_output(output.name, output.media_type):
+        return _subtitle_preview_response(output.path, output.name)
     return FileResponse(
         output.path.open("rb"),
         as_attachment=False,
         filename=output.name,
         content_type=output.media_type,
     )
+
+
+def _is_subtitle_output(name: str, media_type: str = "") -> bool:
+    suffix = Path(str(name or "")).suffix.lower()
+    return suffix in {".ass", ".srt", ".vtt"} or str(media_type or "").lower() in {"text/x-ssa", "text/x-ass"}
+
+
+def _subtitle_preview_response(path: Path, name: str) -> HttpResponse:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise Http404("Subtitle file not found") from exc
+    text = _decode_subtitle_bytes(raw)
+    cues = _parse_subtitle_cues(text, name)
+    rows = []
+    for index, cue in enumerate(cues[:500], start=1):
+        start = _format_vtt_time(float(cue.get("start") or 0))
+        end = _format_vtt_time(float(cue.get("end") or 0))
+        caption = html.escape(str(cue.get("text") or "")).replace("\n", "<br>")
+        rows.append(
+            f'<article><span>{index:02d}</span><time>{html.escape(start)} - {html.escape(end)}</time><p>{caption}</p></article>'
+        )
+    if not rows:
+        rows.append("<article><span>--</span><time>0:00</time><p>No readable subtitle cues found.</p></article>")
+    raw_link = html.escape(path.name)
+    page = f"""<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(name)}</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; background: #f7fafc; color: #111827; }}
+    main {{ display: grid; gap: 14px; padding: 18px; }}
+    header {{ display: flex; align-items: end; justify-content: space-between; gap: 14px; border-bottom: 1px solid #dbe7f4; padding-bottom: 12px; }}
+    h1 {{ margin: 0; font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }}
+    header span {{ color: #64748b; font-size: 12px; font-weight: 800; }}
+    section {{ display: grid; gap: 9px; }}
+    article {{ display: grid; grid-template-columns: 44px 150px minmax(0, 1fr); gap: 12px; align-items: start; border: 1px solid #d8e4f0; border-radius: 14px; padding: 12px; background: #fff; box-shadow: 0 10px 26px rgba(15,23,42,.05); }}
+    article span {{ display: inline-grid; width: 32px; height: 32px; place-items: center; border-radius: 999px; background: #eef6ff; color: #2563eb; font-size: 12px; font-weight: 900; }}
+    time {{ color: #516176; font-size: 12px; font-weight: 850; white-space: nowrap; }}
+    p {{ margin: 0; color: #0f172a; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }}
+    @media (max-width: 640px) {{ main {{ padding: 12px; }} article {{ grid-template-columns: 36px minmax(0, 1fr); }} time {{ grid-column: 2; }} p {{ grid-column: 1 / -1; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header><div><span>Subtitle preview</span><h1>{html.escape(name)}</h1></div><span>{len(cues)} cues</span></header>
+    <section>{"".join(rows)}</section>
+  </main>
+</body>
+</html>"""
+    response = HttpResponse(page, content_type="text/html; charset=utf-8")
+    response["X-Subtitle-Source"] = raw_link
+    return response
 
 
 def _range_file_response(request: HttpRequest, path: Path, content_type: str, filename: str) -> HttpResponse:
@@ -4180,6 +4358,12 @@ def _create_video_project_from_output(request: HttpRequest, record: JobRecord, o
     output_path = Path(output.path)
     edit_source = _short_video_edit_metadata(output_path)
     asset_source = Path(str(edit_source.get("source_path") or "")) if edit_source else output_path
+    asset_original_name = output_path.name
+    subtitle_source = _job_original_video_source_for_edit(record, output_path)
+    if subtitle_source:
+        asset_source = subtitle_source
+        asset_original_name = subtitle_source.name
+        edit_source = {}
     if not asset_source.exists() or not asset_source.is_file():
         fallback_source = Path(str(edit_source.get("fallback_source_path") or "")) if edit_source else output_path
         asset_source = fallback_source if fallback_source.exists() and fallback_source.is_file() else output_path
@@ -4192,7 +4376,7 @@ def _create_video_project_from_output(request: HttpRequest, record: JobRecord, o
         title=title,
         state_json={},
     )
-    asset = _copy_output_to_video_asset(project, asset_source, output_path.name)
+    asset = _copy_output_to_video_asset(project, asset_source, asset_original_name)
     duration = asset.duration or _safe_video_duration(Path(asset.file_path))
     if duration and not asset.duration:
         asset.duration = duration
@@ -4201,7 +4385,185 @@ def _create_video_project_from_output(request: HttpRequest, record: JobRecord, o
     _update_video_project_metadata(project)
     project.storage_bytes = _video_project_storage_bytes(project)
     project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
+    _append_job_output_subtitles_to_video_project(project, record, output_path)
     return project
+
+
+def _job_original_video_source_for_edit(record: JobRecord, video_output_path: Path) -> Path | None:
+    params = _job_record_params(record)
+    if str(params.get("action") or record.kind) not in {"subtitles", "package"}:
+        return None
+    if not _subtitle_output_path_for_video_edit(record, video_output_path):
+        return None
+    source = Path(str(params.get("source") or ""))
+    if source.exists() and source.is_file():
+        return source
+    return None
+
+
+def _ensure_project_uses_editable_subtitle_source(project: VideoEditorProject, record: JobRecord, video_output_path: Path) -> None:
+    source = _job_original_video_source_for_edit(record, video_output_path)
+    if not source:
+        return
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    video_clip = next((clip for clip in clips if isinstance(clip, dict) and clip.get("type") == "video"), None)
+    if not video_clip:
+        return
+    current_asset = project.assets.filter(id=int(video_clip.get("assetId") or 0)).first()
+    if current_asset:
+        try:
+            if Path(current_asset.file_path).resolve() == source.resolve():
+                return
+        except OSError:
+            pass
+        if current_asset.original_name == source.name:
+            return
+    asset = _copy_output_to_video_asset(project, source, source.name)
+    duration = asset.duration or _safe_video_duration(Path(asset.file_path))
+    video_clip["assetId"] = asset.id
+    video_clip["duration"] = round(max(0.25, duration or float(video_clip.get("duration") or 0) or 12), 3)
+    video_clip["sourceStart"] = 0
+    video_clip["sourceEnd"] = video_clip["duration"]
+    state["clipName"] = source.name
+    state["clips"] = clips
+    project.state_json = state
+    _update_video_project_metadata(project)
+    project.storage_bytes = _video_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
+
+
+def _append_job_output_subtitles_to_video_project(project: VideoEditorProject, record: JobRecord, video_output_path: Path) -> None:
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    if any(isinstance(clip, dict) and clip.get("type") == "caption" for clip in clips):
+        _mark_generated_subtitle_project(project, record, video_output_path)
+        _apply_job_subtitle_style_to_caption_clips(project, record)
+        return
+    subtitle_path = _subtitle_output_path_for_video_edit(record, video_output_path)
+    if not subtitle_path:
+        return
+    try:
+        text = _decode_subtitle_bytes(subtitle_path.read_bytes())
+        cues = _parse_subtitle_cues(text, subtitle_path.name)
+    except Exception:
+        return
+    if cues:
+        _append_video_project_caption_clips(project, cues)
+        _mark_generated_subtitle_project(project, record, video_output_path, subtitle_path=subtitle_path)
+        _apply_job_subtitle_style_to_caption_clips(project, record)
+
+
+def _mark_generated_subtitle_project(
+    project: VideoEditorProject,
+    record: JobRecord,
+    video_output_path: Path,
+    *,
+    subtitle_path: Path | None = None,
+) -> None:
+    params = _job_record_params(record)
+    subtitle_path = subtitle_path or _subtitle_output_path_for_video_edit(record, video_output_path)
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    state = json.loads(json.dumps(state))
+    workflow = state.get("subtitleWorkflow") if isinstance(state.get("subtitleWorkflow"), dict) else {}
+    workflow.update(
+        {
+            "mode": "generated-editable",
+            "sourceJobId": record.job_id,
+            "sourceJobKind": record.kind,
+            "style": str(params.get("style") or "").strip().lower(),
+            "sourceVideo": str(params.get("source") or ""),
+            "renderedVideo": str(video_output_path),
+            "subtitlePath": str(subtitle_path or ""),
+        }
+    )
+    state["subtitleWorkflow"] = workflow
+    clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    for clip in clips:
+        if isinstance(clip, dict) and clip.get("type") == "caption":
+            clip["subtitleSource"] = {
+                "kind": "generated",
+                "jobId": record.job_id,
+                "style": workflow.get("style") or "",
+            }
+    project.state_json = state
+    _update_video_project_metadata(project)
+    project.storage_bytes = _video_project_storage_bytes(project)
+    project.save(update_fields=["state_json", "storage_bytes", "asset_count", "clip_count", "duration_seconds", "thumbnail_path", "updated_at"])
+
+
+def _apply_job_subtitle_style_to_caption_clips(project: VideoEditorProject, record: JobRecord) -> None:
+    params = _job_record_params(record)
+    style = str(params.get("style") or "").strip().lower()
+    clip_style = _video_editor_caption_style(style)
+    state = project.state_json if isinstance(project.state_json, dict) else {}
+    clips = state.get("clips") if isinstance(state.get("clips"), list) else []
+    changed = False
+    for clip in clips:
+        if not isinstance(clip, dict) or clip.get("type") != "caption":
+            continue
+        current = clip.get("style") if isinstance(clip.get("style"), dict) else {}
+        next_style = dict(current)
+        next_style.update(clip_style)
+        clip["style"] = next_style
+        source = clip.get("subtitleSource") if isinstance(clip.get("subtitleSource"), dict) else {}
+        if source:
+            source["style"] = style
+            clip["subtitleSource"] = source
+        changed = True
+    if changed:
+        project.state_json = state
+        project.save(update_fields=["state_json", "updated_at"])
+
+
+def _video_editor_caption_style(style: str) -> dict[str, object]:
+    base = {
+        "font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "size": 32,
+        "fontWeight": 900,
+        "color": "#ffffff",
+        "stroke": "#000000",
+        "strokeWidth": 2,
+        "bg": "#000000",
+        "bgAlpha": 0,
+        "textShadow": "0 3px 0 rgba(0,0,0,.72), 0 10px 24px rgba(0,0,0,.28)",
+        "animation": style or "none",
+    }
+    if style in {"kinetic", "bounce", "pop", "headline"}:
+        base.update({"size": 36, "stroke": "#db2777", "strokeWidth": 2, "bgAlpha": 0, "animation": "kinetic"})
+    elif style == "neon":
+        base.update({"size": 34, "stroke": "#7c3aed", "strokeWidth": 2, "bgAlpha": 0, "textShadow": "0 0 10px #22d3ee, 0 0 22px #f0abfc, 0 3px 0 #020617", "animation": "neon"})
+    elif style == "candy":
+        base.update({"size": 34, "stroke": "#7e22ce", "strokeWidth": 2, "bgAlpha": 0, "textShadow": "2px 2px 0 #672c92, -1px -1px 0 #672c92, 0 0 14px rgba(255,118,216,.52)", "animation": "candy"})
+    elif style in {"clean", "minimal"}:
+        base.update({"size": 28, "fontWeight": 760, "stroke": "#111827", "strokeWidth": 1, "bg": "#000000", "bgAlpha": 24, "textShadow": "none", "animation": "none"})
+    elif style in {"editorial", "luxury"}:
+        base.update({"size": 30, "color": "#f8fafc", "stroke": "#1f2937", "strokeWidth": 1, "bgAlpha": 18, "animation": "soft"})
+    elif style == "typewriter":
+        base.update({"font": "Consolas, monospace", "size": 28, "fontWeight": 800, "strokeWidth": 1, "bgAlpha": 20, "textShadow": "none", "animation": "typewriter"})
+    return base
+
+
+def _subtitle_output_path_for_video_edit(record: JobRecord, video_output_path: Path) -> Path | None:
+    try:
+        video_parent = video_output_path.resolve().parent
+    except OSError:
+        video_parent = video_output_path.parent
+    candidates: list[Path] = []
+    for output in record.outputs.all():
+        path = Path(output.path)
+        if path == video_output_path or not _is_subtitle_output(path.name, output.media_type):
+            continue
+        if not path.exists() or not path.is_file():
+            continue
+        candidates.append(path)
+    if not candidates:
+        return None
+    try:
+        same_folder = [path for path in candidates if path.resolve().parent == video_parent]
+    except OSError:
+        same_folder = [path for path in candidates if path.parent == video_parent]
+    return (same_folder or candidates)[0]
 
 
 def _short_video_edit_metadata(output_path: Path) -> dict[str, object]:
@@ -4810,12 +5172,12 @@ def _render_video_project_from_clip(clip: dict[str, object], assets: dict[int, V
         size = max(12, min(96, int(float(style.get("size") or 32))))
         start = max(0, float(text_clip.get("start") or 0))
         end = min(duration, start + max(0.25, float(text_clip.get("duration") or 4)))
-        y = int(height * (float(text_clip.get("y") or 78) / 100))
+        x_expr, y_expr = _ffmpeg_drawtext_xy(text_clip, width, height)
+        draw_style = _ffmpeg_drawtext_style(style)
         filters.append(
             f"[{current_label}]drawtext="
             f"text='{text}':"
-            f"x=(w-text_w)/2:y={y}:fontsize={size}:fontcolor=white:"
-            "box=1:boxcolor=black@0.45:boxborderw=18:"
+            f"x={x_expr}:y={y_expr}:fontsize={size}:{draw_style}:"
             f"enable='between(t,{start:.3f},{end:.3f})'[txt{text_index}]"
         )
         current_label = f"txt{text_index}"
@@ -4906,12 +5268,12 @@ def _render_visual_card_project(state: dict[str, object], assets: dict[int, Vide
         size = max(12, min(96, int(float(style.get("size") or 32))))
         start = max(0, float(text_clip.get("start") or 0))
         end = min(duration, start + max(0.25, float(text_clip.get("duration") or 4)))
-        y = int(height * (float(text_clip.get("y") or 78) / 100))
+        x_expr, y_expr = _ffmpeg_drawtext_xy(text_clip, width, height)
+        draw_style = _ffmpeg_drawtext_style(style)
         filters.append(
             "drawtext="
             f"text='{text}':"
-            f"x=(w-text_w)/2:y={y}:fontsize={size}:fontcolor=white:"
-            "box=1:boxcolor=black@0.45:boxborderw=18:"
+            f"x={x_expr}:y={y_expr}:fontsize={size}:{draw_style}:"
             f"enable='between(t,{start:.3f},{end:.3f})'"
         )
     if filters:
@@ -4953,6 +5315,43 @@ def _video_export_visual_clips(state: dict[str, object], assets: dict[int, Video
     return sorted(visual, key=lambda item: float(item.get("start") or 0))
 
 
+def _ffmpeg_drawtext_style(style: dict[str, object]) -> str:
+    color = _ffmpeg_color(str(style.get("color") or "#ffffff"), fallback="white")
+    stroke = _ffmpeg_color(str(style.get("stroke") or "#000000"), fallback="black")
+    stroke_width = max(0, min(8, int(float(style.get("strokeWidth") or 0))))
+    bg = _ffmpeg_color(str(style.get("bg") or "#000000"), fallback="black")
+    bg_alpha = max(0, min(100, int(float(style.get("bgAlpha") or 0)))) / 100
+    parts = [f"fontcolor={color}"]
+    if stroke_width:
+        parts.extend([f"borderw={stroke_width}", f"bordercolor={stroke}"])
+    if bg_alpha > 0:
+        parts.extend(["box=1", f"boxcolor={bg}@{bg_alpha:.2f}", "boxborderw=18"])
+    else:
+        parts.extend(["box=0", "boxborderw=0"])
+    if str(style.get("textShadow") or "").strip().lower() != "none":
+        parts.extend(["shadowcolor=black@0.55", "shadowx=2", "shadowy=3"])
+    return ":".join(parts)
+
+
+def _ffmpeg_drawtext_xy(clip: dict[str, object], width: int, height: int) -> tuple[str, str]:
+    x_pct = max(-140.0, min(240.0, float(clip.get("x") or 50)))
+    y_pct = max(-140.0, min(240.0, float(clip.get("y") or 78)))
+    x = int(width * (x_pct / 100))
+    y = int(height * (y_pct / 100))
+    x_expr = f"{x}-text_w/2"
+    y_expr = f"{y}-text_h/2"
+    return x_expr, y_expr
+
+
+def _ffmpeg_color(value: str, *, fallback: str) -> str:
+    raw = str(value or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", raw):
+        return f"0x{raw[1:]}"
+    if re.fullmatch(r"[A-Za-z]+", raw):
+        return raw.lower()
+    return fallback
+
+
 def _ffmpeg_drawtext_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'").replace("\n", " ")[:500]
 
@@ -4991,7 +5390,11 @@ def _parse_json_subtitles(text: str) -> list[dict[str, object]]:
     for item in raw_cues:
         if not isinstance(item, dict):
             continue
-        cues.append({"start": item.get("start"), "end": item.get("end"), "text": item.get("text")})
+        cue: dict[str, object] = {"start": item.get("start"), "end": item.get("end"), "text": item.get("text")}
+        for key in ("x", "y", "scale", "boxWidth", "rotation", "style", "source"):
+            if key in item:
+                cue[key] = item[key]
+        cues.append(cue)
     return cues
 
 
@@ -5035,7 +5438,11 @@ def _normalize_subtitle_cues(raw_cues: list[dict[str, object]]) -> list[dict[str
         if end <= start:
             end = start + 2.0
         if text:
-            cues.append({"start": round(start, 3), "end": round(end, 3), "text": text[:800]})
+            cue: dict[str, object] = {"start": round(start, 3), "end": round(end, 3), "text": text[:800]}
+            for key in ("x", "y", "scale", "boxWidth", "rotation", "style", "source"):
+                if key in item:
+                    cue[key] = item[key]
+            cues.append(cue)
     cues.sort(key=lambda cue: (float(cue["start"]), float(cue["end"])))
     return cues[:5000]
 
@@ -5080,6 +5487,18 @@ def _append_video_project_caption_clips(project: VideoEditorProject, cues: list[
     for cue in cues:
         start = max(0.0, float(cue.get("start") or 0))
         end = max(start + 0.2, float(cue.get("end") or start + 2))
+        cue_style = cue.get("style") if isinstance(cue.get("style"), dict) else {}
+        default_style = {
+            "font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            "size": 24,
+            "color": "#ffffff",
+            "stroke": "#000000",
+            "strokeWidth": 1,
+            "bg": "#000000",
+            "bgAlpha": 42,
+        }
+        default_style.update(cue_style)
+        source = cue.get("source") if isinstance(cue.get("source"), dict) else {}
         clips.append(
             {
                 "id": f"caption-{uuid.uuid4().hex[:10]}",
@@ -5087,19 +5506,14 @@ def _append_video_project_caption_clips(project: VideoEditorProject, cues: list[
                 "trackId": text_track.get("id") or "text-1",
                 "start": round(start, 3),
                 "duration": round(max(0.2, end - start), 3),
-                "x": 50,
-                "y": 84,
-                "scale": 100,
+                "x": max(0.0, min(100.0, float(cue.get("x") or 50))),
+                "y": max(0.0, min(100.0, float(cue.get("y") or 84))),
+                "scale": max(10.0, min(300.0, float(cue.get("scale") or 100))),
+                "boxWidth": max(18.0, min(86.0, float(cue.get("boxWidth") or 42))),
+                "rotation": float(cue.get("rotation") or 0),
                 "text": str(cue.get("text") or "Caption"),
-                "style": {
-                    "font": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                    "size": 24,
-                    "color": "#ffffff",
-                    "stroke": "#000000",
-                    "strokeWidth": 1,
-                    "bg": "#000000",
-                    "bgAlpha": 42,
-                },
+                "style": default_style,
+                "subtitleSource": source,
             }
         )
     state["clips"] = clips
@@ -5110,7 +5524,7 @@ def _append_video_project_caption_clips(project: VideoEditorProject, cues: list[
     return project
 
 
-def _video_project_caption_cues(state: dict[str, object]) -> list[dict[str, object]]:
+def _video_project_caption_cues(state: dict[str, object], *, rich: bool = False) -> list[dict[str, object]]:
     raw_clips = state.get("clips") if isinstance(state.get("clips"), list) else []
     cues: list[dict[str, object]] = []
     for clip in raw_clips:
@@ -5120,7 +5534,21 @@ def _video_project_caption_cues(state: dict[str, object]) -> list[dict[str, obje
         duration = max(0.1, float(clip.get("duration") or 0))
         text = _clean_subtitle_text(str(clip.get("text") or ""))
         if text:
-            cues.append({"start": round(start, 3), "end": round(start + duration, 3), "text": text[:800]})
+            cue: dict[str, object] = {"start": round(start, 3), "end": round(start + duration, 3), "text": text[:800]}
+            if rich:
+                style = clip.get("style") if isinstance(clip.get("style"), dict) else {}
+                cue.update(
+                    {
+                        "x": max(0.0, min(100.0, float(clip.get("x") or 50))),
+                        "y": max(0.0, min(100.0, float(clip.get("y") or 84))),
+                        "scale": max(10.0, min(300.0, float(clip.get("scale") or 100))),
+                        "boxWidth": max(18.0, min(86.0, float(clip.get("boxWidth") or 42))),
+                        "rotation": float(clip.get("rotation") or 0),
+                        "style": style,
+                        "source": clip.get("subtitleSource") if isinstance(clip.get("subtitleSource"), dict) else {},
+                    }
+                )
+            cues.append(cue)
     return _normalize_subtitle_cues(cues)
 
 
@@ -5177,23 +5605,106 @@ def _render_vtt(cues: list[dict[str, object]]) -> str:
 
 def _render_ass(cues: list[dict[str, object]], state: dict[str, object]) -> str:
     width, height = _video_export_size(state if isinstance(state, dict) else {}, "1080p")
+    workflow = state.get("subtitleWorkflow") if isinstance(state, dict) and isinstance(state.get("subtitleWorkflow"), dict) else {}
+    workflow_style = str(workflow.get("style") or "").strip().lower()
+    default_style = _video_editor_caption_style(workflow_style)
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
         f"PlayResX: {width}",
         f"PlayResY: {height}",
+        "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,1,2,1,2,48,48,72,1",
+        _ass_style_line("Default", default_style),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for cue in cues:
-        text = str(cue["text"]).replace("\n", "\\N").replace("{", "(").replace("}", ")")
-        lines.append(f"Dialogue: 0,{_format_ass_time(float(cue['start']))},{_format_ass_time(float(cue['end']))},Default,,0,0,0,,{text}")
+        style = cue.get("style") if isinstance(cue.get("style"), dict) else {}
+        merged_style = dict(default_style)
+        merged_style.update(style)
+        x = int(width * (max(0.0, min(100.0, float(cue.get("x") or 50))) / 100))
+        y = int(height * (max(0.0, min(100.0, float(cue.get("y") or 84))) / 100))
+        scale = max(10.0, min(300.0, float(cue.get("scale") or 100)))
+        rotation = float(cue.get("rotation") or 0)
+        start = float(cue["start"])
+        end = float(cue["end"])
+        duration_ms = max(100, int((end - start) * 1000))
+        tags = [r"\an2", fr"\pos({x},{y})"]
+        if scale != 100:
+            tags.append(fr"\fscx{scale:.0f}\fscy{scale:.0f}")
+        if abs(rotation) >= 0.5:
+            tags.append(fr"\frz{rotation:.1f}")
+        tags.extend(_ass_inline_style_tags(merged_style))
+        source = cue.get("source") if isinstance(cue.get("source"), dict) else {}
+        cue_style = str(source.get("style") or workflow_style or "").strip().lower()
+        if cue_style in {"kinetic", "bounce", "pop", "headline"}:
+            tags.append(r"\fad(80,120)")
+            tags.append(r"\t(0,160,\fscx108\fscy108)")
+            tags.append(r"\t(160,320,\fscx100\fscy100)")
+        elif cue_style in {"neon", "candy"}:
+            tags.append(r"\fad(70,140)")
+            tags.append(fr"\t(0,{min(duration_ms, 260)},\blur1)")
+        text = _ass_escape_text(str(cue["text"]))
+        lines.append(f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end)},Default,,0,0,0,,{{{''.join(tags)}}}{text}")
     return "\n".join(lines) + "\n"
+
+
+def _ass_style_line(name: str, style: dict[str, object]) -> str:
+    font = _ass_font_name(str(style.get("font") or "Arial"))
+    size = max(12, min(140, int(float(style.get("size") or 52))))
+    color = _hex_to_ass_color(str(style.get("color") or "#ffffff"), alpha=0)
+    stroke = _hex_to_ass_color(str(style.get("stroke") or "#000000"), alpha=0)
+    bg_alpha = max(0, min(100, int(float(style.get("bgAlpha") or 0))))
+    bg = _hex_to_ass_color(str(style.get("bg") or "#000000"), alpha=255 - int(bg_alpha * 2.55))
+    outline = max(0, min(12, int(float(style.get("strokeWidth") or 2))))
+    bold = -1 if int(float(style.get("fontWeight") or 800)) >= 700 else 0
+    return (
+        f"Style: {name},{font},{size},{color},&H000000FF,{stroke},{bg},"
+        f"{bold},0,0,0,100,100,0,0,1,{outline},2,2,54,54,120,1"
+    )
+
+
+def _ass_inline_style_tags(style: dict[str, object]) -> list[str]:
+    tags: list[str] = []
+    if style.get("color"):
+        tags.append(fr"\c{_hex_to_ass_color(str(style.get('color')), alpha=0)}")
+    if style.get("stroke"):
+        tags.append(fr"\3c{_hex_to_ass_color(str(style.get('stroke')), alpha=0)}")
+    if style.get("strokeWidth") is not None:
+        tags.append(fr"\bord{max(0, min(12, int(float(style.get('strokeWidth') or 0))))}")
+    if style.get("size"):
+        tags.append(fr"\fs{max(12, min(140, int(float(style.get('size') or 52))))}")
+    if int(float(style.get("fontWeight") or 800)) >= 700:
+        tags.append(r"\b1")
+    return tags
+
+
+def _ass_font_name(value: str) -> str:
+    font = value.split(",", 1)[0].strip().strip("'\"") or "Arial"
+    aliases = {"system-ui": "Segoe UI", "-apple-system": "Segoe UI", "blinkmacsystemfont": "Segoe UI"}
+    return aliases.get(font.lower(), font)
+
+
+def _hex_to_ass_color(value: str, *, alpha: int = 0) -> str:
+    raw = str(value or "").strip()
+    match = re.fullmatch(r"#?([0-9a-fA-F]{6})", raw)
+    if not match:
+        raw = "#ffffff"
+        match = re.fullmatch(r"#?([0-9a-fA-F]{6})", raw)
+    hex_value = match.group(1)
+    r = int(hex_value[0:2], 16)
+    g = int(hex_value[2:4], 16)
+    b = int(hex_value[4:6], 16)
+    return f"&H{max(0, min(255, alpha)):02X}{b:02X}{g:02X}{r:02X}"
+
+
+def _ass_escape_text(value: str) -> str:
+    return str(value).replace("{", "(").replace("}", ")").replace("\n", "\\N")
 
 
 def _format_srt_time(seconds: float) -> str:
@@ -5865,6 +6376,13 @@ def _localized_image_modes(language: str) -> list[tuple[str, str]]:
 
 def _localized_youtube_modes(language: str) -> list[tuple[str, str]]:
     labels = {
+        "regular": {"en": "Shorts classic", "ru": "Shorts классика", "uk": "Shorts класика", "fr": "Shorts classique", "de": "Shorts klassisch", "es": "Shorts clásico", "ka": "Shorts კლასიკა", "hy": "Shorts դասական", "it": "Shorts classici"},
+        "dynamic": {"en": "Shorts dynamic", "ru": "Shorts динамика", "uk": "Shorts динаміка", "fr": "Shorts dynamique", "de": "Shorts dynamisch", "es": "Shorts dinámico", "ka": "Shorts დინამიკა", "hy": "Shorts դինամիկ", "it": "Shorts dinamici"},
+        "podcast": {"en": "Shorts podcast", "ru": "Shorts подкаст", "uk": "Shorts подкаст", "fr": "Shorts podcast", "de": "Shorts Podcast", "es": "Shorts podcast", "ka": "Shorts პოდკასტი", "hy": "Shorts փոդքաստ", "it": "Shorts podcast"},
+        "calm": {"en": "Shorts calm", "ru": "Shorts спокойно", "uk": "Shorts спокійно", "fr": "Shorts calme", "de": "Shorts ruhig", "es": "Shorts calmado", "ka": "Shorts მშვიდი", "hy": "Shorts հանգիստ", "it": "Shorts morbidi"},
+        "backstage30": {"en": "Preview 30s", "ru": "Preview 30 сек", "uk": "Preview 30 с", "fr": "Preview 30 s", "de": "Preview 30 s", "es": "Preview 30 s", "ka": "Preview 30 წმ", "hy": "Preview 30 վրկ", "it": "Preview 30 s"},
+        "backstage60": {"en": "Preview 60s", "ru": "Preview 60 сек", "uk": "Preview 60 с", "fr": "Preview 60 s", "de": "Preview 60 s", "es": "Preview 60 s", "ka": "Preview 60 წმ", "hy": "Preview 60 վրկ", "it": "Preview 60 s"},
+        "backstage90": {"en": "Preview 90s", "ru": "Preview 90 сек", "uk": "Preview 90 с", "fr": "Preview 90 s", "de": "Preview 90 s", "es": "Preview 90 s", "ka": "Preview 90 წმ", "hy": "Preview 90 վրկ", "it": "Preview 90 s"},
         "download": {"en": "Download MP4", "ru": "Скачать MP4", "uk": "Завантажити MP4", "fr": "Télécharger MP4", "de": "MP4 herunterladen", "es": "Descargar MP4", "ka": "MP4 ჩამოტვირთვა", "hy": "Ներբեռնել MP4", "it": "Scarica MP4"},
         "cover": {"en": "PNG cover", "ru": "PNG-обложка", "uk": "PNG-обкладинка", "fr": "Couverture PNG", "de": "PNG-Cover", "es": "Portada PNG", "ka": "PNG ყდა", "hy": "PNG շապիկ", "it": "Copertina PNG"},
     }
@@ -7799,6 +8317,8 @@ def _preview_kind(output: dict) -> str:
         return "image"
     if media_type.startswith("video/"):
         return "video"
+    if _is_subtitle_output(name, media_type):
+        return "subtitle"
     if media_type == "application/pdf" or name.endswith(".pdf"):
         return "embed"
     if media_type.startswith("text/") or name.endswith((".txt", ".ass", ".srt", ".json", ".csv")):

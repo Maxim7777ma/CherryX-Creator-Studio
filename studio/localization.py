@@ -15,6 +15,30 @@ LANGUAGE_OPTIONS = (
     {"code": "it", "name": "Italian", "native": "Italiano", "flag": "https://flagcdn.com/it.svg"},
 )
 
+
+_EARLY_RESUME_MODE_TEXT = (
+    {
+        "resume_mode_it": {"en": "IT", "ru": "IT", "uk": "IT", "fr": "IT", "de": "IT", "es": "IT", "ka": "IT", "hy": "IT", "it": "IT"},
+        "resume_mode_it_hint": {"en": "Stack, API, systems", "ru": "Стек, API, системы", "uk": "Стек, API, системи", "fr": "Stack, API, systèmes", "de": "Stack, API, Systeme", "es": "Stack, API, sistemas", "ka": "სტეკი, API, სისტემები", "hy": "Stack, API, համակարգեր", "it": "Stack, API, sistemi"},
+        "resume_mode_design": {"en": "Design", "ru": "Дизайн", "uk": "Дизайн", "fr": "Design", "de": "Design", "es": "Diseño", "ka": "დიზაინი", "hy": "Դիզայն", "it": "Design"},
+        "resume_mode_design_hint": {"en": "UX, product, UI", "ru": "UX, продукт, UI", "uk": "UX, продукт, UI", "fr": "UX, produit, UI", "de": "UX, Produkt, UI", "es": "UX, producto, UI", "ka": "UX, პროდუქტი, UI", "hy": "UX, պրոդուկտ, UI", "it": "UX, prodotto, UI"},
+        "resume_mode_marketing": {"en": "Marketing", "ru": "Маркетинг", "uk": "Маркетинг", "fr": "Marketing", "de": "Marketing", "es": "Marketing", "ka": "მარკეტინგი", "hy": "Մարքեթինգ", "it": "Marketing"},
+        "resume_mode_marketing_hint": {"en": "Growth, content, ads", "ru": "Рост, контент, реклама", "uk": "Зростання, контент, реклама", "fr": "Croissance, contenu, pub", "de": "Wachstum, Content, Ads", "es": "Crecimiento, contenido, anuncios", "ka": "ზრდა, კონტენტი, რეკლამა", "hy": "Աճ, բովանդակություն, գովազդ", "it": "Crescita, contenuti, ads"},
+        "resume_mode_management": {"en": "Management", "ru": "Менеджмент", "uk": "Менеджмент", "fr": "Management", "de": "Management", "es": "Gestión", "ka": "მენეჯმენტი", "hy": "Կառավարում", "it": "Management"},
+        "resume_mode_management_hint": {"en": "Delivery, teams, roadmap", "ru": "Доставка, команды, roadmap", "uk": "Доставка, команди, roadmap", "fr": "Livraison, équipes, roadmap", "de": "Delivery, Teams, Roadmap", "es": "Entrega, equipos, roadmap", "ka": "მიწოდება, გუნდები, roadmap", "hy": "Առաքում, թիմեր, roadmap", "it": "Delivery, team, roadmap"},
+        "resume_mode_student": {"en": "Student", "ru": "Студент", "uk": "Студент", "fr": "Étudiant", "de": "Student", "es": "Estudiante", "ka": "სტუდენტი", "hy": "Ուսանող", "it": "Studente"},
+        "resume_mode_student_hint": {"en": "Junior, intern, learning", "ru": "Junior, стажёр, обучение", "uk": "Junior, стажер, навчання", "fr": "Junior, stage, apprentissage", "de": "Junior, Praktikum, Lernen", "es": "Junior, prácticas, aprendizaje", "ka": "ჯუნიორი, სტაჟიორი, სწავლა", "hy": "Ջունիոր, պրակտիկա, ուսում", "it": "Junior, stage, apprendimento"},
+        "resume_mode_executive": {"en": "Executive", "ru": "Руководитель", "uk": "Керівник", "fr": "Direction", "de": "Führung", "es": "Dirección", "ka": "ხელმძღვანელი", "hy": "Ղեկավար", "it": "Executive"},
+        "resume_mode_executive_hint": {"en": "Leadership, strategy", "ru": "Лидерство, стратегия", "uk": "Лідерство, стратегія", "fr": "Leadership, stratégie", "de": "Führung, Strategie", "es": "Liderazgo, estrategia", "ka": "ლიდერობა, სტრატეგია", "hy": "Առաջնորդություն, ռազմավարություն", "it": "Leadership, strategia"},
+        "resume_mode_data": {"en": "Data", "ru": "Данные", "uk": "Дані", "fr": "Data", "de": "Daten", "es": "Datos", "ka": "მონაცემები", "hy": "Տվյալներ", "it": "Dati"},
+        "resume_mode_data_hint": {"en": "Analytics, BI, insights", "ru": "Аналитика, BI, инсайты", "uk": "Аналітика, BI, інсайти", "fr": "Analyse, BI, insights", "de": "Analytics, BI, Insights", "es": "Analítica, BI, insights", "ka": "ანალიტიკა, BI, ინსაიტები", "hy": "Վերլուծություն, BI, ինսայթներ", "it": "Analisi, BI, insight"},
+        "resume_mode_sales": {"en": "Sales", "ru": "Продажи", "uk": "Продажі", "fr": "Ventes", "de": "Sales", "es": "Ventas", "ka": "გაყიდვები", "hy": "Վաճառքներ", "it": "Vendite"},
+        "resume_mode_sales_hint": {"en": "Clients, pipeline, revenue", "ru": "Клиенты, pipeline, выручка", "uk": "Клієнти, pipeline, дохід", "fr": "Clients, pipeline, revenus", "de": "Kunden, Pipeline, Umsatz", "es": "Clientes, pipeline, ingresos", "ka": "კლიენტები, pipeline, შემოსავალი", "hy": "Հաճախորդներ, pipeline, եկամուտ", "it": "Clienti, pipeline, ricavi"},
+        "resume_mode_content": {"en": "Content", "ru": "Контент", "uk": "Контент", "fr": "Contenu", "de": "Content", "es": "Contenido", "ka": "კონტენტი", "hy": "Բովանդակություն", "it": "Contenuti"},
+        "resume_mode_content_hint": {"en": "Copy, social, editorial", "ru": "Тексты, соцсети, редактура", "uk": "Тексти, соцмережі, редактура", "fr": "Copy, social, éditorial", "de": "Copy, Social, Redaktion", "es": "Copy, social, editorial", "ka": "ტექსტები, соцმედია, რედაქცია", "hy": "Տեքստեր, սոց․ մեդիա, խմբագրում", "it": "Copy, social, editoriale"},
+    }
+)
+
 LANGUAGE_CODES = {item["code"] for item in LANGUAGE_OPTIONS}
 DEFAULT_LANGUAGE = "en"
 
@@ -596,6 +620,202 @@ UI_TEXT.update(
             "hy": "օր",
             "it": "giorni",
         },
+    }
+)
+
+for _resume_key, _resume_values in list(UI_TEXT.items()):
+    if not _resume_key.startswith("resume_") or "en" not in _resume_values:
+        continue
+    for _resume_language in ("fr", "de", "es", "ka", "hy", "it"):
+        _resume_values.setdefault(_resume_language, _resume_fallback_value(_resume_key, _resume_language))
+
+
+UI_TEXT.update(_EARLY_RESUME_MODE_TEXT)
+
+_RESUME_FALLBACK_TEXT = {
+    "fr": {
+        "default": "Texte du CV",
+        "title": "Section du CV",
+        "copy": "Utilisez cette aide pour rendre le CV plus clair et plus ciblé.",
+        "hint": "Ajoutez une information claire et utile pour cette partie du CV.",
+        "placeholder": "Décrivez cette partie du CV de façon courte et précise.",
+        "example": "Exemple à adapter à votre expérience réelle.",
+        "tip": "Gardez cette partie concrète, honnête et facile à lire.",
+        "short": "Étape",
+        "button": "Action",
+    },
+    "de": {
+        "default": "Lebenslauf-Text",
+        "title": "Lebenslauf-Abschnitt",
+        "copy": "Nutzen Sie diesen Hinweis, um den Lebenslauf klarer und gezielter zu machen.",
+        "hint": "Fügen Sie klare und relevante Informationen für diesen Abschnitt hinzu.",
+        "placeholder": "Beschreiben Sie diesen Teil kurz und präzise.",
+        "example": "Beispiel, das Sie an Ihre echte Erfahrung anpassen können.",
+        "tip": "Halten Sie diesen Teil konkret, ehrlich und gut lesbar.",
+        "short": "Schritt",
+        "button": "Aktion",
+    },
+    "es": {
+        "default": "Texto del CV",
+        "title": "Sección del CV",
+        "copy": "Usa esta guía para que el CV sea más claro y enfocado.",
+        "hint": "Añade información clara y útil para esta parte del CV.",
+        "placeholder": "Describe esta parte del CV de forma breve y precisa.",
+        "example": "Ejemplo para adaptar a tu experiencia real.",
+        "tip": "Mantén esta parte concreta, honesta y fácil de leer.",
+        "short": "Paso",
+        "button": "Acción",
+    },
+    "ka": {
+        "default": "რეზიუმეს ტექსტი",
+        "title": "რეზიუმეს სექცია",
+        "copy": "გამოიყენეთ ეს მინიშნება, რომ რეზიუმე იყოს უფრო ნათელი და მიზნობრივი.",
+        "hint": "დაამატეთ მკაფიო და სასარგებლო ინფორმაცია ამ ნაწილისთვის.",
+        "placeholder": "აღწერეთ ეს ნაწილი მოკლედ და ზუსტად.",
+        "example": "მაგალითი, რომელსაც თქვენს რეალურ გამოცდილებას მოარგებთ.",
+        "tip": "დატოვეთ ეს ნაწილი კონკრეტული, მართალი და მარტივად წასაკითხი.",
+        "short": "ნაბიჯი",
+        "button": "მოქმედება",
+    },
+    "hy": {
+        "default": "Ռեզյումեի տեքստ",
+        "title": "Ռեզյումեի բաժին",
+        "copy": "Օգտագործեք այս հուշումը, որպեսզի ռեզյումեն լինի ավելի պարզ և նպատակային։",
+        "hint": "Ավելացրեք հստակ և օգտակար տեղեկություն այս բաժնի համար։",
+        "placeholder": "Նկարագրեք այս մասը կարճ և հստակ։",
+        "example": "Օրինակ, որը կարող եք հարմարեցնել ձեր իրական փորձին։",
+        "tip": "Պահեք այս մասը կոնկրետ, ազնիվ և հեշտ ընթերցվող։",
+        "short": "Քայլ",
+        "button": "Գործողություն",
+    },
+    "it": {
+        "default": "Testo del CV",
+        "title": "Sezione del CV",
+        "copy": "Usa questo suggerimento per rendere il CV più chiaro e mirato.",
+        "hint": "Aggiungi informazioni chiare e utili per questa parte del CV.",
+        "placeholder": "Descrivi questa parte del CV in modo breve e preciso.",
+        "example": "Esempio da adattare alla tua esperienza reale.",
+        "tip": "Mantieni questa parte concreta, sincera e facile da leggere.",
+        "short": "Passo",
+        "button": "Azione",
+    },
+}
+
+_RESUME_EXACT_FALLBACK = {
+    "resume_ai_title": {"fr": "Assistant CV IA", "de": "KI-Lebenslaufassistent", "es": "Asistente IA de CV", "ka": "AI რეზიუმეს ასისტენტი", "hy": "AI ռեզյումեի օգնական", "it": "Assistente CV IA"},
+    "resume_coach_title": {"fr": "Conseils CV", "de": "Lebenslauf-Coach", "es": "Coach de CV", "ka": "რეზიუმეს მწვრთნელი", "hy": "Ռեզյումեի խորհրդատու", "it": "Coach CV"},
+    "resume_score_empty": {"fr": "Remplissez le profil pour voir la préparation.", "de": "Profilfelder ausfüllen, um die Bereitschaft zu sehen.", "es": "Completa el perfil para ver la preparación.", "ka": "შეავსეთ პროფილი მზაობის სანახავად.", "hy": "Լրացրեք պրոֆիլը՝ պատրաստությունը տեսնելու համար։", "it": "Compila il profilo per vedere la prontezza."},
+    "resume_fill_account": {"fr": "Utiliser le compte", "de": "Kontodaten nutzen", "es": "Usar datos de cuenta", "ka": "ანგარიშის მონაცემები", "hy": "Օգտագործել հաշվի տվյալները", "it": "Usa dati account"},
+    "resume_mode_title": {"fr": "Mode du CV", "de": "Lebenslauf-Modus", "es": "Modo de CV", "ka": "რეზიუმეს რეჟიმი", "hy": "Ռեզյումեի ռեժիմ", "it": "Modalità CV"},
+    "resume_step_mode_short": {"fr": "Direction", "de": "Richtung", "es": "Dirección", "ka": "მიმართულება", "hy": "Ուղղություն", "it": "Direzione"},
+    "resume_step_target_short": {"fr": "Cible", "de": "Ziel", "es": "Objetivo", "ka": "მიზანი", "hy": "Նպատակ", "it": "Target"},
+    "resume_step_details_short": {"fr": "Détails", "de": "Details", "es": "Detalles", "ka": "დეტალები", "hy": "Մանրամասներ", "it": "Dettagli"},
+    "resume_step_match_short": {"fr": "Adéquation", "de": "Match", "es": "Ajuste", "ka": "შესაბამისობა", "hy": "Համապատասխանություն", "it": "Match"},
+    "resume_step_mode_title": {"fr": "Choisissez la direction du CV", "de": "Richtung des Lebenslaufs wählen", "es": "Elige la dirección del CV", "ka": "აირჩიეთ რეზიუმეს მიმართულება", "hy": "Ընտրեք ռեզյումեի ուղղությունը", "it": "Scegli la direzione del CV"},
+    "resume_step_target_title": {"fr": "Adaptez-le à l'offre", "de": "Auf die Stelle abstimmen", "es": "Ajústalo a la vacante", "ka": "მოარგეთ ვაკანსიას", "hy": "Հարմարեցրեք թափուր աշխատատեղին", "it": "Adattalo all'offerta"},
+    "resume_step_details_title": {"fr": "Formation, compétences et preuves", "de": "Ausbildung, Fähigkeiten und Nachweise", "es": "Formación, habilidades y pruebas", "ka": "განათლება, უნარები და მტკიცებულებები", "hy": "Կրթություն, հմտություններ և ապացույցներ", "it": "Formazione, competenze e prove"},
+    "resume_step_match_title": {"fr": "Correspondance avec l'offre", "de": "Abgleich mit der Stelle", "es": "Coincidencia con la vacante", "ka": "შესაბამისობა ვაკანსიასთან", "hy": "Համապատասխանություն թափուր աշխատատեղին", "it": "Corrispondenza con l'offerta"},
+    "resume_target_role": {"fr": "Rôle cible", "de": "Zielrolle", "es": "Rol objetivo", "ka": "სამიზნე როლი", "hy": "Թիրախային դեր", "it": "Ruolo target"},
+    "resume_target_scope": {"fr": "Secteur ou produit", "de": "Branche oder Produkt", "es": "Sector o producto", "ka": "სფერო ან პროდუქტი", "hy": "Ոլորտ կամ պրոդուկտ", "it": "Settore o prodotto"},
+    "resume_work_format": {"fr": "Format de travail", "de": "Arbeitsformat", "es": "Formato de trabajo", "ka": "სამუშაო ფორმატი", "hy": "Աշխատանքի ձևաչափ", "it": "Formato di lavoro"},
+    "resume_value_offer": {"fr": "Valeur principale", "de": "Hauptwert", "es": "Valor principal", "ka": "მთავარი ღირებულება", "hy": "Հիմնական արժեք", "it": "Valore principale"},
+    "resume_vacancy_text": {"fr": "Texte de l'offre", "de": "Stellentext", "es": "Texto de la vacante", "ka": "ვაკანსიის ტექსტი", "hy": "Թափուր աշխատատեղի տեքստ", "it": "Testo dell'offerta"},
+    "resume_ats_score": {"fr": "ATS / mots-clés", "de": "ATS / Keyword-Fit", "es": "ATS / palabras clave", "ka": "ATS / საკვანძო სიტყვები", "hy": "ATS / բանալի բառեր", "it": "ATS / parole chiave"},
+    "resume_cover_letter": {"fr": "Lettre de motivation", "de": "Anschreiben", "es": "Carta de presentación", "ka": "სამოტივაციო წერილი", "hy": "Ուղեկցող նամակ", "it": "Lettera di presentazione"},
+    "resume_generate_cover_letter": {"fr": "Générer la lettre", "de": "Anschreiben erstellen", "es": "Generar carta", "ka": "წერილის შექმნა", "hy": "Ստեղծել նամակ", "it": "Genera lettera"},
+    "resume_use_example": {"fr": "Utiliser l'exemple", "de": "Beispiel nutzen", "es": "Usar ejemplo", "ka": "მაგალითის გამოყენება", "hy": "Օգտագործել օրինակը", "it": "Usa esempio"},
+    "resume_smart_variants": {"fr": "Variantes intelligentes", "de": "Smarte Varianten", "es": "Variantes inteligentes", "ka": "ჭკვიანი ვარიანტები", "hy": "Խելացի տարբերակներ", "it": "Varianti smart"},
+}
+
+def _resume_fallback_value(key: str, language: str) -> str:
+    if key in _RESUME_EXACT_FALLBACK and language in _RESUME_EXACT_FALLBACK[key]:
+        return _RESUME_EXACT_FALLBACK[key][language]
+    group = "default"
+    if key.endswith("_title") or key.endswith("_text") or key.endswith("_score") or key.endswith("_quality"):
+        group = "title"
+    elif key.endswith("_copy") or key.endswith("_idle"):
+        group = "copy"
+    elif key.endswith("_hint"):
+        group = "hint"
+    elif "placeholder" in key:
+        group = "placeholder"
+    elif "example" in key:
+        group = "example"
+    elif "_tip_" in key:
+        group = "tip"
+    elif key.endswith("_short"):
+        group = "short"
+    elif key.startswith("resume_ai_add") or key.startswith("resume_ai_format") or key.startswith("resume_use"):
+        group = "button"
+    return _RESUME_FALLBACK_TEXT[language][group]
+
+for _resume_key, _resume_values in list(UI_TEXT.items()):
+    if not _resume_key.startswith("resume_") or "en" not in _resume_values:
+        continue
+    for _resume_language in ("fr", "de", "es", "ka", "hy", "it"):
+        _resume_values.setdefault(_resume_language, _resume_fallback_value(_resume_key, _resume_language))
+
+
+UI_TEXT.update(
+    {
+        "community_nav_market": {"en": "Market", "ru": "Маркет", "uk": "Маркет", "fr": "Marché", "de": "Marktplatz", "es": "Mercado", "ka": "მარკეტი", "hy": "Շուկա", "it": "Mercato"},
+        "community_nav_publish": {"en": "Publish", "ru": "Опубликовать", "uk": "Опублікувати", "fr": "Publier", "de": "Veröffentlichen", "es": "Publicar", "ka": "გამოქვეყნება", "hy": "Հրապարակել", "it": "Pubblica"},
+        "community_my_listings": {"en": "My listings", "ru": "Мои объявления", "uk": "Мої оголошення", "fr": "Mes annonces", "de": "Meine Anzeigen", "es": "Mis anuncios", "ka": "ჩემი განცხადებები", "hy": "Իմ հայտարարությունները", "it": "I miei annunci"},
+        "community_creator_desk": {"en": "Creator desk", "ru": "Кабинет автора", "uk": "Кабінет автора", "fr": "Espace créateur", "de": "Creator-Bereich", "es": "Panel de creador", "ka": "ავტორის სივრცე", "hy": "Հեղինակի վահանակ", "it": "Area creator"},
+        "community_my_listings_copy": {"en": "Public links, visibility, sales and cleanup for everything you published.", "ru": "Публичные ссылки, видимость, продажи и удаление всего, что вы опубликовали.", "uk": "Публічні посилання, видимість, продажі й очищення всього, що ви опублікували.", "fr": "Liens publics, visibilité, ventes et suppression de tout ce que vous avez publié.", "de": "Öffentliche Links, Sichtbarkeit, Verkäufe und Bereinigung für alles, was Sie veröffentlicht haben.", "es": "Enlaces públicos, visibilidad, ventas y limpieza de todo lo que publicaste.", "ka": "საჯარო ბმულები, ხილვადობა, გაყიდვები და წაშლა ყველაფრისთვის, რაც გამოაქვეყნეთ.", "hy": "Հանրային հղումներ, տեսանելիություն, վաճառքներ և մաքրում այն ամենի համար, ինչ հրապարակել եք։", "it": "Link pubblici, visibilità, vendite e pulizia di tutto ciò che hai pubblicato."},
+        "community_new_listing": {"en": "New listing", "ru": "Новое объявление", "uk": "Нове оголошення", "fr": "Nouvelle annonce", "de": "Neue Anzeige", "es": "Nuevo anuncio", "ka": "ახალი განცხადება", "hy": "Նոր հայտարարություն", "it": "Nuovo annuncio"},
+        "community_metric_listings": {"en": "Listings", "ru": "Объявления", "uk": "Оголошення", "fr": "Annonces", "de": "Anzeigen", "es": "Anuncios", "ka": "განცხადებები", "hy": "Հայտարարություններ", "it": "Annunci"},
+        "community_metric_views": {"en": "Views", "ru": "Просмотры", "uk": "Перегляди", "fr": "Vues", "de": "Aufrufe", "es": "Vistas", "ka": "ნახვები", "hy": "Դիտումներ", "it": "Visualizzazioni"},
+        "community_metric_sales": {"en": "Sales", "ru": "Продажи", "uk": "Продажі", "fr": "Ventes", "de": "Verkäufe", "es": "Ventas", "ka": "გაყიდვები", "hy": "Վաճառքներ", "it": "Vendite"},
+        "community_metric_revenue": {"en": "Earned", "ru": "Доход", "uk": "Дохід", "fr": "Revenu", "de": "Erlös", "es": "Ingresos", "ka": "შემოსავალი", "hy": "Եկամուտ", "it": "Guadagno"},
+        "community_metric_downloads": {"en": "Downloads", "ru": "Скачивания", "uk": "Завантаження", "fr": "Téléchargements", "de": "Downloads", "es": "Descargas", "ka": "ჩამოტვირთვები", "hy": "Ներբեռնումներ", "it": "Download"},
+        "community_metric_views_hint": {"en": "Public page opens", "ru": "Открытия публичной страницы", "uk": "Відкриття публічної сторінки", "fr": "Ouvertures de page publique", "de": "Öffentliche Seitenaufrufe", "es": "Aperturas de página pública", "ka": "საჯარო გვერდის გახსნები", "hy": "Հանրային էջի բացումներ", "it": "Aperture della pagina pubblica"},
+        "community_metric_downloads_hint": {"en": "Original file downloads", "ru": "Скачивания оригинальных файлов", "uk": "Завантаження оригінальних файлів", "fr": "Téléchargements des fichiers originaux", "de": "Downloads der Originaldateien", "es": "Descargas de archivos originales", "ka": "ორიგინალი ფაილების ჩამოტვირთვები", "hy": "Բնօրինակ ֆայլերի ներբեռնումներ", "it": "Download dei file originali"},
+        "community_metric_earned": {"en": "earned", "ru": "заработано", "uk": "зароблено", "fr": "gagnés", "de": "verdient", "es": "ganados", "ka": "მიღებულია", "hy": "վաստակված", "it": "guadagnati"},
+        "community_metric_page_opens": {"en": "Page opens", "ru": "Открытия страницы", "uk": "Відкриття сторінки", "fr": "Ouvertures de page", "de": "Seitenaufrufe", "es": "Aperturas de página", "ka": "გვერდის გახსნები", "hy": "Էջի բացումներ", "it": "Aperture pagina"},
+        "community_metric_purchases": {"en": "Purchases", "ru": "Покупки", "uk": "Покупки", "fr": "Achats", "de": "Käufe", "es": "Compras", "ka": "შესყიდვები", "hy": "Գնումներ", "it": "Acquisti"},
+        "community_metric_net_cherryx": {"en": "Net CherryX", "ru": "Чистый CherryX", "uk": "Чистий CherryX", "fr": "CherryX net", "de": "Netto-CherryX", "es": "CherryX neto", "ka": "წმინდა CherryX", "hy": "Մաքուր CherryX", "it": "CherryX netto"},
+        "community_metric_original_files": {"en": "Original files", "ru": "Оригинальные файлы", "uk": "Оригінальні файли", "fr": "Fichiers originaux", "de": "Originaldateien", "es": "Archivos originales", "ka": "ორიგინალი ფაილები", "hy": "Բնօրինակ ֆայլեր", "it": "File originali"},
+        "community_status_public": {"en": "Public", "ru": "Публично", "uk": "Публічно", "fr": "Public", "de": "Öffentlich", "es": "Público", "ka": "საჯარო", "hy": "Հանրային", "it": "Pubblico"},
+        "community_status_hidden": {"en": "Hidden", "ru": "Скрыто", "uk": "Приховано", "fr": "Masqué", "de": "Ausgeblendet", "es": "Oculto", "ka": "დამალული", "hy": "Թաքնված", "it": "Nascosto"},
+        "community_access_free": {"en": "Free", "ru": "Бесплатно", "uk": "Безкоштовно", "fr": "Gratuit", "de": "Kostenlos", "es": "Gratis", "ka": "უფასო", "hy": "Անվճար", "it": "Gratis"},
+        "community_action_stats": {"en": "Stats", "ru": "Статистика", "uk": "Статистика", "fr": "Stats", "de": "Statistik", "es": "Estadísticas", "ka": "სტატისტიკა", "hy": "Վիճակագրություն", "it": "Statistiche"},
+        "community_action_hide": {"en": "Hide from public", "ru": "Скрыть от всех", "uk": "Приховати від усіх", "fr": "Masquer au public", "de": "Öffentlich ausblenden", "es": "Ocultar del público", "ka": "საჯაროდ დამალვა", "hy": "Թաքցնել հանրությունից", "it": "Nascondi al pubblico"},
+        "community_action_publish_again": {"en": "Publish again", "ru": "Вернуть в публикацию", "uk": "Повернути в публікацію", "fr": "Republier", "de": "Wieder veröffentlichen", "es": "Volver a publicar", "ka": "ხელახლა გამოქვეყნება", "hy": "Կրկին հրապարակել", "it": "Ripubblica"},
+        "community_empty_title": {"en": "No listings yet", "ru": "Объявлений пока нет", "uk": "Оголошень поки немає", "fr": "Aucune annonce pour le moment", "de": "Noch keine Anzeigen", "es": "Aún no hay anuncios", "ka": "განცხადებები ჯერ არ არის", "hy": "Դեռ հայտարարություններ չկան", "it": "Ancora nessun annuncio"},
+        "community_empty_copy": {"en": "Publish a video, image, music project or text work, then manage it here.", "ru": "Опубликуйте видео, изображение, музыкальный проект или текст и управляйте им здесь.", "uk": "Опублікуйте відео, зображення, музичний проєкт або текст і керуйте ним тут.", "fr": "Publiez une vidéo, une image, un projet musical ou un texte, puis gérez-le ici.", "de": "Veröffentlichen Sie ein Video, Bild, Musikprojekt oder Textwerk und verwalten Sie es hier.", "es": "Publica un video, imagen, proyecto musical o texto y gestiónalo aquí.", "ka": "გამოაქვეყნეთ ვიდეო, სურათი, მუსიკალური პროექტი ან ტექსტი და მართეთ აქ.", "hy": "Հրապարակեք տեսանյութ, պատկեր, երաժշտական նախագիծ կամ տեքստ և կառավարեք այստեղ։", "it": "Pubblica un video, un'immagine, un progetto musicale o un testo e gestiscilo qui."},
+        "community_empty_action": {"en": "Create first listing", "ru": "Создать первое объявление", "uk": "Створити перше оголошення", "fr": "Créer la première annonce", "de": "Erste Anzeige erstellen", "es": "Crear el primer anuncio", "ka": "პირველი განცხადების შექმნა", "hy": "Ստեղծել առաջին հայտարարությունը", "it": "Crea il primo annuncio"},
+        "community_listing": {"en": "Listing", "ru": "Объявление", "uk": "Оголошення", "fr": "Annonce", "de": "Anzeige", "es": "Anuncio", "ka": "განცხადება", "hy": "Հայտարարություն", "it": "Annuncio"},
+        "community_listing_action": {"en": "Listing action", "ru": "Действие с объявлением", "uk": "Дія з оголошенням", "fr": "Action sur l'annonce", "de": "Aktion für Anzeige", "es": "Acción del anuncio", "ka": "განცხადების მოქმედება", "hy": "Հայտարարության գործողություն", "it": "Azione annuncio"},
+        "community_public_url": {"en": "Public URL", "ru": "Публичная ссылка", "uk": "Публічне посилання", "fr": "URL publique", "de": "Öffentliche URL", "es": "URL pública", "ka": "საჯარო ბმული", "hy": "Հանրային URL", "it": "URL pubblico"},
+        "community_link_copied": {"en": "Public link copied.", "ru": "Публичная ссылка скопирована.", "uk": "Публічне посилання скопійовано.", "fr": "Lien public copié.", "de": "Öffentlicher Link kopiert.", "es": "Enlace público copiado.", "ka": "საჯარო ბმული დაკოპირდა.", "hy": "Հանրային հղումը պատճենվեց։", "it": "Link pubblico copiato."},
+        "community_copy_failed": {"en": "Copy failed. Select the link manually.", "ru": "Не удалось скопировать. Выделите ссылку вручную.", "uk": "Не вдалося скопіювати. Виділіть посилання вручну.", "fr": "Copie impossible. Sélectionnez le lien manuellement.", "de": "Kopieren fehlgeschlagen. Link manuell auswählen.", "es": "No se pudo copiar. Selecciona el enlace manualmente.", "ka": "კოპირება ვერ მოხერხდა. მონიშნეთ ბმული ხელით.", "hy": "Պատճենումը չհաջողվեց։ Ընտրեք հղումը ձեռքով։", "it": "Copia non riuscita. Seleziona il link manualmente."},
+        "community_hide_copy": {"en": "Hide this listing from public feeds and public detail page. Stats and files stay in your account.", "ru": "Скрыть объявление из публичных лент и публичной страницы. Статистика и файлы останутся в аккаунте.", "uk": "Приховати оголошення з публічних стрічок і публічної сторінки. Статистика й файли залишаться в акаунті.", "fr": "Masquez cette annonce des flux publics et de sa page publique. Les stats et fichiers restent dans votre compte.", "de": "Diese Anzeige aus öffentlichen Feeds und der Detailseite ausblenden. Statistiken und Dateien bleiben im Konto.", "es": "Oculta este anuncio de los feeds públicos y de la página pública. Las estadísticas y archivos quedan en tu cuenta.", "ka": "დამალეთ განცხადება საჯარო ლენტებიდან და საჯარო გვერდიდან. სტატისტიკა და ფაილები ანგარიშში დარჩება.", "hy": "Թաքցնել հայտարարությունը հանրային հոսքերից և էջից։ Վիճակագրությունն ու ֆայլերը կմնան հաշվում։", "it": "Nascondi l'annuncio dai feed e dalla pagina pubblica. Statistiche e file restano nell'account."},
+        "community_publish_again_copy": {"en": "Return this listing to the public marketplace with the same public URL.", "ru": "Вернуть объявление в публичный маркет с той же ссылкой.", "uk": "Повернути оголошення в публічний маркет із тим самим посиланням.", "fr": "Remettez cette annonce sur le marché public avec la même URL.", "de": "Diese Anzeige mit derselben öffentlichen URL wieder veröffentlichen.", "es": "Devuelve este anuncio al mercado público con la misma URL.", "ka": "დააბრუნეთ განცხადება საჯარო მარკეტში იმავე ბმულით.", "hy": "Վերադարձնել հայտարարությունը հանրային շուկա նույն հղումով։", "it": "Riporta l'annuncio nel mercato pubblico con lo stesso URL."},
+        "community_delete_copy": {"en": "This permanently deletes the listing, attached listing files, purchase records for this listing and the database row. This cannot be undone.", "ru": "Это навсегда удалит объявление, прикрепленные файлы, записи покупок по нему и строку в базе. Отменить нельзя.", "uk": "Це назавжди видалить оголошення, прикріплені файли, записи покупок і рядок у базі. Скасувати не можна.", "fr": "Cela supprime définitivement l'annonce, ses fichiers, les achats associés et la ligne en base. Impossible d'annuler.", "de": "Dies löscht Anzeige, angehängte Dateien, Kaufdatensätze und Datenbankzeile dauerhaft. Das kann nicht rückgängig gemacht werden.", "es": "Esto elimina para siempre el anuncio, sus archivos, registros de compra y fila de base de datos. No se puede deshacer.", "ka": "ეს სამუდამოდ წაშლის განცხადებას, ფაილებს, შესყიდვების ჩანაწერებს და ბაზის ჩანაწერს. გაუქმება შეუძლებელია.", "hy": "Սա ընդմիշտ կջնջի հայտարարությունը, ֆայլերը, գնումների գրառումները և տվյալների բազայի տողը։ Հետարկել հնարավոր չէ։", "it": "Elimina definitivamente annuncio, file allegati, record degli acquisti e riga nel database. Non si può annullare."},
+        "community_delete_forever": {"en": "Delete forever", "ru": "Удалить навсегда", "uk": "Видалити назавжди", "fr": "Supprimer définitivement", "de": "Dauerhaft löschen", "es": "Eliminar para siempre", "ka": "სამუდამოდ წაშლა", "hy": "Ջնջել ընդմիշտ", "it": "Elimina definitivamente"},
+        "community_hidden_toast": {"en": "Listing is hidden from public feeds.", "ru": "Объявление скрыто от всех.", "uk": "Оголошення приховано від усіх.", "fr": "Annonce masquée au public.", "de": "Anzeige öffentlich ausgeblendet.", "es": "Anuncio oculto al público.", "ka": "განცხადება საჯაროდ დამალულია.", "hy": "Հայտարարությունը թաքցված է հանրությունից։", "it": "Annuncio nascosto al pubblico."},
+        "community_published_toast": {"en": "Listing is public again.", "ru": "Объявление снова публичное.", "uk": "Оголошення знову публічне.", "fr": "Annonce à nouveau publique.", "de": "Anzeige ist wieder öffentlich.", "es": "El anuncio vuelve a ser público.", "ka": "განცხადება ისევ საჯაროა.", "hy": "Հայտարարությունը կրկին հանրային է։", "it": "Annuncio di nuovo pubblico."},
+        "community_deleted_toast": {"en": "Listing was deleted from the system and database.", "ru": "Объявление удалено из системы и базы.", "uk": "Оголошення видалено із системи й бази.", "fr": "Annonce supprimée du système et de la base.", "de": "Anzeige aus System und Datenbank gelöscht.", "es": "Anuncio eliminado del sistema y la base de datos.", "ka": "განცხადება წაიშალა სისტემიდან და ბაზიდან.", "hy": "Հայտարարությունը ջնջվեց համակարգից և բազայից։", "it": "Annuncio eliminato dal sistema e dal database."},
+        "copy": {"en": "Copy", "ru": "Скопировать", "uk": "Скопіювати", "fr": "Copier", "de": "Kopieren", "es": "Copiar", "ka": "კოპირება", "hy": "Պատճենել", "it": "Copia"},
+        "delete": {"en": "Delete", "ru": "Удалить", "uk": "Видалити", "fr": "Supprimer", "de": "Löschen", "es": "Eliminar", "ka": "წაშლა", "hy": "Ջնջել", "it": "Elimina"},
+        "billing": {"en": "Billing", "ru": "Оплата", "uk": "Оплата", "fr": "Facturation", "de": "Abrechnung", "es": "Facturación", "ka": "ბილინგი", "hy": "Վճարումներ", "it": "Fatturazione"},
+        "design": {"en": "Design", "ru": "Дизайн", "uk": "Дизайн", "fr": "Design", "de": "Design", "es": "Diseño", "ka": "დიზაინი", "hy": "Դիզայն", "it": "Design"},
+        "details": {"en": "Details", "ru": "Детали", "uk": "Деталі", "fr": "Détails", "de": "Details", "es": "Detalles", "ka": "დეტალები", "hy": "Մանրամասներ", "it": "Dettagli"},
+        "email": {"en": "Email", "ru": "Email", "uk": "Email", "fr": "E-mail", "de": "E-Mail", "es": "Email", "ka": "ელფოსტა", "hy": "Էլ. փոստ", "it": "Email"},
+        "file": {"en": "File", "ru": "Файл", "uk": "Файл", "fr": "Fichier", "de": "Datei", "es": "Archivo", "ka": "ფაილი", "hy": "Ֆայլ", "it": "File"},
+        "images": {"en": "Images", "ru": "Изображения", "uk": "Зображення", "fr": "Images", "de": "Bilder", "es": "Imágenes", "ka": "სურათები", "hy": "Պատկերներ", "it": "Immagini"},
+        "link": {"en": "Link", "ru": "Ссылка", "uk": "Посилання", "fr": "Lien", "de": "Link", "es": "Enlace", "ka": "ბმული", "hy": "Հղում", "it": "Link"},
+        "links": {"en": "Links", "ru": "Ссылки", "uk": "Посилання", "fr": "Liens", "de": "Links", "es": "Enlaces", "ka": "ბმულები", "hy": "Հղումներ", "it": "Link"},
+        "mode": {"en": "Mode", "ru": "Режим", "uk": "Режим", "fr": "Mode", "de": "Modus", "es": "Modo", "ka": "რეჟიმი", "hy": "Ռեժիմ", "it": "Modalità"},
+        "name": {"en": "Name", "ru": "Имя", "uk": "Ім'я", "fr": "Nom", "de": "Name", "es": "Nombre", "ka": "სახელი", "hy": "Անուն", "it": "Nome"},
+        "optional": {"en": "Optional", "ru": "Необязательно", "uk": "Необов'язково", "fr": "Facultatif", "de": "Optional", "es": "Opcional", "ka": "არასავალდებულო", "hy": "Ըստ ցանկության", "it": "Opzionale"},
+        "package": {"en": "Package", "ru": "Пакет", "uk": "Пакет", "fr": "Package", "de": "Paket", "es": "Paquete", "ka": "პაკეტი", "hy": "Փաթեթ", "it": "Pacchetto"},
+        "photo": {"en": "Photo", "ru": "Фото", "uk": "Фото", "fr": "Photo", "de": "Foto", "es": "Foto", "ka": "ფოტო", "hy": "Լուսանկար", "it": "Foto"},
+        "position": {"en": "Position", "ru": "Позиция", "uk": "Позиція", "fr": "Poste", "de": "Position", "es": "Puesto", "ka": "პოზიცია", "hy": "Պաշտոն", "it": "Posizione"},
+        "style": {"en": "Style", "ru": "Стиль", "uk": "Стиль", "fr": "Style", "de": "Stil", "es": "Estilo", "ka": "სტილი", "hy": "Ոճ", "it": "Stile"},
+        "video": {"en": "Video", "ru": "Видео", "uk": "Відео", "fr": "Vidéo", "de": "Video", "es": "Vídeo", "ka": "ვიდეო", "hy": "Տեսանյութ", "it": "Video"},
+        "volume": {"en": "Volume", "ru": "Громкость", "uk": "Гучність", "fr": "Volume", "de": "Lautstärke", "es": "Volumen", "ka": "ხმა", "hy": "Ձայնի ուժգնություն", "it": "Volume"},
     }
 )
 
@@ -1543,13 +1763,33 @@ def localize(values: dict[str, str], language: str | None = None, default: str =
     return repair_mojibake(text)
 
 
+_COMMON_TRANSLATION_OVERRIDES = {
+    "billing": {"ru": "Оплата", "uk": "Оплата", "fr": "Facturation", "de": "Abrechnung", "es": "Facturación", "ka": "ბილინგი", "hy": "Վճարումներ", "it": "Fatturazione"},
+    "details": {"ru": "Детали", "uk": "Деталі", "fr": "Détails", "de": "Details", "es": "Detalles", "ka": "დეტალები", "hy": "Մանրամասներ", "it": "Dettagli"},
+    "email": {"ru": "Email", "uk": "Email", "fr": "E-mail", "de": "E-Mail", "es": "Email", "ka": "ელფოსტა", "hy": "Էլ. փոստ", "it": "Email"},
+    "images": {"ru": "Изображения", "uk": "Зображення", "fr": "Images", "de": "Bilder", "es": "Imágenes", "ka": "სურათები", "hy": "Պատկերներ", "it": "Immagini"},
+    "link": {"ru": "Ссылка", "uk": "Посилання", "fr": "Lien", "de": "Link", "es": "Enlace", "ka": "ბმული", "hy": "Հղում", "it": "Link"},
+    "links": {"ru": "Ссылки", "uk": "Посилання", "fr": "Liens", "de": "Links", "es": "Enlaces", "ka": "ბმულები", "hy": "Հղումներ", "it": "Link"},
+    "mode": {"ru": "Режим", "uk": "Режим", "fr": "Mode", "de": "Modus", "es": "Modo", "ka": "რეჟიმი", "hy": "Ռեժիմ", "it": "Modalità"},
+    "name": {"ru": "Имя", "uk": "Ім'я", "fr": "Nom", "de": "Name", "es": "Nombre", "ka": "სახელი", "hy": "Անուն", "it": "Nome"},
+    "optional": {"ru": "Необязательно", "uk": "Необов'язково", "fr": "Facultatif", "de": "Optional", "es": "Opcional", "ka": "არასავალდებულო", "hy": "Ըստ ցանկության", "it": "Opzionale"},
+    "position": {"ru": "Позиция", "uk": "Позиція", "fr": "Poste", "de": "Position", "es": "Puesto", "ka": "პოზიცია", "hy": "Պաշտոն", "it": "Posizione"},
+    "video": {"ru": "Видео", "uk": "Відео", "fr": "Vidéo", "de": "Video", "es": "Vídeo", "ka": "ვიდეო", "hy": "Տեսանյութ", "it": "Video"},
+    "volume": {"ru": "Громкость", "uk": "Гучність", "fr": "Volume", "de": "Lautstärke", "es": "Volumen", "ka": "ხმა", "hy": "Ձայնի ուժգնություն", "it": "Volume"},
+}
+
+
 def current_language() -> str:
     return clean_language(get_language())
 
 
 def translate(key: str, language: str | None = None) -> str:
     language = clean_language(language or current_language())
+    if key in _COMMON_TRANSLATION_OVERRIDES and language in _COMMON_TRANSLATION_OVERRIDES[key]:
+        return _COMMON_TRANSLATION_OVERRIDES[key][language]
     values = UI_TEXT.get(key, {})
+    if key.startswith("resume_") and language in _RESUME_FALLBACK_TEXT and language not in values and "en" in values:
+        values[language] = _resume_fallback_value(key, language)
     return localize(values, language, key.replace("_", " ").title())
 
 
@@ -3049,5 +3289,24 @@ UI_TEXT.update(
         "resume_step_details_short": {"en": "Details", "ru": "Детали", "uk": "Деталі"},
         "resume_step_details_title": {"en": "Education, skills and proof", "ru": "Образование, навыки и доказательства", "uk": "Освіта, навички і докази"},
         "resume_step_details_copy": {"en": "Add the supporting blocks separately so the resume stays readable and not overloaded.", "ru": "Добавьте вспомогательные блоки отдельно, чтобы резюме осталось читаемым и не перегруженным.", "uk": "Додайте допоміжні блоки окремо, щоб резюме залишилося читабельним і не перевантаженим."},
+    }
+)
+
+UI_TEXT.update(
+    {
+        "youtube_processing_speed": {"en": "Processing speed", "ru": "Скорость обработки", "uk": "Швидкість обробки", "fr": "Vitesse de traitement", "de": "Verarbeitungstempo", "es": "Velocidad de procesamiento", "ka": "დამუშავების სიჩქარე", "hy": "Մշակման արագություն", "it": "Velocità elaborazione"},
+        "youtube_speed_auto": {"en": "Auto", "ru": "Авто", "uk": "Авто", "fr": "Auto", "de": "Auto", "es": "Auto", "ka": "ავტო", "hy": "Ավտո", "it": "Auto"},
+        "youtube_speed_fast": {"en": "Fast", "ru": "Быстро", "uk": "Швидко", "fr": "Rapide", "de": "Schnell", "es": "Rápido", "ka": "სწრაფი", "hy": "Արագ", "it": "Rapido"},
+        "youtube_speed_smart": {"en": "Smart", "ru": "Умно", "uk": "Розумно", "fr": "Intelligent", "de": "Smart", "es": "Smart", "ka": "ჭკვიანი", "hy": "Խելացի", "it": "Smart"},
+        "youtube_speed_pro": {"en": "Pro", "ru": "Профи", "uk": "Профі", "fr": "Pro", "de": "Pro", "es": "Pro", "ka": "Pro", "hy": "Pro", "it": "Pro"},
+        "youtube_ai_improve_cuts": {"en": "AI improve cuts", "ru": "AI улучшит нарезку", "uk": "AI покращить нарізку", "fr": "IA optimise les coupes", "de": "KI verbessert Schnitte", "es": "IA mejora los cortes", "ka": "AI აუმჯობესებს ჭრას", "hy": "AI-ը բարելավում է կտրվածքները", "it": "AI migliora i tagli"},
+        "youtube_shorts_count": {"en": "Shorts count", "ru": "Количество Shorts", "uk": "Кількість Shorts", "fr": "Nombre de Shorts", "de": "Shorts-Anzahl", "es": "Cantidad de Shorts", "ka": "Shorts რაოდენობა", "hy": "Shorts քանակը", "it": "Numero di Shorts"},
+        "youtube_mode_regular_hint": {"en": "Balanced shorts for most videos", "ru": "Сбалансированные Shorts для большинства видео", "uk": "Збалансовані Shorts для більшості відео", "fr": "Shorts équilibrés pour la plupart des vidéos", "de": "Ausgewogene Shorts für die meisten Videos", "es": "Shorts equilibrados para la mayoría de videos", "ka": "დაბალანსებული Shorts ვიდეოების უმეტესობისთვის", "hy": "Հավասարակշռված Shorts տեսանյութերի մեծ մասի համար", "it": "Shorts bilanciati per la maggior parte dei video"},
+        "youtube_mode_dynamic_hint": {"en": "Fast cuts, stronger hooks and more motion", "ru": "Быстрые склейки, сильнее хук и больше движения", "uk": "Швидкі склейки, сильніший хук і більше руху", "fr": "Coupes rapides, accroches plus fortes et plus de mouvement", "de": "Schnelle Schnitte, stärkere Hooks und mehr Bewegung", "es": "Cortes rápidos, hooks más fuertes y más movimiento", "ka": "სწრაფი ჭრები, ძლიერი ჰუკები და მეტი მოძრაობა", "hy": "Արագ կտրվածքներ, ուժեղ հուկեր և ավելի շատ շարժում", "it": "Tagli rapidi, hook più forti e più movimento"},
+        "youtube_mode_podcast_hint": {"en": "Keeps speech flow for interviews and talk videos", "ru": "Сохраняет речь для интервью и разговорных видео", "uk": "Зберігає потік мовлення для інтерв'ю та розмовних відео", "fr": "Garde le rythme de parole pour interviews et discussions", "de": "Hält den Sprachfluss für Interviews und Talks", "es": "Mantiene el flujo de voz para entrevistas y charlas", "ka": "ინარჩუნებს საუბრის რიტმს ინტერვიუებისა და talk-ვიდეოებისთვის", "hy": "Պահում է խոսքի հոսքը հարցազրույցների և խոսակցական տեսանյութերի համար", "it": "Mantiene il parlato per interviste e video talk"},
+        "youtube_mode_calm_hint": {"en": "Softer pacing for lessons, stories and quiet clips", "ru": "Мягкий темп для уроков, историй и спокойных клипов", "uk": "М'який темп для уроків, історій і спокійних кліпів", "fr": "Rythme plus doux pour cours, récits et clips calmes", "de": "Ruhigeres Tempo für Lektionen, Stories und leise Clips", "es": "Ritmo más suave para clases, historias y clips tranquilos", "ka": "რბილი ტემპი გაკვეთილებისთვის, ისტორიებისთვის და მშვიდი კლიპებისთვის", "hy": "Ավելի մեղմ տեմպ դասերի, պատմությունների և հանգիստ հոլովակների համար", "it": "Ritmo più morbido per lezioni, storie e clip calme"},
+        "youtube_mode_backstage_hint": {"en": "Wide preview montage for market pages and clients", "ru": "Широкий preview-монтаж для маркета и клиентов", "uk": "Широкий preview-монтаж для маркету й клієнтів", "fr": "Montage preview large pour le marché et les clients", "de": "Breite Preview-Montage für Marktseiten und Kunden", "es": "Montaje preview amplio para mercado y clientes", "ka": "ფართო preview-მონტაჟი მარკეტისთვის და კლიენტებისთვის", "hy": "Լայն preview մոնտաժ շուկայի էջերի և հաճախորդների համար", "it": "Preview ampia per mercato e clienti"},
+        "youtube_mode_download_hint": {"en": "Download a clean MP4 source without cutting", "ru": "Скачать чистый MP4 без нарезки", "uk": "Завантажити чистий MP4 без нарізки", "fr": "Télécharger un MP4 propre sans découpe", "de": "Saubere MP4-Quelle ohne Schnitt herunterladen", "es": "Descargar MP4 limpio sin cortes", "ka": "სუფთა MP4-ის ჩამოტვირთვა ჭრის გარეშე", "hy": "Ներբեռնել մաքուր MP4 առանց կտրելու", "it": "Scarica un MP4 pulito senza tagli"},
+        "youtube_mode_cover_hint": {"en": "Create a PNG cover from the video", "ru": "Сделать PNG-обложку из видео", "uk": "Створити PNG-обкладинку з відео", "fr": "Créer une couverture PNG depuis la vidéo", "de": "PNG-Cover aus dem Video erstellen", "es": "Crear portada PNG desde el video", "ka": "PNG ყდის შექმნა ვიდეოდან", "hy": "Ստեղծել PNG շապիկ տեսանյութից", "it": "Crea una copertina PNG dal video"},
     }
 )

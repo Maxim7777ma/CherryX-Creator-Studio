@@ -102,6 +102,7 @@
         let internalVideoPause = false;
         let historyPast = [];
         let historyFuture = [];
+        const historyLimit = 5;
         let snapEnabled = true;
         let timelineDensity = localStorage.getItem("videoEditorDensity") || "normal";
         let copiedClip = null;
@@ -114,6 +115,8 @@
         let saveFailed = false;
         let exportQuality = "720p";
         let exportPreset = "shorts";
+        let textEditSnapshot = "";
+        let lastPlayheadPersist = 0;
         let exportQueueTimer = 0;
         const EXPORT_PRESETS = {
           shorts: {aspect: "9 / 16", quality: "1080p"},
@@ -150,6 +153,7 @@
             x: Number.isFinite(Number(clip.x)) ? Number(clip.x) : 50,
             y: Number.isFinite(Number(clip.y)) ? Number(clip.y) : 50,
             scale: Number.isFinite(Number(clip.scale)) ? Number(clip.scale) : (clip.type === "image" ? 42 : 100),
+            boxWidth: Number.isFinite(Number(clip.boxWidth)) ? Math.max(18, Math.min(86, Number(clip.boxWidth))) : (["text", "caption"].includes(clip.type) ? (clip.type === "caption" ? 42 : 36) : undefined),
             rotation: Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
             style: {speed: 1, fit: "contain", opacity: 100, transition: "none", fadeIn: 0, fadeOut: 0, ...(clip.style || {})},
           };
@@ -209,6 +213,36 @@
         function normalizeSelection() {
           setSelection(selectedClipIdList(), selectedClipId);
         }
+        function activateInspectorPanel(tool, options = {}) {
+          if (!tool) return;
+          root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
+          root.querySelectorAll("[data-panel-tab]").forEach((item) => item.classList.toggle("is-active", item.dataset.panelTab === tool));
+          root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item.dataset.editorTool === tool));
+          root.querySelector(`[data-panel-tab="${CSS.escape(tool)}"]`)?.scrollIntoView({behavior: "smooth", inline: "center", block: "nearest"});
+          const panel = root.querySelector(`[data-tool-panel="${CSS.escape(tool)}"]`);
+          if (options.scroll !== false && panel && window.matchMedia("(max-width: 760px)").matches) {
+            panel.scrollIntoView({block: "nearest"});
+          }
+        }
+        function inspectorPanelForClip(clip) {
+          if (!clip) return "";
+          if (["text", "caption"].includes(clip.type)) return "text";
+          if (clip.type === "audio") return "audio";
+          return "trim";
+        }
+        function focusInspectorForClip(clip, options = {}) {
+          const panel = inspectorPanelForClip(clip);
+          if (panel) activateInspectorPanel(panel, options);
+        }
+        function overlayPositionBounds(clip, loose = false) {
+          if (isTextOverlayClip(clip)) return loose ? {min: -140, max: 240} : {min: -55, max: 155};
+          return {min: 0, max: 100};
+        }
+        function clampOverlayPositionValue(value, clip, loose = false) {
+          const bounds = overlayPositionBounds(clip, loose);
+          const number = Number.isFinite(Number(value)) ? Number(value) : 50;
+          return Math.max(bounds.min, Math.min(bounds.max, number));
+        }
         function updateClipPatch(ids, patch, options = {}) {
           const clips = ids.map((id) => clipById(id)).filter(Boolean);
           if (!clips.length) return;
@@ -217,8 +251,8 @@
             if (patch.start !== undefined) clip.start = Math.max(0, Number(patch.start) || 0);
             if (patch.duration !== undefined) clip.duration = Math.max(0.25, Number(patch.duration) || 0.25);
             if (patch.end !== undefined) clip.duration = Math.max(0.25, Number(patch.end) - clip.start);
-            if (patch.x !== undefined) clip.x = Math.max(0, Math.min(100, Number(patch.x) || 0));
-            if (patch.y !== undefined) clip.y = Math.max(0, Math.min(100, Number(patch.y) || 0));
+            if (patch.x !== undefined) clip.x = clampOverlayPositionValue(patch.x, clip, true);
+            if (patch.y !== undefined) clip.y = clampOverlayPositionValue(patch.y, clip, true);
             if (patch.scale !== undefined) {
               const bounds = clip.type === "video" ? videoScaleBounds(clip) : {min: 8, max: 160};
               const maxScale = bounds.max;
@@ -279,20 +313,52 @@
             label.append(button);
           });
         }
-        function pushHistory() {
-          historyPast.push(snapshotState());
-          if (historyPast.length > 80) historyPast.shift();
+        function pushHistorySnapshot(snapshot) {
+          if (!snapshot) return;
+          if (historyPast[historyPast.length - 1] === snapshot) return;
+          historyPast.push(snapshot);
+          if (historyPast.length > historyLimit) historyPast.shift();
           historyFuture = [];
+        }
+        function pushHistory() {
+          pushHistorySnapshot(snapshotState());
         }
         function undo() {
           if (!historyPast.length) return;
           historyFuture.push(snapshotState());
+          if (historyFuture.length > historyLimit) historyFuture.shift();
           restoreSnapshot(historyPast.pop());
         }
         function redo() {
           if (!historyFuture.length) return;
           historyPast.push(snapshotState());
+          if (historyPast.length > historyLimit) historyPast.shift();
           restoreSnapshot(historyFuture.pop());
+        }
+        function isUndoShortcut(event) {
+          const key = event.key.toLowerCase();
+          return (event.ctrlKey || event.metaKey) && !event.shiftKey && (key === "z" || event.code === "KeyZ");
+        }
+        function isRedoShortcut(event) {
+          const key = event.key.toLowerCase();
+          return ((event.ctrlKey || event.metaKey) && event.shiftKey && (key === "z" || event.code === "KeyZ")) || (event.ctrlKey && key === "y");
+        }
+        function playheadStorageKey() {
+          return `videoEditorPlayhead:${projectId || currentProject?.id || window.location.pathname}`;
+        }
+        function persistProjectTime(force = false) {
+          const now = Date.now();
+          if (!force && now - lastPlayheadPersist < 500) return;
+          lastPlayheadPersist = now;
+          try {
+            localStorage.setItem(playheadStorageKey(), String(Math.max(0, Number(projectTime) || 0)));
+          } catch {}
+        }
+        function restoreProjectTime() {
+          try {
+            const saved = Number(localStorage.getItem(playheadStorageKey()));
+            if (Number.isFinite(saved)) projectTime = Math.max(0, Math.min(timelineDuration(), saved));
+          } catch {}
         }
         function snapTime(value, excludeId = "") {
           if (!snapEnabled) return {value: Math.max(0, value), snapped: false};
@@ -334,6 +400,7 @@
           const data = await jsonFetch(`${api}create/`, {method: "POST", body: JSON.stringify({title: state.title, state})});
           projectId = String(data.project.id);
           window.history.replaceState({}, "", `${window.location.pathname}?project=${projectId}`);
+          persistProjectTime(true);
           return projectId;
         }
         function collectState() {
@@ -440,6 +507,7 @@
           const normalized = normalizeClip(clip);
           state.clips.push(normalized);
           selectOnly(normalized.id);
+          focusInspectorForClip(normalized);
           render();
           scheduleSave();
         }
@@ -491,24 +559,38 @@
             x: 50,
             y: 78,
             scale: 100,
+            boxWidth: 38,
             text: t("your_headline", "Your headline"),
             style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 22, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 48},
           });
         }
         function addCaptionClip(text = t("caption", "Caption"), start = currentTime(), duration = 3, options = {}) {
           const track = state.tracks.find((item) => item.type === "text") || state.tracks[1];
+          const style = {
+            font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            size: 24,
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeWidth: 1,
+            bg: "#000000",
+            bgAlpha: 42,
+            ...(options.style && typeof options.style === "object" ? options.style : {}),
+          };
           const clip = {
             id: uid("caption"),
             type: "caption",
             trackId: track.id,
             start,
             duration,
-            x: 50,
-            y: 84,
-            scale: 100,
+            x: Number.isFinite(Number(options.x)) ? Number(options.x) : 50,
+            y: Number.isFinite(Number(options.y)) ? Number(options.y) : 84,
+            scale: Number.isFinite(Number(options.scale)) ? Number(options.scale) : 100,
+            boxWidth: Number.isFinite(Number(options.boxWidth)) ? Math.max(18, Math.min(86, Number(options.boxWidth))) : 42,
+            rotation: Number.isFinite(Number(options.rotation)) ? Number(options.rotation) : 0,
             text,
-            style: {font: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 24, color: "#ffffff", stroke: "#000000", strokeWidth: 1, bg: "#000000", bgAlpha: 42},
+            style,
           };
+          if (options.source && typeof options.source === "object") clip.subtitleSource = {...options.source};
           if (options.history === false) {
             state.clips.push(normalizeClip(clip));
             setSelection([clip.id], clip.id);
@@ -587,6 +669,179 @@
           }
           return message || t("auto_subtitles_failed", "Auto subtitles failed");
         }
+        function closeAutoSubtitleLanguageChoice() {
+          const choice = root.querySelector("[data-auto-subtitle-language-choice]");
+          if (!choice) return;
+          choice.classList.remove("is-open");
+          choice.querySelector("[data-language-current]")?.setAttribute("aria-expanded", "false");
+        }
+        function setupAutoSubtitleLanguageChoice() {
+          const choice = root.querySelector("[data-auto-subtitle-language-choice]");
+          if (!choice || !autoSubtitleLanguage) return;
+          const current = choice.querySelector("[data-language-current]");
+          const currentLabel = current?.querySelector("b");
+          const optionButtons = Array.from(choice.querySelectorAll("[data-language-value]"));
+          const setLanguage = (button) => {
+            if (!button) return;
+            autoSubtitleLanguage.value = button.dataset.languageValue || "";
+            if (currentLabel) currentLabel.textContent = button.textContent.trim();
+            optionButtons.forEach((item) => {
+              const selected = item === button;
+              item.classList.toggle("is-selected", selected);
+              item.setAttribute("aria-selected", selected ? "true" : "false");
+            });
+          };
+          setLanguage(optionButtons.find((button) => button.classList.contains("is-selected")) || optionButtons[0]);
+          current?.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const open = !choice.classList.contains("is-open");
+            root.querySelectorAll(".editor-language-choice.is-open").forEach((item) => {
+              if (item !== choice) item.classList.remove("is-open");
+            });
+            choice.classList.toggle("is-open", open);
+            current.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          optionButtons.forEach((button) => button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setLanguage(button);
+            closeAutoSubtitleLanguageChoice();
+          }));
+          choice.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              closeAutoSubtitleLanguageChoice();
+              current?.focus();
+            }
+          });
+        }
+        function closeTextFontChoice() {
+          const choice = root.querySelector("[data-text-font-choice]");
+          if (!choice) return;
+          clearTextFontPreview();
+          choice.classList.remove("is-open");
+          choice.querySelector("[data-font-current]")?.setAttribute("aria-expanded", "false");
+        }
+        function selectedTextOverlayContent() {
+          if (!selectedClipId) return null;
+          return overlayRoot.querySelector(`.editor-overlay-item[data-clip-id="${CSS.escape(selectedClipId)}"] .editor-overlay-text-content`);
+        }
+        function setTextFontCurrentPreview(value, label = "") {
+          const choice = root.querySelector("[data-text-font-choice]");
+          const current = choice?.querySelector("[data-font-current]");
+          const currentLabel = current?.querySelector("b");
+          if (current) current.style.fontFamily = value || "";
+          if (currentLabel && label) currentLabel.textContent = label;
+        }
+        function previewTextFontValue(value, label = "") {
+          const clip = selectedClip();
+          if (!clip || !["text", "caption"].includes(clip.type)) return;
+          const textNode = selectedTextOverlayContent();
+          if (!textNode) return;
+          textNode.dataset.fontPreview = "true";
+          textNode.style.fontFamily = value;
+          setTextFontCurrentPreview(value, label);
+          root.querySelectorAll("[data-font-value]").forEach((button) => {
+            button.classList.toggle("is-previewing", button.dataset.fontValue === value);
+          });
+        }
+        function clearTextFontPreview() {
+          const clip = selectedClip();
+          const textNode = selectedTextOverlayContent();
+          if (clip && textNode?.dataset.fontPreview === "true") {
+            delete textNode.dataset.fontPreview;
+            textNode.style.fontFamily = clip.style?.font || root.querySelector("[data-text-font]")?.value || "system-ui";
+          }
+          root.querySelectorAll("[data-font-value].is-previewing").forEach((button) => button.classList.remove("is-previewing"));
+          const selected = root.querySelector("[data-text-font-choice] [data-font-value].is-selected");
+          setTextFontCurrentPreview(selected?.dataset.fontValue || "", selected?.dataset.fontLabel || selected?.textContent?.trim() || "");
+        }
+        function setTextFontChoiceValue(value, options = {}) {
+          const input = root.querySelector("[data-text-font]");
+          const choice = root.querySelector("[data-text-font-choice]");
+          if (!input || !choice) return;
+          const buttons = Array.from(choice.querySelectorAll("[data-font-value]"));
+          const selected = buttons.find((button) => button.dataset.fontValue === value) || buttons[0];
+          if (!selected) return;
+          input.value = selected.dataset.fontValue || "";
+          const label = selected.dataset.fontLabel || selected.textContent.trim();
+          setTextFontCurrentPreview(input.value, label);
+          buttons.forEach((button) => {
+            const active = button === selected;
+            button.classList.toggle("is-selected", active);
+            button.setAttribute("aria-selected", active ? "true" : "false");
+          });
+          if (options.emit) {
+            input.dispatchEvent(new Event("input", {bubbles: true}));
+            input.dispatchEvent(new Event("change", {bubbles: true}));
+          }
+        }
+        function setupTextFontChoice() {
+          const choice = root.querySelector("[data-text-font-choice]");
+          const input = root.querySelector("[data-text-font]");
+          if (!choice || !input) return;
+          const current = choice.querySelector("[data-font-current]");
+          const search = choice.querySelector("[data-font-search]");
+          const buttons = Array.from(choice.querySelectorAll("[data-font-value]"));
+          const filterFonts = () => {
+            const query = String(search?.value || "").trim().toLowerCase();
+            buttons.forEach((button) => {
+              const label = `${button.dataset.fontLabel || ""} ${button.textContent || ""}`.toLowerCase();
+              button.hidden = Boolean(query && !label.includes(query));
+            });
+          };
+          setTextFontChoiceValue(input.value);
+          choice.addEventListener("click", (event) => event.stopPropagation());
+          current?.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const open = !choice.classList.contains("is-open");
+            choice.classList.toggle("is-open", open);
+            current.setAttribute("aria-expanded", open ? "true" : "false");
+            if (open) {
+              if (search) {
+                search.value = "";
+                filterFonts();
+                window.setTimeout(() => search.focus(), 0);
+              }
+            }
+          });
+          search?.addEventListener("input", filterFonts);
+          buttons.forEach((button) => {
+            const preview = () => previewTextFontValue(button.dataset.fontValue || "", button.dataset.fontLabel || button.textContent.trim());
+            button.addEventListener("pointerenter", preview);
+            button.addEventListener("focus", preview);
+          });
+          choice.querySelector("[data-font-options]")?.addEventListener("pointerleave", clearTextFontPreview);
+          buttons.forEach((button) => button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setTextFontChoiceValue(button.dataset.fontValue || "", {emit: true});
+            closeTextFontChoice();
+          }));
+          choice.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              closeTextFontChoice();
+              current?.focus();
+            }
+          });
+        }
+        function setupPropertyTabScroller() {
+          const tabs = root.querySelector("[data-property-tabs]");
+          const buttons = Array.from(root.querySelectorAll("[data-tab-scroll]"));
+          if (!tabs || !buttons.length) return;
+          const syncButtons = () => {
+            const max = Math.max(0, tabs.scrollWidth - tabs.clientWidth - 1);
+            buttons.forEach((button) => {
+              const direction = Number(button.dataset.tabScroll || 0);
+              button.disabled = direction < 0 ? tabs.scrollLeft <= 1 : tabs.scrollLeft >= max;
+            });
+          };
+          buttons.forEach((button) => button.addEventListener("click", () => {
+            const direction = Number(button.dataset.tabScroll || 0);
+            tabs.scrollBy({left: direction * Math.max(96, Math.round(tabs.clientWidth * 0.72)), behavior: "smooth"});
+            window.setTimeout(syncButtons, 220);
+          }));
+          tabs.addEventListener("scroll", syncButtons, {passive: true});
+          window.addEventListener("resize", syncButtons);
+          syncButtons();
+        }
         async function generateAutoSubtitles() {
           if (readOnly || !autoSubtitleButton) return;
           const sourceClip = autoSubtitleSourceClip();
@@ -620,7 +875,7 @@
               return;
             }
             pushHistory();
-            cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {history: false}));
+            cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {...cue, history: false}));
             render();
             scheduleSave();
             setAutoSubtitleStatus(`${t("auto_subtitles_done", "Subtitles added")}: ${cues.length}`, "ok");
@@ -655,7 +910,7 @@
             render();
           } else if (Array.isArray(job.cues) && job.cues.length) {
             pushHistory();
-            job.cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {history: false}));
+            job.cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {...cue, history: false}));
             render();
             scheduleSave();
           }
@@ -810,6 +1065,7 @@
         }
         function selectClip(id) {
           selectOnly(id);
+          focusInspectorForClip(clipById(id));
           render();
         }
         function deleteSelectedClip() {
@@ -1007,6 +1263,7 @@
             root.querySelectorAll(".editor-layer-clip").forEach((item) => item.classList.toggle("is-selected", item === node));
             node.classList.add("is-dragging");
             renderProperties();
+            focusInspectorForClip(clip, {scroll: false});
             const mode = event.target.dataset.trim || "move";
             const lane = node.closest(".editor-track-lane");
             const groupClips = mode === "move" ? selectedClips().map((item) => ({id: item.id, start: item.start, trackId: item.trackId})) : [];
@@ -1078,6 +1335,7 @@
             }
             if (event.shiftKey) toggleClipSelection(clip.id);
             else if (!selectedClipIds.has(clip.id) || selectedClipIds.size <= 1) selectOnly(clip.id);
+            focusInspectorForClip(clip);
             render();
           });
           node.addEventListener("contextmenu", (event) => {
@@ -1086,6 +1344,7 @@
             root.querySelectorAll(".editor-layer-clip").forEach((item) => item.classList.toggle("is-selected", item === node));
             showClipMenu(event.clientX, event.clientY, node);
             renderProperties();
+            focusInspectorForClip(clip, {scroll: false});
           });
           return node;
         }
@@ -1207,6 +1466,139 @@
           updateClipControls(clip);
           scheduleSave();
         }
+        function isTextOverlayClip(clip) {
+          return clip && ["text", "caption"].includes(clip.type);
+        }
+        function textOverlayBoxWidth(clip) {
+          return Math.max(18, Math.min(86, Number(clip?.boxWidth || (clip?.type === "caption" ? 42 : 36))));
+        }
+        function setTextOverlayBoxWidth(clip, width) {
+          if (!isTextOverlayClip(clip)) return;
+          clip.boxWidth = Math.max(18, Math.min(86, Number(width) || textOverlayBoxWidth(clip)));
+        }
+        function textOverlayFallback(clip) {
+          return clip?.type === "caption" ? t("caption", "Caption") : t("text", "Text");
+        }
+        function normalizedOverlayText(node, fallback) {
+          const raw = (node.innerText || node.textContent || "").replace(/\u00a0/g, " ").replace(/\r/g, "");
+          return raw.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n").trim() || fallback;
+        }
+        function setOverlayTextEditing(node, textLayer, clip, editing) {
+          if (editing) {
+            textEditSnapshot = snapshotState();
+            node.dataset.editing = "true";
+            textLayer.contentEditable = "true";
+            textLayer.focus();
+            const range = document.createRange();
+            range.selectNodeContents(textLayer);
+            range.collapse(false);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return;
+          }
+          delete node.dataset.editing;
+          textLayer.contentEditable = "false";
+          clip.text = normalizedOverlayText(textLayer, textOverlayFallback(clip));
+          textLayer.textContent = clip.text;
+          if (textEditSnapshot && snapshotState() !== textEditSnapshot) pushHistorySnapshot(textEditSnapshot);
+          textEditSnapshot = "";
+          updateTextControls(clip);
+          renderTracks();
+          scheduleSave();
+        }
+        function applyTextPreset(clip, preset) {
+          if (!isTextOverlayClip(clip)) return;
+          clip.style = {...(clip.style || {})};
+          if (preset === "clean") {
+            Object.assign(clip.style, {fontWeight: 760, strokeWidth: 0, bgAlpha: 28, textShadow: "0 8px 22px rgba(0,0,0,.34)", animation: "none"});
+          } else if (preset === "caption") {
+            Object.assign(clip.style, {fontWeight: 850, strokeWidth: 1, bgAlpha: 42, textShadow: "0 3px 0 rgba(0,0,0,.55), 0 10px 26px rgba(0,0,0,.28)", animation: "none"});
+          } else if (preset === "headline") {
+            Object.assign(clip.style, {fontWeight: 930, strokeWidth: 2, bgAlpha: 0, textShadow: "0 3px 0 rgba(0,0,0,.72), 0 12px 30px rgba(0,0,0,.34)", animation: "headline"});
+          }
+        }
+        function createTextOverlayToolbar(clip, textLayer) {
+          const toolbar = document.createElement("div");
+          toolbar.className = "editor-overlay-text-toolbar";
+          toolbar.contentEditable = "false";
+          toolbar.setAttribute("aria-label", t("text", "Text"));
+          const buttons = [
+            {icon: "bold", title: t("bold", "Bold"), action: "bold"},
+            {icon: "case-upper", title: t("uppercase", "Uppercase"), action: "uppercase"},
+            {icon: "align-left", title: t("align_left", "Left"), action: "left"},
+            {icon: "align-center", title: t("align_center", "Center"), action: "center"},
+            {icon: "align-right", title: t("align_right", "Right"), action: "right"},
+            {icon: "sparkles", title: "Clean", action: "preset-clean"},
+            {icon: "captions", title: t("caption", "Caption"), action: "preset-caption"},
+          ];
+          buttons.forEach((item) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.title = item.title;
+            button.setAttribute("aria-label", item.title);
+            button.dataset.icon = item.icon;
+            button.dataset.textOverlayAction = item.action;
+            if (item.action === "bold" && Number(clip.style?.fontWeight || 850) >= 850) button.classList.add("is-active");
+            if (item.action === "uppercase" && clip.style?.textTransform === "uppercase") button.classList.add("is-active");
+            if (item.action === (clip.style?.textAlign || "center")) button.classList.add("is-active");
+            toolbar.append(button);
+          });
+          toolbar.addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+          });
+          toolbar.addEventListener("click", (event) => {
+            const button = event.target.closest("[data-text-overlay-action]");
+            if (!button) return;
+            event.preventDefault();
+            event.stopPropagation();
+            pushHistory();
+            clip.style = {...(clip.style || {})};
+            const action = button.dataset.textOverlayAction;
+            if (action === "bold") clip.style.fontWeight = Number(clip.style.fontWeight || 850) >= 850 ? 700 : 900;
+            if (action === "uppercase") clip.style.textTransform = clip.style.textTransform === "uppercase" ? "none" : "uppercase";
+            if (["left", "center", "right"].includes(action)) clip.style.textAlign = action;
+            if (action === "preset-clean") applyTextPreset(clip, "clean");
+            if (action === "preset-caption") applyTextPreset(clip, "caption");
+            applyTextStyle(textLayer, clip.style);
+            updateTextControls(clip);
+            renderPreview();
+            scheduleSave();
+          });
+          return toolbar;
+        }
+        function clampOverlayClipToFrame(clip, node, rect = frame.getBoundingClientRect()) {
+          if (!clip || !node || !rect.width || !rect.height) return;
+          if (isTextOverlayClip(clip)) {
+            const loose = Boolean(draggingOverlay?.free);
+            clip.x = clampOverlayPositionValue(clip.x ?? 50, clip, loose);
+            clip.y = clampOverlayPositionValue(clip.y ?? 50, clip, loose);
+            node.style.left = `${clip.x}%`;
+            node.style.top = `${clip.y}%`;
+            return;
+          }
+          const marginPx = 8;
+          const halfWidthPct = Math.min(48, ((node.offsetWidth / 2 + marginPx) / rect.width) * 100);
+          const halfHeightPct = Math.min(48, ((node.offsetHeight / 2 + marginPx) / rect.height) * 100);
+          clip.x = Math.max(halfWidthPct, Math.min(100 - halfWidthPct, Number(clip.x ?? 50)));
+          clip.y = Math.max(halfHeightPct, Math.min(100 - halfHeightPct, Number(clip.y ?? 50)));
+          node.style.left = `${clip.x}%`;
+          node.style.top = `${clip.y}%`;
+        }
+        function commitOverlayDragHistory() {
+          if (!draggingOverlay?.beforeSnapshot || draggingOverlay.historyCommitted) return;
+          if (snapshotState() === draggingOverlay.beforeSnapshot) return;
+          pushHistorySnapshot(draggingOverlay.beforeSnapshot);
+          draggingOverlay.historyCommitted = true;
+        }
+        function finishActiveOverlayDrag() {
+          if (!draggingOverlay) return;
+          if (draggingOverlay.beforeSnapshot && !draggingOverlay.historyCommitted && snapshotState() !== draggingOverlay.beforeSnapshot) {
+            pushHistorySnapshot(draggingOverlay.beforeSnapshot);
+          }
+          draggingOverlay = null;
+          scheduleSave();
+        }
         function renderPreview() {
           const hasVideo = state.clips.some((clip) => clip.type === "video");
           const hasActiveVisual = state.clips.some((clip) => ["video", "image"].includes(clip.type) && isClipActive(clip));
@@ -1227,7 +1619,7 @@
             node.style.left = `${clip.x ?? 50}%`;
             node.style.top = `${clip.y ?? 50}%`;
             node.style.transform = `translate(-50%, -50%) rotate(${clip.rotation || 0}deg)`;
-            node.style.width = clip.type === "image" ? `${clip.scale || 42}%` : "auto";
+            node.style.width = clip.type === "image" ? `${clip.scale || 42}%` : `${textOverlayBoxWidth(clip)}%`;
             node.style.zIndex = String(clip.style?.zIndex || 2);
             if (clip.type === "image") {
               const asset = assetById(clip.assetId);
@@ -1286,66 +1678,76 @@
             } else {
               node.contentEditable = "false";
               node.spellcheck = false;
-              node.textContent = clip.text || (clip.type === "caption" ? t("caption", "Caption") : t("text", "Text"));
-              applyTextStyle(node, clip.style || {});
+              const textLayer = document.createElement("span");
+              textLayer.className = "editor-overlay-text-content";
+              textLayer.contentEditable = "false";
+              textLayer.spellcheck = false;
+              textLayer.textContent = clip.text || textOverlayFallback(clip);
+              applyTextStyle(textLayer, clip.style || {});
               node.style.opacity = String(fadeOpacity(clip, clipOpacityValue(clip)));
-              const remove = document.createElement("button");
-              remove.type = "button";
-              remove.contentEditable = "false";
-              remove.className = "editor-overlay-delete";
-              remove.dataset.overlayDelete = "true";
-              remove.dataset.icon = "trash-2";
-              remove.title = t("delete", "Delete");
-              remove.setAttribute("aria-label", t("delete", "Delete"));
-              node.append(remove);
-              node.addEventListener("input", () => {
-                clip.text = Array.from(node.childNodes)
-                  .filter((child) => child.nodeType === Node.TEXT_NODE)
-                  .map((child) => child.textContent)
-                  .join("")
-                  .trim() || (clip.type === "caption" ? t("caption", "Caption") : t("text", "Text"));
+              const guide = document.createElement("span");
+              guide.className = "editor-overlay-text-guide";
+              guide.textContent = `${Math.round(textOverlayBoxWidth(clip))}%`;
+              guide.contentEditable = "false";
+              const resizeLeft = document.createElement("span");
+              resizeLeft.contentEditable = "false";
+              resizeLeft.className = "editor-overlay-handle is-resize is-left";
+              resizeLeft.dataset.overlayHandle = "resize-left";
+              resizeLeft.title = t("width", "Width");
+              const resizeRight = document.createElement("span");
+              resizeRight.contentEditable = "false";
+              resizeRight.className = "editor-overlay-handle is-resize is-right";
+              resizeRight.dataset.overlayHandle = "resize-right";
+              resizeRight.title = t("width", "Width");
+              const rotate = document.createElement("span");
+              rotate.contentEditable = "false";
+              rotate.className = "editor-overlay-handle is-rotate";
+              rotate.dataset.overlayHandle = "rotate";
+              rotate.title = t("rotation", "Rotation");
+              node.append(textLayer, guide, resizeLeft, resizeRight, rotate);
+              if (clip.id === selectedClipId) node.append(createTextOverlayToolbar(clip, textLayer));
+              textLayer.addEventListener("input", () => {
+                clip.text = normalizedOverlayText(textLayer, textOverlayFallback(clip));
                 updateTextControls(clip);
                 renderTracks();
                 scheduleSave();
               });
-              node.addEventListener("dblclick", (event) => {
+              textLayer.addEventListener("dblclick", (event) => {
                 event.stopPropagation();
                 event.preventDefault();
                 selectOnly(clip.id);
-                node.dataset.editing = "true";
-                node.contentEditable = "true";
-                node.focus();
-                const range = document.createRange();
-                range.selectNodeContents(node);
-                range.collapse(false);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
+                focusInspectorForClip(clip, {scroll: false});
+                setOverlayTextEditing(node, textLayer, clip, true);
               });
-              node.addEventListener("keydown", (event) => {
+              textLayer.addEventListener("keydown", (event) => {
                 if (node.dataset.editing !== "true") return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  node.blur();
+                  textLayer.blur();
                 }
                 if (event.key === "Escape") {
                   event.preventDefault();
-                  node.textContent = clip.text || (clip.type === "caption" ? t("caption", "Caption") : t("text", "Text"));
-                  node.blur();
+                  textLayer.textContent = clip.text || textOverlayFallback(clip);
+                  textLayer.blur();
                 }
               });
-              node.addEventListener("blur", () => {
+              textLayer.addEventListener("blur", () => {
                 if (node.dataset.editing !== "true") return;
-                delete node.dataset.editing;
-                node.contentEditable = "false";
-                clip.text = node.textContent.trim() || (clip.type === "caption" ? t("caption", "Caption") : t("text", "Text"));
-                updateTextControls(clip);
-                renderTracks();
-                scheduleSave();
+                setOverlayTextEditing(node, textLayer, clip, false);
               });
             }
+            node.addEventListener("contextmenu", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              selectOnly(clip.id);
+              renderProperties();
+              focusInspectorForClip(clip, {scroll: false});
+              overlayRoot.querySelectorAll(".editor-overlay-item").forEach((item) => item.classList.toggle("is-selected", item === node));
+              showClipMenu(event.clientX, event.clientY, node);
+            });
             node.addEventListener("pointerdown", (event) => {
               if (node.dataset.editing === "true") return;
+              if (event.target.closest("[data-text-overlay-action]")) return;
               if (event.target.closest("[data-overlay-delete]")) {
                 event.stopPropagation();
                 event.preventDefault();
@@ -1354,30 +1756,35 @@
               }
               selectOnly(clip.id);
               renderProperties();
+              focusInspectorForClip(clip, {scroll: false});
               overlayRoot.querySelectorAll(".editor-overlay-item").forEach((item) => item.classList.toggle("is-selected", item === node));
               const rect = frame.getBoundingClientRect();
               const handle = event.target.dataset.cropHandle ? `crop-${event.target.dataset.cropHandle}` : (event.target.dataset.overlayHandle || "move");
+              const beforeOverlayDrag = snapshotState();
               draggingOverlay = {
                 id: clip.id,
                 mode: handle,
+                beforeSnapshot: beforeOverlayDrag,
                 startX: event.clientX,
                 startY: event.clientY,
                 x: clip.x ?? 50,
                 y: clip.y ?? 50,
                 scale: clip.scale || 42,
+                boxWidth: textOverlayBoxWidth(clip),
                 rotation: clip.rotation || 0,
                 crop: {...(clip.style?.crop || {x: 10, y: 10, width: 80, height: 80})},
+                free: event.altKey,
                 centerX: rect.left + ((clip.x ?? 50) / 100) * rect.width,
                 centerY: rect.top + ((clip.y ?? 50) / 100) * rect.height,
                 frameWidth: rect.width,
               };
-              pushHistory();
               if (node.isConnected) node.setPointerCapture(event.pointerId);
               event.preventDefault();
             });
             node.addEventListener("pointermove", (event) => {
               if (!draggingOverlay || draggingOverlay.id !== clip.id) return;
               const rect = frame.getBoundingClientRect();
+              draggingOverlay.free = Boolean(event.altKey);
               if (String(draggingOverlay.mode).startsWith("crop-")) {
                 clip.style = clip.style || {};
                 const dx = ((event.clientX - draggingOverlay.startX) / rect.width) * 100;
@@ -1395,34 +1802,52 @@
                 }
                 clip.style.crop = crop;
                 renderPreview();
-              } else if (draggingOverlay.mode === "resize") {
-                const distance = Math.hypot(event.clientX - draggingOverlay.centerX, event.clientY - draggingOverlay.centerY);
-                clip.scale = Math.max(8, Math.min(120, (distance * 2 / draggingOverlay.frameWidth) * 100));
-                node.style.width = `${clip.scale}%`;
+              } else if (String(draggingOverlay.mode).startsWith("resize")) {
+                if (isTextOverlayClip(clip)) {
+                  const dx = ((event.clientX - draggingOverlay.startX) / rect.width) * 100;
+                  const nextWidth = draggingOverlay.mode === "resize-left" ? draggingOverlay.boxWidth - dx * 2 : draggingOverlay.boxWidth + dx * 2;
+                  setTextOverlayBoxWidth(clip, nextWidth);
+                  node.style.width = `${textOverlayBoxWidth(clip)}%`;
+                  const guide = node.querySelector(".editor-overlay-text-guide");
+                  if (guide) guide.textContent = `${Math.round(textOverlayBoxWidth(clip))}%`;
+                  clampOverlayClipToFrame(clip, node, rect);
+                } else {
+                  const distance = Math.hypot(event.clientX - draggingOverlay.centerX, event.clientY - draggingOverlay.centerY);
+                  clip.scale = Math.max(8, Math.min(120, (distance * 2 / draggingOverlay.frameWidth) * 100));
+                  node.style.width = `${clip.scale}%`;
+                }
               } else if (draggingOverlay.mode === "rotate") {
                 const radians = Math.atan2(event.clientY - draggingOverlay.centerY, event.clientX - draggingOverlay.centerX);
                 clip.rotation = Math.round((radians * 180 / Math.PI) + 90);
                 node.style.transform = `translate(-50%, -50%) rotate(${clip.rotation}deg)`;
               } else {
-                clip.x = Math.max(4, Math.min(96, ((event.clientX - rect.left) / rect.width) * 100));
-                clip.y = Math.max(4, Math.min(96, ((event.clientY - rect.top) / rect.height) * 100));
-                node.style.left = `${clip.x}%`;
-                node.style.top = `${clip.y}%`;
+                clip.x = clampOverlayPositionValue(((event.clientX - rect.left) / rect.width) * 100, clip, event.altKey);
+                clip.y = clampOverlayPositionValue(((event.clientY - rect.top) / rect.height) * 100, clip, event.altKey);
+                clampOverlayClipToFrame(clip, node, rect);
               }
+              commitOverlayDragHistory();
             });
-            node.addEventListener("pointerup", (event) => {
+            const finishOverlayDrag = (event) => {
               if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
-              draggingOverlay = null;
-              scheduleSave();
-            });
+              finishActiveOverlayDrag();
+            };
+            node.addEventListener("pointerup", finishOverlayDrag);
+            node.addEventListener("pointercancel", finishOverlayDrag);
             node.addEventListener("wheel", (event) => {
-              if (clip.type !== "image") return;
+              if (!["image", "text", "caption"].includes(clip.type)) return;
               event.preventDefault();
-              clip.scale = Math.max(10, Math.min(96, (clip.scale || 42) + (event.deltaY > 0 ? -3 : 3)));
-              node.style.width = `${clip.scale}%`;
+              if (isTextOverlayClip(clip)) {
+                setTextOverlayBoxWidth(clip, textOverlayBoxWidth(clip) + (event.deltaY > 0 ? -2 : 2));
+                node.style.width = `${textOverlayBoxWidth(clip)}%`;
+                clampOverlayClipToFrame(clip, node);
+              } else {
+                clip.scale = Math.max(10, Math.min(96, (clip.scale || 42) + (event.deltaY > 0 ? -3 : 3)));
+                node.style.width = `${clip.scale}%`;
+              }
               scheduleSave();
             }, {passive: false});
             overlayRoot.append(node);
+            if (isTextOverlayClip(clip)) clampOverlayClipToFrame(clip, node);
           });
           updateOverlayVisibility();
           syncMediaForProjectTime(false);
@@ -1430,7 +1855,7 @@
         function renderProperties() {
           const clip = selectedClip();
           toolTitle.textContent = selectedClipIds.size > 1 ? `${selectedClipIds.size} clips selected` : (clip ? `${typeName(clip.type)} - ${fmt(clip.start)} - ${fmt(clip.start + clip.duration)}` : "Project");
-          if (clip && clip.type === "text") updateTextControls(clip);
+          if (clip && ["text", "caption"].includes(clip.type)) updateTextControls(clip);
           updateClipControls(clip);
           updateEffectControls(clip);
         }
@@ -1450,7 +1875,7 @@
           set("[data-clip-x]", clip ? Math.round(clip.x ?? 50) : "", !canPosition);
           set("[data-clip-y]", clip ? Math.round(clip.y ?? 50) : "", !canPosition);
           set("[data-clip-scale]", clip ? Math.round(clip.scale ?? (clip.type === "image" ? 42 : 100)) : "", !canZoom);
-          set("[data-clip-rotation]", clip ? Math.round(clip.rotation ?? 0) : "", !clip || !["text", "image"].includes(clip.type));
+          set("[data-clip-rotation]", clip ? Math.round(clip.rotation ?? 0) : "", !clip || !["text", "caption", "image"].includes(clip.type));
           set("[data-clip-fit]", style.fit || "contain", !clip || !["video", "image"].includes(clip.type));
           set("[data-clip-speed]", String(style.speed || 1), !clip || !["video", "audio"].includes(clip.type));
           updateChoice("clip-fit", style.fit || "contain", !clip || !["video", "image"].includes(clip.type));
@@ -1483,14 +1908,24 @@
           const alpha = Math.max(0, Math.min(100, Number(style.bgAlpha ?? 48))) / 100;
           node.style.fontFamily = style.font || "system-ui";
           node.style.fontSize = `${style.size || 22}px`;
+          node.style.fontWeight = String(style.fontWeight || 850);
           node.style.color = style.color || "#ffffff";
           node.style.background = `rgba(${bg.r}, ${bg.g}, ${bg.b}, ${alpha})`;
           node.style.webkitTextStroke = `${style.strokeWidth || 0}px ${style.stroke || "#000000"}`;
+          node.style.textShadow = style.textShadow || "0 3px 0 rgba(0,0,0,.55)";
+          node.style.textAlign = style.textAlign || "center";
+          node.style.lineHeight = String(style.lineHeight || 1.12);
+          node.style.letterSpacing = `${Number(style.letterSpacing || 0)}px`;
+          node.style.textTransform = style.textTransform || "none";
+          node.dataset.subtitleAnimation = style.animation || "none";
+          if (node.parentElement?.classList.contains("editor-overlay-item")) {
+            node.parentElement.dataset.subtitleAnimation = style.animation || "none";
+          }
         }
         function updateTextControls(clip) {
           clip.style = clip.style || {};
           root.querySelector("[data-text-value]").value = clip.text || "";
-          root.querySelector("[data-text-font]").value = clip.style.font || root.querySelector("[data-text-font]").value;
+          setTextFontChoiceValue(clip.style.font || root.querySelector("[data-text-font]").value);
           root.querySelector("[data-text-size]").value = clip.style.size || 22;
           root.querySelector("[data-text-color]").value = clip.style.color || "#ffffff";
           root.querySelector("[data-text-stroke]").value = clip.style.stroke || "#000000";
@@ -1731,6 +2166,11 @@
         }
         function showClipMenu(x, y, anchor = null) {
           if (!clipMenu) return;
+          const clip = selectedClip();
+          const textClip = isTextOverlayClip(clip);
+          clipMenu.dataset.menuKind = textClip ? "text" : "clip";
+          clipMenu.querySelectorAll("[data-text-menu-only]").forEach((item) => { item.hidden = !textClip; });
+          clipMenu.querySelectorAll("[data-non-text-menu-only]").forEach((item) => { item.hidden = textClip; });
           clipMenu.hidden = false;
           const menuRect = clipMenu.getBoundingClientRect();
           const anchorRect = anchor?.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
@@ -1743,6 +2183,23 @@
         }
         function hideClipMenu() {
           if (clipMenu) clipMenu.hidden = true;
+        }
+        function editSelectedTextOverlay() {
+          const clip = selectedClip();
+          if (!isTextOverlayClip(clip)) return;
+          renderPreview();
+          const node = overlayRoot.querySelector(`.editor-overlay-item[data-clip-id="${CSS.escape(clip.id)}"]`);
+          const textLayer = node?.querySelector(".editor-overlay-text-content");
+          if (node && textLayer) setOverlayTextEditing(node, textLayer, clip, true);
+        }
+        function applySelectedTextPreset(preset) {
+          const clip = selectedClip();
+          if (!isTextOverlayClip(clip)) return;
+          pushHistory();
+          applyTextPreset(clip, preset);
+          updateTextControls(clip);
+          renderPreview();
+          scheduleSave();
         }
         function changeSelectedZ(delta) {
           const clip = selectedClip();
@@ -1835,6 +2292,7 @@
           projectTime = Math.max(0, Math.min(timelineDuration(), Number(seconds) || 0));
           syncMediaForProjectTime(playing);
           sync();
+          persistProjectTime(true);
         }
         function seekFromClient(clientX) {
           const rect = timeRuler.getBoundingClientRect();
@@ -1871,6 +2329,7 @@
           video.pause();
           audioPool.forEach((media) => media.pause());
           sync();
+          persistProjectTime(true);
         }
         function tickPlayback(now) {
           if (!playing) return;
@@ -1883,6 +2342,7 @@
           }
           syncMediaForProjectTime(true);
           sync();
+          persistProjectTime(false);
           rafId = requestAnimationFrame(tickPlayback);
         }
         function splitSelectedClip() {
@@ -2305,18 +2765,17 @@
         });
         aspectMenu?.addEventListener("click", (event) => event.stopPropagation());
         document.addEventListener("click", closeAspectMenu);
+        document.addEventListener("click", closeAutoSubtitleLanguageChoice);
+        document.addEventListener("click", closeTextFontChoice);
+        setupAutoSubtitleLanguageChoice();
+        setupTextFontChoice();
+        setupPropertyTabScroller();
         root.querySelectorAll("[data-aspect]").forEach((button) => button.addEventListener("click", () => setAspectFromButton(button)));
         root.querySelectorAll("[data-editor-tool]").forEach((button) => button.addEventListener("click", () => {
-          const tool = button.dataset.editorTool;
-          root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item === button));
-          root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
-          root.querySelectorAll("[data-panel-tab]").forEach((item) => item.classList.toggle("is-active", item.dataset.panelTab === tool));
+          activateInspectorPanel(button.dataset.editorTool);
         }));
         root.querySelectorAll("[data-panel-tab]").forEach((button) => button.addEventListener("click", () => {
-          const tool = button.dataset.panelTab;
-          root.querySelectorAll("[data-panel-tab]").forEach((item) => item.classList.toggle("is-active", item === button));
-          root.querySelectorAll("[data-tool-panel]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.toolPanel === tool));
-          root.querySelectorAll("[data-editor-tool]").forEach((item) => item.classList.toggle("is-active", item.dataset.editorTool === tool));
+          activateInspectorPanel(button.dataset.panelTab);
         }));
         setupMobileVideoEditor();
         root.querySelectorAll("[data-add-kind]").forEach((button) => button.addEventListener("click", () => {
@@ -2377,7 +2836,7 @@
             cues = parseSubtitleText(text);
           }
           pushHistory();
-          cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {history: false}));
+          cues.forEach((cue) => addCaptionClip(cue.text, cue.start, Math.max(0.2, cue.end - cue.start), {...cue, history: false}));
           render();
           scheduleSave();
           if (cues.length) setAutoSubtitleStatus(`${t("auto_subtitles_done", "Subtitles added")}: ${cues.length}`, "ok");
@@ -2586,12 +3045,17 @@
           if (action === "split") splitSelectedClip();
           if (action === "front") changeSelectedZ(1);
           if (action === "back") changeSelectedZ(-1);
+          if (action === "edit-text") editSelectedTextOverlay();
+          if (action === "preset-clean") applySelectedTextPreset("clean");
+          if (action === "preset-caption") applySelectedTextPreset("caption");
           if (action === "delete") confirmDeleteSelectedClip();
           hideClipMenu();
         });
         document.addEventListener("click", (event) => {
           if (!clipMenu?.contains(event.target)) hideClipMenu();
         });
+        document.addEventListener("pointerup", finishActiveOverlayDrag);
+        document.addEventListener("pointercancel", finishActiveOverlayDrag);
         document.addEventListener("keydown", (event) => {
           if (event.key === "Escape" && confirmModal && !confirmModal.hidden) {
             closeConfirm(false);
@@ -2601,6 +3065,16 @@
             hideClipMenu();
             selectOnly("");
             render();
+            return;
+          }
+          if (!readOnly && isUndoShortcut(event)) {
+            event.preventDefault();
+            undo();
+            return;
+          }
+          if (!readOnly && isRedoShortcut(event)) {
+            event.preventDefault();
+            redo();
             return;
           }
           if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
@@ -2633,16 +3107,9 @@
             render();
             scheduleSave();
           }
-          if (event.ctrlKey && event.key.toLowerCase() === "z") {
-            event.preventDefault();
-            undo();
-          }
-          if (event.ctrlKey && event.key.toLowerCase() === "y") {
-            event.preventDefault();
-            redo();
-          }
         });
         window.addEventListener("beforeunload", (event) => {
+          persistProjectTime(true);
           if (!dirty && !saving && !saveFailed) return;
           event.preventDefault();
           event.returnValue = "";
@@ -2668,13 +3135,14 @@
         const textInputs = ["value", "font", "size", "color", "stroke", "stroke-width", "bg", "bg-alpha"].map((name) => root.querySelector(`[data-text-${name}]`)).filter(Boolean);
         textInputs.forEach((input) => input.addEventListener("input", () => {
           const clip = selectedClip();
-          if (!clip || clip.type !== "text") return;
+          if (!clip || !["text", "caption"].includes(clip.type)) return;
           if (!input.dataset.historyStarted) {
             pushHistory();
             input.dataset.historyStarted = "true";
           }
           clip.text = root.querySelector("[data-text-value]").value;
           clip.style = {
+            ...(clip.style || {}),
             font: root.querySelector("[data-text-font]").value,
             size: Number(root.querySelector("[data-text-size]").value),
             color: root.querySelector("[data-text-color]").value,
@@ -2700,6 +3168,7 @@
           });
           if (saveStatus) saveStatus.textContent = t("view_only", "View only");
         }
+        restoreProjectTime();
         render();
         refreshExportQueue();
 

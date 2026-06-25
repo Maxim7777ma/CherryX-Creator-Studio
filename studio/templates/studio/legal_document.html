@@ -8,7 +8,7 @@
       {% if document_type == "terms" %}{% ui "merchant_terms_title" %}{% elif document_type == "refund" %}{% ui "merchant_refund_title" %}{% else %}{% ui "merchant_contacts_title" %}{% endif %}
       - CherryX Creator Studio
     </title>
-    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260622-language-pages-polish">
+    <link rel="stylesheet" href="{% static 'studio/styles.css' %}?v=20260623-legal-marketplace">
   </head>
   <body class="landing-page legal-info-page legal-document-page">
     <header class="landing-nav">
@@ -70,6 +70,21 @@
             <li>{% ui "legal_stars_step_4" %}</li>
           </ol>
         </section>
+
+        {% if legal_doc.marketplace_card %}
+          <section class="legal-market-card" aria-labelledby="legal-market-title">
+            <div>
+              <span class="legal-document-kicker">{{ legal_doc.marketplace_card.kicker }}</span>
+              <h2 id="legal-market-title">{{ legal_doc.marketplace_card.title }}</h2>
+              <p>{{ legal_doc.marketplace_card.copy }}</p>
+            </div>
+            <nav aria-label="{{ legal_doc.marketplace_card.title }}">
+              <a href="{{ legal_doc.marketplace_card.market_url }}" data-icon="store">{{ legal_doc.marketplace_card.market }}</a>
+              <a href="{{ legal_doc.marketplace_card.publish_url }}" data-icon="upload-cloud">{{ legal_doc.marketplace_card.publish }}</a>
+              <a href="{{ legal_doc.marketplace_card.manage_url }}" data-icon="list-checks">{{ legal_doc.marketplace_card.manage }}</a>
+            </nav>
+          </section>
+        {% endif %}
 
         {% for section in legal_doc.sections %}
           <section class="legal-document-section">

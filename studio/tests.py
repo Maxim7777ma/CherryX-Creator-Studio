@@ -742,7 +742,7 @@ class QueryOptimizationTests(TransactionTestCase):
 
         self.assertContains(response, 'action="/api/jobs/queuedaction01/cancel/"')
         self.assertContains(response, 'action="/api/jobs/runningaction1/cancel/"')
-        self.assertContains(response, 'action="/api/jobs/failedaction01/repeat/"')
+        self.assertContains(response, 'action="/api/jobs/failedaction01/resume/"')
         self.assertContains(response, 'action="/api/jobs/cancelaction01/repeat/"')
         self.assertContains(response, 'href="/download/completeaction/all/"')
 
@@ -983,6 +983,24 @@ class JobSchedulerTests(TransactionTestCase):
                 break
             time.sleep(0.05)
         self.assertEqual(len(completed), 12)
+
+    def test_interrupted_web_jobs_are_paused_for_recovery(self) -> None:
+        JobRecord.objects.create(
+            owner=self.user,
+            job_id="recoverrun01",
+            kind="youtube",
+            title="Interrupted video job",
+            status="running",
+            progress=34,
+            params_json=json.dumps({"action": "youtube", "url": "https://example.com/video", "mode": "regular"}),
+        )
+
+        actions.mark_interrupted_jobs()
+
+        record = JobRecord.objects.get(job_id="recoverrun01")
+        self.assertEqual(record.status, "paused")
+        self.assertEqual(record.progress, 34)
+        self.assertEqual(record.error, "")
 
 
 def _video_project_queryset_for_test(owner_id: int):
