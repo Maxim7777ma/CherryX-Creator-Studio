@@ -6025,6 +6025,12 @@ body.is-designer-workspace .studio-topbar h1 {
   grid-column: 1 / -1;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
+  margin-top: 8px !important;
+}
+
+.youtube-prepare-form .is-mode-hidden,
+.youtube-prepare-form [hidden] {
+  display: none !important;
 }
 
 .youtube-prepare-form .choice-row span {

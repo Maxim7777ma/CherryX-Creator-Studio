@@ -38,6 +38,7 @@ from .youtube_tools import (
     rank_smart_clip_candidates,
     render_subtitle_assets,
     select_smart_clip_starts_from_candidates,
+    shorts_mode_tuning,
     transcribe_subtitle_cues,
     video_source_label,
     YouTubeDownload,
@@ -183,6 +184,8 @@ class YouTubeProfile:
     backstage_intro_seconds: int
     min_gap_seconds: int
     sample_limit: int
+    strict_face: bool = False
+    alignment_mode: str = "default"
 
 
 @dataclass(frozen=True)
@@ -444,26 +447,73 @@ def start_youtube_job(
                 profile.mode,
                 progress_callback=on_analysis_progress,
                 max_analysis_seconds=processing_plan.analysis_seconds,
+                strict_focus=profile.strict_face,
             )
             _save_youtube_analysis_cache(cache_key, clip_candidates)
             _update_job(job, 46, f"Shorts candidates found: {len(clip_candidates)}")
-        starts = select_smart_clip_starts_from_candidates(
+        render_queue = select_smart_clip_starts_from_candidates(
             clip_candidates,
             actual_duration,
-            profile.max_shorts,
+            profile.max_shorts * 2 if profile.strict_face else profile.max_shorts,
             profile.short_seconds,
+            profile.strict_face,
+            min_gap_seconds=profile.min_gap_seconds,
         )
+        starts = render_queue[: profile.max_shorts]
         if not starts:
-            raise ValueError("Не получилось подобрать фрагменты для Shorts")
+            raise ValueError("No face-safe moments found for Shorts. Try Smart/Pro, a clearer source video, or Preview mode.")
 
-        if ai_improve:
+        if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
+        elif ai_improve and profile.strict_face:
+            _update_job(job, 47, "AI improve skipped for strict face-safe Shorts selection")
         selected_starts = list(starts)
+        candidate_by_start = {}
+        for candidate in clip_candidates:
+            try:
+                candidate_by_start[int(candidate.get("start") or 0)] = dict(candidate)
+            except (TypeError, ValueError):
+                continue
 
         source_info = inspect_video(download.path)
         clips = []
         base_name = clean_base_name(download.title, "youtube_short")
         editor_source_path = _prepare_youtube_editor_source(download.path, output_dir, base_name)
+
+        def render_short_with_retries(start_second: int, index: int):
+            max_start = max(0, int(actual_duration) - max(1, profile.short_seconds))
+            retry_offsets = [0, -2, 2, 4, -4] if profile.strict_face else [0]
+            errors: list[str] = []
+            tried: set[int] = set()
+            for offset in retry_offsets:
+                retry_start = max(0, min(max_start, int(start_second) + offset))
+                if retry_start in tried:
+                    continue
+                tried.add(retry_start)
+                try:
+                    clip = make_short_clip(
+                        download.path,
+                        output_dir,
+                        base_name,
+                        actual_duration,
+                        retry_start,
+                        index,
+                        profile.short_seconds,
+                        settings.video_timeout_seconds,
+                        processing_plan.focus_mode,
+                        processing_plan.face_detection,
+                        source_info.width,
+                        source_info.height,
+                        profile.strict_face,
+                        profile.alignment_mode,
+                    )
+                    return clip, retry_start, errors
+                except RuntimeError as exc:
+                    errors.append(f"{format_duration(retry_start)}: {exc}")
+                    if not profile.strict_face or "face" not in str(exc).lower():
+                        raise
+            raise RuntimeError("; ".join(errors) or "face-safe retry failed")
+
         if processing_plan.render_workers > 1 and len(starts) > 1:
             render_items = list(enumerate(starts, start=1))
 
@@ -482,6 +532,8 @@ def start_youtube_job(
                     processing_plan.face_detection,
                     source_info.width,
                     source_info.height,
+                    profile.strict_face,
+                    profile.alignment_mode,
                 )
 
             rendered: dict[int, object] = {}
@@ -511,6 +563,7 @@ def start_youtube_job(
                                 "source_height": source_info.height,
                                 "mode": profile.mode,
                                 "aspect": "9 / 16",
+                                "selection": _clip_selection_report(candidate_by_start.get(int(clip.start_seconds), {}), profile.mode, processing_plan.label),
                             },
                             ensure_ascii=False,
                             indent=2,
@@ -521,23 +574,20 @@ def start_youtube_job(
                     pass
                 _add_output(job, clip.path, f"Short {index}")
             starts = []
-        for index, start_second in enumerate(starts, start=1):
+        sequential_starts = render_queue if profile.strict_face else starts
+        for render_index, start_second in enumerate(sequential_starts, start=1):
+            if profile.strict_face and len(clips) >= profile.max_shorts:
+                break
+            index = len(clips) + 1 if profile.strict_face else render_index
             progress = 38 + int((index - 1) / max(1, len(starts)) * 38)
             _update_job(job, progress, f"Режу клип {index}/{len(starts)}: старт {format_duration(start_second)}")
-            clip = make_short_clip(
-                download.path,
-                output_dir,
-                base_name,
-                actual_duration,
-                start_second,
-                index,
-                profile.short_seconds,
-                settings.video_timeout_seconds,
-                processing_plan.focus_mode,
-                processing_plan.face_detection,
-                source_info.width,
-                source_info.height,
-            )
+            try:
+                clip, actual_start_second, retry_errors = render_short_with_retries(start_second, index)
+            except RuntimeError as exc:
+                if profile.strict_face and "face" in str(exc).lower():
+                    _update_job(job, progress, f"Skipped weak face crop at {format_duration(start_second)}")
+                    continue
+                raise
             clips.append(clip)
             try:
                 clip.path.with_suffix(".edit.json").write_text(
@@ -554,6 +604,12 @@ def start_youtube_job(
                             "source_height": source_info.height,
                             "mode": profile.mode,
                             "aspect": "9 / 16",
+                            "selection": {
+                                **_clip_selection_report(candidate_by_start.get(int(start_second), {}), profile.mode, processing_plan.label),
+                                "requested_start": int(start_second),
+                                "render_start": int(actual_start_second),
+                                "retry_errors": retry_errors,
+                            },
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -563,6 +619,9 @@ def start_youtube_job(
             except Exception:
                 pass
             _add_output(job, clip.path, f"Short {index}")
+
+        if not clips:
+            raise ValueError("No face-safe Shorts rendered. Try Smart/Pro, a clearer source video, or Preview mode.")
 
         _update_job(job, 82, "Собираю ZIP со всеми Shorts")
         zip_path = zip_clips(clips, output_dir / f"{base_name}_shorts.zip")
@@ -1666,6 +1725,7 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
 
     base_short_seconds = max(10, settings.youtube_short_seconds)
     if mode == "dynamic":
+        tuning = shorts_mode_tuning(mode)
         return YouTubeProfile(
             mode=mode,
             label="Shorts dynamic",
@@ -1677,8 +1737,11 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
             backstage_intro_seconds=settings.backstage_intro_seconds,
             min_gap_seconds=max(20, settings.backstage_min_gap_seconds // 2),
             sample_limit=max(settings.backstage_sample_limit, 520),
+            strict_face=tuning.strict_focus,
+            alignment_mode=tuning.alignment_mode,
         )
     if mode == "podcast":
+        tuning = shorts_mode_tuning(mode)
         return YouTubeProfile(
             mode=mode,
             label="Shorts podcast",
@@ -1690,8 +1753,11 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
             backstage_intro_seconds=settings.backstage_intro_seconds,
             min_gap_seconds=settings.backstage_min_gap_seconds,
             sample_limit=max(settings.backstage_sample_limit, 620),
+            strict_face=tuning.strict_focus,
+            alignment_mode=tuning.alignment_mode,
         )
     if mode == "calm":
+        tuning = shorts_mode_tuning(mode)
         return YouTubeProfile(
             mode=mode,
             label="Shorts calm",
@@ -1703,8 +1769,11 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
             backstage_intro_seconds=settings.backstage_intro_seconds,
             min_gap_seconds=settings.backstage_min_gap_seconds,
             sample_limit=settings.backstage_sample_limit,
+            strict_face=tuning.strict_focus,
+            alignment_mode=tuning.alignment_mode,
         )
     if mode.startswith("backstage"):
+        tuning = shorts_mode_tuning(mode)
         seconds = {"backstage30": 30, "backstage60": 60, "backstage90": 90}.get(mode, settings.backstage_output_seconds)
         return YouTubeProfile(
             mode=mode,
@@ -1717,7 +1786,10 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
             backstage_intro_seconds=1 if seconds <= 30 else 2,
             min_gap_seconds=max(18, min(settings.backstage_min_gap_seconds, seconds)),
             sample_limit=max(settings.backstage_sample_limit, 700 if seconds >= 60 else settings.backstage_sample_limit),
+            strict_face=tuning.strict_focus,
+            alignment_mode=tuning.alignment_mode,
         )
+    tuning = shorts_mode_tuning("regular")
     return YouTubeProfile(
         mode="regular",
         label="Shorts classic",
@@ -1729,6 +1801,8 @@ def youtube_render_profile(mode: str) -> YouTubeProfile:
         backstage_intro_seconds=settings.backstage_intro_seconds,
         min_gap_seconds=settings.backstage_min_gap_seconds,
         sample_limit=settings.backstage_sample_limit,
+        strict_face=tuning.strict_focus,
+        alignment_mode=tuning.alignment_mode,
     )
 
 
@@ -1741,21 +1815,22 @@ def _youtube_processing_plan(speed: str, profile: YouTubeProfile, duration_secon
     duration = max(1, int(duration_seconds or 0))
     requested = _normalize_processing_speed(speed)
     if requested == "auto":
-        requested = "fast" if duration >= 45 * 60 else "smart"
+        requested = "smart" if profile.strict_face else "fast" if duration >= 45 * 60 else "smart"
 
     cpu_count = max(1, os.cpu_count() or 1)
     max_render_workers = max(1, min(2, cpu_count // 2 or 1))
     base_sample_limit = max(80, int(profile.sample_limit or settings.backstage_sample_limit or 360))
 
     if requested == "fast":
+        strict_face_detection = bool(profile.strict_face and settings.face_detection_enabled)
         return YouTubeProcessingPlan(
             code="fast",
-            label="Fast",
+            label="Fast face" if strict_face_detection else "Fast",
             sample_limit=max(80, min(180, int(base_sample_limit * 0.55))),
-            face_detection=False,
+            face_detection=strict_face_detection,
             analysis_seconds=45.0,
-            render_workers=max_render_workers,
-            focus_mode="center",
+            render_workers=1 if strict_face_detection else max_render_workers,
+            focus_mode=settings.shorts_focus_mode if strict_face_detection else "center",
         )
     if requested == "pro":
         return YouTubeProcessingPlan(
@@ -1764,16 +1839,16 @@ def _youtube_processing_plan(speed: str, profile: YouTubeProfile, duration_secon
             sample_limit=max(160, min(520, int(base_sample_limit * 1.18))),
             face_detection=bool(settings.face_detection_enabled),
             analysis_seconds=150.0,
-            render_workers=1 if bool(settings.face_detection_enabled) else max_render_workers,
+            render_workers=1 if bool(settings.face_detection_enabled or profile.strict_face) else max_render_workers,
             focus_mode=settings.shorts_focus_mode,
         )
     return YouTubeProcessingPlan(
         code="smart",
         label="Smart",
         sample_limit=max(100, min(300, int(base_sample_limit * 0.78))),
-        face_detection=bool(settings.face_detection_enabled and duration < 90 * 60),
+        face_detection=bool(settings.face_detection_enabled and (duration < 90 * 60 or profile.strict_face)),
         analysis_seconds=80.0,
-        render_workers=max_render_workers,
+        render_workers=1 if bool(profile.strict_face and settings.face_detection_enabled) else max_render_workers,
         focus_mode=settings.shorts_focus_mode,
     )
 
@@ -1787,6 +1862,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
+        "schema": "youtube-analysis-v3-focus-passport",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
@@ -1795,9 +1871,40 @@ def _youtube_analysis_cache_key(
         "speed": plan.code,
         "sample_limit": int(plan.sample_limit),
         "face_detection": bool(plan.face_detection),
+        "strict_face": bool(youtube_render_profile(mode).strict_face),
+        "alignment_mode": youtube_render_profile(mode).alignment_mode,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _clip_selection_report(candidate: dict[str, object], mode: str, processing_label: str) -> dict[str, object]:
+    fields = (
+        "score",
+        "peak_second",
+        "peak_score",
+        "avg_score",
+        "coverage",
+        "position",
+        "face_coverage",
+        "face_confidence",
+        "crop_safety",
+        "center_safety",
+        "size_safety",
+        "speech_activity_score",
+        "face_liveliness_score",
+        "speaker_lock_score",
+        "empty_frame_risk",
+        "focus_score",
+        "focus_source",
+        "motion_focus_available",
+        "strict_focus_ok",
+        "source",
+    )
+    report = {key: candidate.get(key) for key in fields if key in candidate}
+    report["mode"] = mode
+    report["processing"] = processing_label
+    return report
 
 
 def _youtube_analysis_cache_path(cache_key: str) -> Path:

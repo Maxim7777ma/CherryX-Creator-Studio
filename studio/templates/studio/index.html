@@ -298,25 +298,25 @@
             </label>
             <div class="field custom-select-field youtube-mode-select" data-custom-select>
               <span>{% ui "mode" %}</span>
-              {% for value, label in youtube_modes %}
+              {% for mode in youtube_modes %}
                 {% if forloop.first %}
-                  <input type="hidden" name="mode" value="{{ value }}" data-custom-select-input>
-                  <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false" data-mode-icon="classic">
-                    <b>{{ label }}</b>
-                    <small>{% ui "youtube_mode_regular_hint" %}</small>
+                  <input type="hidden" name="mode" value="{{ mode.value }}" data-custom-select-input>
+                  <button class="custom-select-current" type="button" data-custom-select-current aria-expanded="false" data-mode-icon="{{ mode.icon }}">
+                    <b>{{ mode.label }}</b>
+                    <small>{{ mode.hint }}</small>
                   </button>
                 {% endif %}
               {% endfor %}
               <div class="custom-select-menu youtube-mode-menu" data-custom-select-menu>
-                {% for value, label in youtube_modes %}
-                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ value }}" data-mode-icon="{% if value == 'dynamic' %}dynamic{% elif value == 'podcast' %}podcast{% elif value == 'calm' %}calm{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}backstage{% elif value == 'download' %}download{% elif value == 'cover' %}cover{% else %}classic{% endif %}" data-select-hint="{% if value == 'dynamic' %}{% ui "youtube_mode_dynamic_hint" %}{% elif value == 'podcast' %}{% ui "youtube_mode_podcast_hint" %}{% elif value == 'calm' %}{% ui "youtube_mode_calm_hint" %}{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}{% ui "youtube_mode_backstage_hint" %}{% elif value == 'download' %}{% ui "youtube_mode_download_hint" %}{% elif value == 'cover' %}{% ui "youtube_mode_cover_hint" %}{% else %}{% ui "youtube_mode_regular_hint" %}{% endif %}">
-                    <b>{{ label }}</b>
-                    <small>{% if value == 'dynamic' %}{% ui "youtube_mode_dynamic_hint" %}{% elif value == 'podcast' %}{% ui "youtube_mode_podcast_hint" %}{% elif value == 'calm' %}{% ui "youtube_mode_calm_hint" %}{% elif value == 'backstage30' or value == 'backstage60' or value == 'backstage90' %}{% ui "youtube_mode_backstage_hint" %}{% elif value == 'download' %}{% ui "youtube_mode_download_hint" %}{% elif value == 'cover' %}{% ui "youtube_mode_cover_hint" %}{% else %}{% ui "youtube_mode_regular_hint" %}{% endif %}</small>
+                {% for mode in youtube_modes %}
+                  <button class="{% if forloop.first %}is-selected{% endif %}" type="button" data-custom-select-value="{{ mode.value }}" data-mode-icon="{{ mode.icon }}" data-select-hint="{{ mode.hint }}">
+                    <b>{{ mode.label }}</b>
+                    <small>{{ mode.hint }}</small>
                   </button>
                 {% endfor %}
               </div>
             </div>
-            <fieldset class="choice-row field-wide youtube-speed-field">
+            <fieldset class="choice-row field-wide youtube-speed-field" data-youtube-speed-field>
               <legend>{% ui "youtube_processing_speed" %}</legend>
               <label data-speed-icon="auto">
                 <input type="radio" name="processing_speed" value="auto" checked>
@@ -335,11 +335,11 @@
                 <span>{% ui "youtube_speed_pro" %}</span>
               </label>
             </fieldset>
-            <label class="field ai-option">
+            <label class="field ai-option" data-youtube-ai-field>
               <input type="checkbox" name="ai_improve" {% if openai_ready %}checked{% endif %}>
               <span>{% ui "youtube_ai_improve_cuts" %}</span>
             </label>
-            <label class="field">
+            <label class="field" data-youtube-count-field>
               <span>{% ui "youtube_shorts_count" %}</span>
               <input type="number" name="clip_count" value="10" min="1" max="{{ youtube_max_shorts }}" step="1">
             </label>

@@ -6374,7 +6374,7 @@ def _localized_image_modes(language: str) -> list[tuple[str, str]]:
     return [(value, labels.get(value, {}).get(language, labels.get(value, {}).get("en", label))) for value, label in actions.IMAGE_MODE_CHOICES]
 
 
-def _localized_youtube_modes(language: str) -> list[tuple[str, str]]:
+def _localized_youtube_modes(language: str) -> list[dict[str, str]]:
     labels = {
         "regular": {"en": "Shorts classic", "ru": "Shorts классика", "uk": "Shorts класика", "fr": "Shorts classique", "de": "Shorts klassisch", "es": "Shorts clásico", "ka": "Shorts კლასიკა", "hy": "Shorts դասական", "it": "Shorts classici"},
         "dynamic": {"en": "Shorts dynamic", "ru": "Shorts динамика", "uk": "Shorts динаміка", "fr": "Shorts dynamique", "de": "Shorts dynamisch", "es": "Shorts dinámico", "ka": "Shorts დინამიკა", "hy": "Shorts դինամիկ", "it": "Shorts dinamici"},
@@ -6386,7 +6386,37 @@ def _localized_youtube_modes(language: str) -> list[tuple[str, str]]:
         "download": {"en": "Download MP4", "ru": "Скачать MP4", "uk": "Завантажити MP4", "fr": "Télécharger MP4", "de": "MP4 herunterladen", "es": "Descargar MP4", "ka": "MP4 ჩამოტვირთვა", "hy": "Ներբեռնել MP4", "it": "Scarica MP4"},
         "cover": {"en": "PNG cover", "ru": "PNG-обложка", "uk": "PNG-обкладинка", "fr": "Couverture PNG", "de": "PNG-Cover", "es": "Portada PNG", "ka": "PNG ყდა", "hy": "PNG շապիկ", "it": "Copertina PNG"},
     }
-    return [(value, labels.get(value, {}).get(language, labels.get(value, {}).get("en", label))) for value, label in actions.YOUTUBE_MODE_CHOICES]
+    hint_keys = {
+        "regular": "youtube_mode_regular_hint",
+        "dynamic": "youtube_mode_dynamic_hint",
+        "podcast": "youtube_mode_podcast_hint",
+        "calm": "youtube_mode_calm_hint",
+        "backstage30": "youtube_mode_backstage_hint",
+        "backstage60": "youtube_mode_backstage_hint",
+        "backstage90": "youtube_mode_backstage_hint",
+        "download": "youtube_mode_download_hint",
+        "cover": "youtube_mode_cover_hint",
+    }
+    icons = {
+        "regular": "classic",
+        "dynamic": "dynamic",
+        "podcast": "podcast",
+        "calm": "calm",
+        "backstage30": "backstage",
+        "backstage60": "backstage",
+        "backstage90": "backstage",
+        "download": "download",
+        "cover": "cover",
+    }
+    return [
+        {
+            "value": value,
+            "label": labels.get(value, {}).get(language, labels.get(value, {}).get("en", label)),
+            "hint": translate(hint_keys.get(value, "youtube_mode_regular_hint"), language),
+            "icon": icons.get(value, "classic"),
+        }
+        for value, label in actions.YOUTUBE_MODE_CHOICES
+    ]
 
 
 def _localized_subtitle_styles(request: HttpRequest) -> list[dict[str, str]]:

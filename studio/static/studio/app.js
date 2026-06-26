@@ -42,6 +42,7 @@ renderInitialJobs();
 setupFileFields();
 setupFormatPickers();
 setupCustomSelects();
+setupYoutubeModeFields();
 setupResumeWizards();
 setupLanguageSwitchers();
 setupSubscriptionDrawer();
@@ -530,6 +531,7 @@ function setupCustomSelects() {
 
     const choose = (button) => {
       input.value = button.dataset.customSelectValue || "";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
       buttons.forEach((item) => item.classList.toggle("is-selected", item === button));
       const label = (button.querySelector("b") || button).textContent.trim();
       const hint = button.dataset.selectHint || button.querySelector("small")?.textContent?.trim() || "YouTube";
@@ -559,6 +561,42 @@ function setupCustomSelects() {
     window.addEventListener("scroll", () => {
       if (picker.classList.contains("is-open")) positionMenu();
     }, true);
+  });
+}
+
+function setupYoutubeModeFields() {
+  document.querySelectorAll(".youtube-prepare-form").forEach((form) => {
+    const modeInput = form.querySelector('[name="mode"]');
+    const speedField = form.querySelector("[data-youtube-speed-field]");
+    const aiField = form.querySelector("[data-youtube-ai-field]");
+    const countField = form.querySelector("[data-youtube-count-field]");
+    const speedInputs = [...form.querySelectorAll('[name="processing_speed"]')];
+    const aiInput = form.querySelector('[name="ai_improve"]');
+    const countInput = form.querySelector('[name="clip_count"]');
+    if (!modeInput) return;
+
+    const setFieldState = (field, controls, visible) => {
+      if (!field) return;
+      field.hidden = !visible;
+      field.classList.toggle("is-mode-hidden", !visible);
+      controls.filter(Boolean).forEach((control) => {
+        control.disabled = !visible;
+      });
+    };
+
+    const sync = () => {
+      const mode = String(modeInput.value || "regular");
+      const isDownload = mode === "download";
+      const isCover = mode === "cover";
+      const isPreview = mode.startsWith("backstage");
+      const needsCutControls = !isDownload && !isCover;
+      setFieldState(speedField, speedInputs, needsCutControls);
+      setFieldState(countField, [countInput], needsCutControls && !isPreview);
+      setFieldState(aiField, [aiInput], !isDownload);
+    };
+
+    modeInput.addEventListener("change", sync);
+    sync();
   });
 }
 

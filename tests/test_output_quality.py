@@ -66,6 +66,188 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertEqual(web_actions._normalize_requested_clip_count("3", 15), 3)
         self.assertLessEqual(web_actions._normalize_requested_clip_count("999", 15), web_actions.settings.youtube_max_shorts)
 
+    def test_youtube_mode_profiles_carry_strict_focus_and_alignment(self) -> None:
+        self.assertTrue(web_actions.youtube_render_profile("regular").strict_face)
+        self.assertTrue(web_actions.youtube_render_profile("dynamic").strict_face)
+        self.assertTrue(web_actions.youtube_render_profile("calm").strict_face)
+        podcast = web_actions.youtube_render_profile("podcast")
+        self.assertTrue(podcast.strict_face)
+        self.assertEqual(podcast.alignment_mode, "podcast")
+        self.assertFalse(web_actions.youtube_render_profile("backstage30").strict_face)
+
+    def test_strict_selection_skips_weak_focus_candidates_without_fallback(self) -> None:
+        starts = youtube_tools.select_smart_clip_starts_from_candidates(
+            [
+                {"start": 4, "score": 98, "strict_focus_ok": False},
+                {"start": 38, "score": 72, "strict_focus_ok": True},
+                {"start": 74, "score": 70, "strict_focus_ok": False},
+            ],
+            duration_seconds=120,
+            max_clips=3,
+            clip_seconds=20,
+            strict_focus=True,
+        )
+
+        self.assertEqual(starts, [38])
+
+    def test_selection_uses_mode_gap_to_avoid_duplicate_moments(self) -> None:
+        starts = youtube_tools.select_smart_clip_starts_from_candidates(
+            [
+                {"start": 10, "score": 100, "strict_focus_ok": True},
+                {"start": 22, "score": 99, "strict_focus_ok": True},
+                {"start": 72, "score": 85, "strict_focus_ok": True},
+            ],
+            duration_seconds=140,
+            max_clips=2,
+            clip_seconds=20,
+            strict_focus=True,
+            min_gap_seconds=35,
+        )
+
+        self.assertEqual(starts, [10, 72])
+
+    def test_strict_focus_requires_speaker_lock_and_low_empty_risk(self) -> None:
+        good = {
+            "focus_source": "face",
+            "focus_score": 0.55,
+            "face_coverage": 0.4,
+            "face_confidence": 0.35,
+            "speaker_lock_score": 0.3,
+            "empty_frame_risk": 0.42,
+            "center_safety": 0.8,
+            "size_safety": 0.7,
+        }
+        weak_speaker = {**good, "speaker_lock_score": 0.05}
+        empty_risk = {**good, "empty_frame_risk": 0.9}
+        unsafe_center = {**good, "center_safety": 0.2}
+
+        self.assertTrue(youtube_tools.candidate_has_strict_focus(good))
+        self.assertFalse(youtube_tools.candidate_has_strict_focus(weak_speaker))
+        self.assertFalse(youtube_tools.candidate_has_strict_focus(empty_risk))
+        self.assertFalse(youtube_tools.candidate_has_strict_focus(unsafe_center))
+
+    def test_non_strict_selection_can_fill_from_fallback_starts(self) -> None:
+        starts = youtube_tools.select_smart_clip_starts_from_candidates(
+            [{"start": 12, "score": 90}],
+            duration_seconds=120,
+            max_clips=3,
+            clip_seconds=20,
+            strict_focus=False,
+        )
+
+        self.assertGreaterEqual(len(starts), 2)
+
+    def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
+        with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
+            youtube_tools,
+            "_find_nearby_audio_pause",
+            return_value=54,
+        ):
+            start, duration = youtube_tools.align_clip_window_to_audio(
+                Path("missing.mp4"),
+                start_seconds=10,
+                clip_seconds=50,
+                duration_seconds=120,
+                mode="podcast",
+            )
+
+        self.assertEqual(start, 10)
+        self.assertEqual(duration, 50)
+
+    def test_podcast_alignment_can_pull_start_to_phrase_beginning(self) -> None:
+        with patch.object(youtube_tools, "_find_phrase_start_near", side_effect=[None, 13.0]), patch.object(
+            youtube_tools,
+            "_find_nearby_audio_pause",
+            return_value=None,
+        ):
+            start = youtube_tools.align_clip_start_to_audio(
+                Path("missing.mp4"),
+                start_seconds=20,
+                clip_seconds=50,
+                duration_seconds=120,
+                mode="podcast",
+            )
+
+        self.assertEqual(start, 13)
+
+    def test_podcast_alignment_can_extend_to_natural_pause(self) -> None:
+        with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
+            youtube_tools,
+            "_find_nearby_audio_pause",
+            return_value=63,
+        ):
+            _start, duration = youtube_tools.align_clip_window_to_audio(
+                Path("missing.mp4"),
+                start_seconds=10,
+                clip_seconds=50,
+                duration_seconds=120,
+                mode="podcast",
+            )
+
+        self.assertEqual(duration, 53)
+
+    def test_calm_alignment_can_extend_softly_to_natural_pause(self) -> None:
+        with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
+            youtube_tools,
+            "_find_nearby_audio_pause",
+            return_value=63,
+        ):
+            _start, duration = youtube_tools.align_clip_window_to_audio(
+                Path("missing.mp4"),
+                start_seconds=10,
+                clip_seconds=50,
+                duration_seconds=120,
+                mode="calm",
+            )
+
+        self.assertEqual(duration, 53)
+
+    def test_phrase_end_after_finds_quiet_after_speech(self) -> None:
+        windows = [
+            (49.25, 320),
+            (49.50, 340),
+            (49.75, 330),
+            (50.00, 310),
+            (50.25, 305),
+            (50.50, 95),
+            (50.75, 85),
+            (51.00, 80),
+            (51.25, 78),
+        ]
+        with patch.object(youtube_tools, "_read_audio_rms_windows", return_value=windows):
+            end = youtube_tools._find_phrase_end_after(Path("missing.mp4"), 50, after_seconds=3)
+
+        self.assertIsNotNone(end)
+        self.assertGreaterEqual(end, 50.3)
+
+    def test_rendered_short_focus_validation_uses_final_crop(self) -> None:
+        points = [
+            youtube_tools.FaceTrackPoint(second=0, x=540, y=820, width=220, height=280, confidence=0.6),
+            youtube_tools.FaceTrackPoint(second=2, x=545, y=830, width=220, height=280, confidence=0.62),
+            youtube_tools.FaceTrackPoint(second=4, x=538, y=825, width=220, height=280, confidence=0.58),
+        ]
+        info = type("Info", (), {"width": 1080, "height": 1920, "duration_seconds": 6, "size_bytes": 1000})()
+        with patch.object(youtube_tools, "detect_face_track", return_value=points), patch.object(youtube_tools, "inspect_video", return_value=info):
+            result = youtube_tools.validate_rendered_short_focus(Path("short.mp4"), 6)
+
+        self.assertTrue(result["ok"])
+        self.assertGreaterEqual(result["face_coverage"], 0.2)
+        self.assertGreaterEqual(result["center_safety"], 0.4)
+        self.assertGreaterEqual(result["size_safety"], 0.3)
+
+    def test_rendered_short_focus_validation_rejects_edge_face(self) -> None:
+        points = [
+            youtube_tools.FaceTrackPoint(second=0, x=70, y=820, width=120, height=180, confidence=0.6),
+            youtube_tools.FaceTrackPoint(second=2, x=72, y=825, width=120, height=180, confidence=0.6),
+            youtube_tools.FaceTrackPoint(second=4, x=68, y=830, width=120, height=180, confidence=0.6),
+        ]
+        info = type("Info", (), {"width": 1080, "height": 1920, "duration_seconds": 6, "size_bytes": 1000})()
+        with patch.object(youtube_tools, "detect_face_track", return_value=points), patch.object(youtube_tools, "inspect_video", return_value=info):
+            result = youtube_tools.validate_rendered_short_focus(Path("short.mp4"), 6)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("edge", result["reason"])
+
     def test_clip_window_ranking_prefers_strong_window_not_single_second(self) -> None:
         scores = [
             (0, 5.0),
@@ -195,6 +377,17 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         best_second = max(scores, key=lambda item: item[1])[0]
         self.assertGreaterEqual(best_second, 8)
         self.assertLessEqual(best_second, 10)
+
+    def test_clip_speech_activity_rewards_continuous_voice(self) -> None:
+        active = [(index * 0.5, 420 + (index % 3) * 90) for index in range(20)]
+        quiet = [(index * 0.5, 35 if index % 2 else 55) for index in range(20)]
+
+        with patch.object(youtube_tools, "_read_audio_rms_windows", return_value=active):
+            active_score = youtube_tools._clip_speech_activity_score(Path("missing.mp4"), 0, 10)
+        with patch.object(youtube_tools, "_read_audio_rms_windows", return_value=quiet):
+            quiet_score = youtube_tools._clip_speech_activity_score(Path("missing.mp4"), 0, 10)
+
+        self.assertGreater(active_score, quiet_score)
 
     def test_cover_variant_profiles_are_distinct_and_editable(self) -> None:
         first = youtube_tools._cover_variant_profile("Big product launch", (920, 310), 1, 123)

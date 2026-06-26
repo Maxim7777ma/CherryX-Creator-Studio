@@ -132,6 +132,32 @@ class FaceTrackPoint:
 
 
 @dataclass(frozen=True)
+class ShortsModeTuning:
+    strict_focus: bool = False
+    alignment_mode: str = "default"
+    min_focus_score: float = 0.42
+    min_face_coverage: float = 0.26
+    min_face_confidence: float = 0.24
+    min_speaker_lock: float = 0.22
+
+
+SHORTS_MODE_TUNING: dict[str, ShortsModeTuning] = {
+    "regular": ShortsModeTuning(strict_focus=True, min_focus_score=0.42, min_face_coverage=0.25, min_face_confidence=0.23),
+    "dynamic": ShortsModeTuning(strict_focus=True, min_focus_score=0.44, min_face_coverage=0.24, min_face_confidence=0.23),
+    "podcast": ShortsModeTuning(strict_focus=True, alignment_mode="podcast", min_focus_score=0.38, min_face_coverage=0.22, min_face_confidence=0.21, min_speaker_lock=0.24),
+    "calm": ShortsModeTuning(strict_focus=True, alignment_mode="calm", min_focus_score=0.44, min_face_coverage=0.30, min_face_confidence=0.24),
+    "backstage": ShortsModeTuning(strict_focus=False),
+}
+
+
+def shorts_mode_tuning(selection_mode: str) -> ShortsModeTuning:
+    mode = (selection_mode or "regular").lower()
+    if mode.startswith("backstage"):
+        mode = "backstage"
+    return SHORTS_MODE_TUNING.get(mode, SHORTS_MODE_TUNING["regular"])
+
+
+@dataclass(frozen=True)
 class CoverCopy:
     headline: str
     description: str
@@ -287,6 +313,7 @@ def calculate_smart_clip_starts(
     face_detection_enabled: bool = True,
     selection_mode: str = "regular",
 ) -> list[int]:
+    tuning = shorts_mode_tuning(selection_mode)
     ranked_starts = rank_smart_clip_candidates(
         source,
         duration_seconds,
@@ -295,10 +322,18 @@ def calculate_smart_clip_starts(
         sample_limit,
         face_detection_enabled,
         selection_mode,
+        strict_focus=tuning.strict_focus,
     )
     if not ranked_starts:
-        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
-    return select_smart_clip_starts_from_candidates(ranked_starts, duration_seconds, max_clips, clip_seconds)
+        return [] if tuning.strict_focus else calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
+    return select_smart_clip_starts_from_candidates(
+        ranked_starts,
+        duration_seconds,
+        max_clips,
+        clip_seconds,
+        tuning.strict_focus,
+        min_gap_seconds=tuning.min_gap_seconds,
+    )
 
 
 def select_smart_clip_starts_from_candidates(
@@ -306,18 +341,24 @@ def select_smart_clip_starts_from_candidates(
     duration_seconds: float,
     max_clips: int,
     clip_seconds: int,
+    strict_focus: bool = False,
+    min_gap_seconds: int | None = None,
 ) -> list[int]:
     if not ranked_starts:
-        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
-    min_gap = max(int(clip_seconds * 0.82), min(clip_seconds + 12, 65))
+        return [] if strict_focus else calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
+    min_gap = max(int(clip_seconds * 0.82), min(clip_seconds + 12, 65), int(min_gap_seconds or 0))
     scored_starts: list[tuple[int, float]] = []
     for item in ranked_starts:
+        if strict_focus:
+            strict_ok = bool(item["strict_focus_ok"]) if "strict_focus_ok" in item else candidate_has_strict_focus(item)
+            if not strict_ok:
+                continue
         try:
             scored_starts.append((int(item["start"]), float(item.get("score") or 0.0)))
         except (KeyError, TypeError, ValueError):
             continue
     if not scored_starts:
-        return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
+        return []
     selected = _select_diverse_ranked_starts(
         scored_starts,
         max_clips,
@@ -326,7 +367,7 @@ def select_smart_clip_starts_from_candidates(
         clip_seconds,
     )
     base_starts = calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
-    if len(selected) < max_clips:
+    if not strict_focus and len(selected) < max_clips:
         for start in base_starts:
             if all(abs(start - existing) >= clip_seconds // 2 for existing in selected):
                 selected.append(start)
@@ -345,14 +386,18 @@ def rank_smart_clip_candidates(
     selection_mode: str = "regular",
     progress_callback: Callable[[int, int], None] | None = None,
     max_analysis_seconds: float | None = None,
+    strict_focus: bool = False,
 ) -> list[dict[str, object]]:
     duration = int(duration_seconds)
     if duration < 10:
         return []
 
     base_starts = calculate_clip_starts(duration_seconds, max_candidates, clip_seconds)
+    tuning = shorts_mode_tuning(selection_mode)
+    strict_focus = bool(strict_focus or tuning.strict_focus)
     if duration <= max_candidates * clip_seconds:
-        return [{"start": start, "score": round(1000.0 - index, 3), "source": "sequential"} for index, start in enumerate(base_starts)]
+        candidates = [{"start": start, "score": round(1000.0 - index, 3), "source": "sequential"} for index, start in enumerate(base_starts)]
+        return annotate_clip_candidate_focus(source, candidates, clip_seconds, face_detection_enabled, selection_mode) if strict_focus else candidates
 
     sample_limit = max(80, min(260 if face_detection_enabled else 420, sample_limit))
     step = max(2, int(duration / sample_limit))
@@ -374,7 +419,8 @@ def rank_smart_clip_candidates(
         candidates.append({"start": start, "score": round(max(1.0, 35.0 - index), 3), "source": "fallback"})
         seen.add(start)
 
-    return candidates[: max(1, max_candidates)]
+    candidates = candidates[: max(1, max_candidates)]
+    return annotate_clip_candidate_focus(source, candidates, clip_seconds, face_detection_enabled, selection_mode) if strict_focus else candidates
 
 
 def make_shorts(
@@ -429,6 +475,8 @@ def make_short_clip(
     face_detection_enabled: bool = True,
     source_width: int | None = None,
     source_height: int | None = None,
+    strict_focus: bool = False,
+    alignment_mode: str = "default",
 ) -> ShortClip:
     output_dir.mkdir(parents=True, exist_ok=True)
     if source_width is None or source_height is None:
@@ -436,7 +484,7 @@ def make_short_clip(
         source_width = source_info.width
         source_height = source_info.height
 
-    start_seconds, current_duration = align_clip_window_to_audio(source, start_seconds, clip_seconds, duration_seconds)
+    start_seconds, current_duration = align_clip_window_to_audio(source, start_seconds, clip_seconds, duration_seconds, mode=alignment_mode)
     output = output_dir / f"{clean_base_name(base_name, 'youtube_short')}_short_{index:02d}.mp4"
     vf = build_vertical_filter(
         source,
@@ -446,6 +494,7 @@ def make_short_clip(
         source_height,
         focus_mode,
         face_detection_enabled,
+        strict_focus,
     )
     args = [
         ffmpeg_path(),
@@ -487,7 +536,63 @@ def make_short_clip(
     if completed.returncode != 0:
         detail = completed.stderr.strip().splitlines()[-1:] or ["FFmpeg shorts conversion failed"]
         raise RuntimeError(detail[0])
+    if strict_focus:
+        validation = validate_rendered_short_focus(output, current_duration)
+        if not validation.get("ok"):
+            output.unlink(missing_ok=True)
+            raise RuntimeError(f"Rendered short failed face-safe validation: {validation.get('reason') or 'bad crop'}")
     return ShortClip(path=output, start_seconds=start_seconds, duration_seconds=current_duration)
+
+
+def validate_rendered_short_focus(path: Path, duration_seconds: int | float, min_coverage: float = 0.22, min_confidence: float = 0.20) -> dict[str, object]:
+    track = detect_face_track(path, 0, max(1, int(duration_seconds or 1)), fallback_to_motion=False)
+    offsets_count = max(1, len(_focus_sample_offsets(max(1, int(duration_seconds or 1)))))
+    coverage = min(1.0, len(track) / offsets_count) if track else 0.0
+    confidence = sum(point.confidence for point in track) / max(1, len(track)) if track else 0.0
+    center_safety = 0.0
+    size_safety = 0.0
+    try:
+        info = inspect_video(path)
+        width = int(info.width or 0)
+        height = int(info.height or 0)
+        crop_safety = _face_track_crop_safety(track, width, height)
+        center_safety = _face_track_center_safety(track, width, height)
+        size_safety = _face_track_size_safety(track, width, height)
+    except Exception:
+        crop_safety = 0.0
+    ok = bool(
+        track
+        and coverage >= min_coverage
+        and confidence >= min_confidence
+        and crop_safety >= 0.34
+        and center_safety >= 0.42
+        and size_safety >= 0.36
+    )
+    reason = ""
+    if not ok:
+        if not track:
+            reason = "no face detected in rendered crop"
+        elif coverage < min_coverage:
+            reason = "face coverage too low in rendered crop"
+        elif confidence < min_confidence:
+            reason = "face confidence too low in rendered crop"
+        elif crop_safety < 0.34:
+            reason = "face is too close to crop edge"
+        elif center_safety < 0.42:
+            reason = "face is poorly centered in crop"
+        elif size_safety < 0.36:
+            reason = "face size is unsafe in crop"
+        else:
+            reason = "bad rendered crop"
+    return {
+        "ok": ok,
+        "reason": reason,
+        "face_coverage": round(coverage, 3),
+        "face_confidence": round(confidence, 3),
+        "crop_safety": round(crop_safety, 3),
+        "center_safety": round(center_safety, 3),
+        "size_safety": round(size_safety, 3),
+    }
 
 
 def align_clip_start_to_audio(
@@ -495,14 +600,25 @@ def align_clip_start_to_audio(
     start_seconds: int,
     clip_seconds: int,
     duration_seconds: float,
+    mode: str = "default",
 ) -> int:
     if start_seconds <= 0:
         return 0
+    alignment = (mode or "default").lower()
+    gentle = alignment in {"podcast", "calm"}
     phrase_start = _find_phrase_start_near(source, start_seconds, before_seconds=5.5, after_seconds=1.8)
     if phrase_start is not None:
         aligned = clamp(int(round(phrase_start)), 0, max(0, int(duration_seconds) - max(1, clip_seconds)))
-        if abs(aligned - start_seconds) <= 6:
+        if abs(aligned - start_seconds) <= (4 if gentle else 6):
             return aligned
+    if gentle:
+        phrase_start = _find_phrase_start_near(source, start_seconds, before_seconds=8.0, after_seconds=0.75)
+        if phrase_start is not None:
+            aligned = clamp(int(round(phrase_start)), 0, max(0, int(duration_seconds) - max(1, clip_seconds)))
+            if aligned <= start_seconds + 1 and abs(aligned - start_seconds) <= 7:
+                return aligned
+    if gentle:
+        return start_seconds
     pause = _find_nearby_audio_pause(source, start_seconds, before_seconds=3.5, after_seconds=1.5)
     if pause is None:
         return start_seconds
@@ -519,8 +635,11 @@ def align_clip_window_to_audio(
     duration_seconds: float,
     min_duration: int | None = None,
     max_extension_seconds: int = 3,
+    mode: str = "default",
 ) -> tuple[int, int]:
-    aligned_start = align_clip_start_to_audio(source, start_seconds, clip_seconds, duration_seconds)
+    alignment = (mode or "default").lower()
+    gentle = alignment in {"podcast", "calm"}
+    aligned_start = align_clip_start_to_audio(source, start_seconds, clip_seconds, duration_seconds, mode)
     remaining = max(1, int(duration_seconds - aligned_start))
     current_duration = min(clip_seconds, remaining)
     if remaining <= current_duration:
@@ -528,12 +647,19 @@ def align_clip_window_to_audio(
 
     min_duration = min_duration or max(8, min(clip_seconds, clip_seconds - 4))
     preferred_end = aligned_start + current_duration
-    end_pause = _find_nearby_audio_pause(source, preferred_end, before_seconds=2.5, after_seconds=3.0)
+    end_pause = _find_nearby_audio_pause(source, preferred_end, before_seconds=1.0 if gentle else 2.5, after_seconds=5.5 if alignment == "podcast" else 4.0 if alignment == "calm" else 3.0)
+    phrase_end = _find_phrase_end_after(source, preferred_end, after_seconds=5.5 if alignment == "podcast" else 4.0 if alignment == "calm" else 0.0) if gentle else None
     if end_pause is not None:
         candidate_duration = int(round(end_pause - aligned_start))
-        max_duration = min(remaining, clip_seconds + max_extension_seconds)
-        if min_duration <= candidate_duration <= max_duration:
+        max_duration = min(remaining, clip_seconds + (6 if alignment == "podcast" else 4 if alignment == "calm" else max_extension_seconds))
+        min_allowed = current_duration if gentle else min_duration
+        if min_allowed <= candidate_duration <= max_duration:
             current_duration = candidate_duration
+    if phrase_end is not None:
+        candidate_duration = int(round(phrase_end - aligned_start))
+        max_duration = min(remaining, clip_seconds + (6 if alignment == "podcast" else 4))
+        if current_duration <= candidate_duration <= max_duration:
+            current_duration = max(current_duration, candidate_duration)
     return aligned_start, max(1, min(current_duration, remaining))
 
 
@@ -2811,15 +2937,18 @@ def build_vertical_filter(
     height: int | None,
     focus_mode: str,
     face_detection_enabled: bool,
+    strict_focus: bool = False,
 ) -> str:
     if not width or not height:
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
     face_track: list[FaceTrackPoint] = []
     if focus_mode == "face" and face_detection_enabled:
-        face_track = detect_face_track(source, start_seconds, clip_seconds)
+        face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=not strict_focus)
 
     if not face_track:
+        if strict_focus:
+            raise RuntimeError("No confident face/focus track for strict Shorts crop")
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
     target_ratio = 9 / 16
@@ -2860,7 +2989,7 @@ def detect_face_focus(source: Path, start_seconds: int, clip_seconds: int = 10) 
     return FaceFocus(int(weighted_x / total_weight), int(weighted_y / total_weight), confidence)
 
 
-def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10) -> list[FaceTrackPoint]:
+def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10, fallback_to_motion: bool = True) -> list[FaceTrackPoint]:
     native_points = native_tools.face_track_points(source, start_seconds, clip_seconds)
     if native_points:
         points: list[FaceTrackPoint] = []
@@ -2922,7 +3051,7 @@ def detect_face_track(source: Path, start_seconds: int, clip_seconds: int = 10) 
             candidates.append(point)
             previous_point = point
             previous_gray = gray
-        if not candidates:
+        if not candidates and fallback_to_motion:
             return _detect_motion_focus_track(source, start_seconds, clip_seconds)
         return _smooth_face_track(candidates)
     finally:
@@ -3597,6 +3726,163 @@ def _clip_candidate_dicts(
     return candidates
 
 
+def annotate_clip_candidate_focus(
+    source: Path,
+    candidates: list[dict[str, object]],
+    clip_seconds: int,
+    face_detection_enabled: bool,
+    selection_mode: str = "regular",
+) -> list[dict[str, object]]:
+    if not candidates:
+        return []
+    tuning = shorts_mode_tuning(selection_mode)
+    try:
+        source_info = inspect_video(source)
+        source_width = int(source_info.width or 0)
+        source_height = int(source_info.height or 0)
+    except Exception:
+        source_width = 0
+        source_height = 0
+    offsets_count = max(1, len(_focus_sample_offsets(max(1, clip_seconds))))
+    annotated: list[dict[str, object]] = []
+    for item in candidates:
+        prepared = dict(item)
+        try:
+            start = int(prepared.get("start") or 0)
+        except (TypeError, ValueError):
+            start = 0
+        face_track = detect_face_track(source, start, clip_seconds, fallback_to_motion=False) if face_detection_enabled else []
+        coverage = min(1.0, len(face_track) / offsets_count) if face_track else 0.0
+        confidence = sum(point.confidence for point in face_track) / max(1, len(face_track)) if face_track else 0.0
+        crop_safety = _face_track_crop_safety(face_track, source_width, source_height)
+        center_safety = _face_track_center_safety(face_track, source_width, source_height)
+        size_safety = _face_track_size_safety(face_track, source_width, source_height)
+        stability = _face_track_stability_score(face_track, source_width, source_height)
+        speech_activity = _clip_speech_activity_score(source, start, clip_seconds)
+        face_liveliness = _face_track_liveliness_score(face_track, stability)
+        speaker_lock = round(confidence * 0.26 + coverage * 0.22 + stability * 0.16 + speech_activity * 0.22 + face_liveliness * 0.14, 3)
+        empty_frame_risk = round(max(0.0, 1.0 - (coverage * 0.42 + confidence * 0.22 + crop_safety * 0.16 + center_safety * 0.12 + size_safety * 0.08)), 3)
+        focus_score = round(coverage * 0.34 + confidence * 0.24 + crop_safety * 0.14 + center_safety * 0.10 + size_safety * 0.08 + speaker_lock * 0.10, 3)
+        prepared.update(
+            {
+                "face_coverage": round(coverage, 3),
+                "face_confidence": round(confidence, 3),
+                "crop_safety": round(crop_safety, 3),
+                "center_safety": round(center_safety, 3),
+                "size_safety": round(size_safety, 3),
+                "speech_activity_score": speech_activity,
+                "face_liveliness_score": face_liveliness,
+                "speaker_lock_score": speaker_lock,
+                "empty_frame_risk": empty_frame_risk,
+                "focus_score": focus_score,
+                "focus_source": "face" if face_track else "none",
+            }
+        )
+        if not face_track and face_detection_enabled:
+            motion_track = _detect_motion_focus_track(source, start, clip_seconds)
+            prepared["motion_focus_available"] = bool(motion_track)
+            if motion_track and not tuning.strict_focus:
+                motion_confidence = sum(point.confidence for point in motion_track) / max(1, len(motion_track))
+                prepared["focus_source"] = "motion"
+                prepared["focus_score"] = round(max(focus_score, min(0.34, motion_confidence + len(motion_track) / offsets_count * 0.16)), 3)
+        else:
+            prepared["motion_focus_available"] = False
+        prepared["strict_focus_ok"] = candidate_has_strict_focus(prepared, tuning)
+        annotated.append(prepared)
+    return annotated
+
+
+def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeTuning | None = None) -> bool:
+    tuning = tuning or SHORTS_MODE_TUNING["regular"]
+    try:
+        focus_score = float(candidate.get("focus_score") or 0.0)
+        coverage = float(candidate.get("face_coverage") or 0.0)
+        confidence = float(candidate.get("face_confidence") or 0.0)
+        speaker_lock = float(candidate.get("speaker_lock_score") or 0.0)
+        empty_frame_risk = float(candidate.get("empty_frame_risk") or 1.0)
+        center_safety = float(candidate.get("center_safety") or 0.0)
+        size_safety = float(candidate.get("size_safety") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return (
+        str(candidate.get("focus_source") or "") == "face"
+        and focus_score >= tuning.min_focus_score
+        and coverage >= tuning.min_face_coverage
+        and confidence >= tuning.min_face_confidence
+        and speaker_lock >= tuning.min_speaker_lock
+        and center_safety >= 0.36
+        and size_safety >= 0.30
+        and empty_frame_risk <= 0.72
+    )
+
+
+def _face_track_crop_safety(points: list[FaceTrackPoint], width: int, height: int) -> float:
+    if not points or width <= 0 or height <= 0:
+        return 0.0
+    safe = 0.0
+    for point in points:
+        left = point.x - point.width / 2
+        top = point.y - point.height / 2
+        right = point.x + point.width / 2
+        bottom = point.y + point.height / 2
+        margin_x = max(1.0, width * 0.025)
+        margin_y = max(1.0, height * 0.025)
+        horizontal = 1.0 if margin_x <= left and right <= width - margin_x else 0.35
+        vertical = 1.0 if margin_y <= top and bottom <= height - margin_y else 0.35
+        safe += min(horizontal, vertical) * max(0.2, min(1.0, point.confidence))
+    return max(0.0, min(1.0, safe / max(1, len(points))))
+
+
+def _face_track_center_safety(points: list[FaceTrackPoint], width: int, height: int) -> float:
+    if not points or width <= 0 or height <= 0:
+        return 0.0
+    scores = []
+    for point in points:
+        nx = point.x / max(1, width)
+        ny = point.y / max(1, height)
+        horizontal = 1.0 - min(1.0, abs(nx - 0.5) / 0.36)
+        vertical = 1.0 - min(1.0, abs(ny - 0.42) / 0.42)
+        scores.append(max(0.0, min(1.0, horizontal * 0.62 + vertical * 0.38)))
+    return max(0.0, min(1.0, sum(scores) / max(1, len(scores))))
+
+
+def _face_track_size_safety(points: list[FaceTrackPoint], width: int, height: int) -> float:
+    if not points or width <= 0 or height <= 0:
+        return 0.0
+    frame_area = max(1, width * height)
+    scores = []
+    for point in points:
+        area_ratio = max(0.0, (point.width * point.height) / frame_area)
+        too_small = min(1.0, area_ratio / 0.018)
+        too_large = 1.0 - min(1.0, max(0.0, area_ratio - 0.34) / 0.22)
+        aspect = 1.0 - min(1.0, abs((point.width / max(1, point.height)) - 0.78) / 0.92)
+        scores.append(max(0.0, min(1.0, too_small * 0.48 + too_large * 0.34 + aspect * 0.18)))
+    return max(0.0, min(1.0, sum(scores) / max(1, len(scores))))
+
+
+def _face_track_liveliness_score(points: list[FaceTrackPoint], stability: float) -> float:
+    if not points:
+        return 0.0
+    confidence_span = max(point.confidence for point in points) - min(point.confidence for point in points)
+    size_span = 0.0
+    if len(points) > 1:
+        areas = [point.width * point.height for point in points]
+        size_span = (max(areas) - min(areas)) / max(1, sum(areas) / len(areas))
+    activity = min(1.0, confidence_span * 2.4 + size_span * 0.45)
+    return round(max(0.0, min(1.0, activity * 0.72 + stability * 0.28)), 3)
+
+
+def _face_track_stability_score(points: list[FaceTrackPoint], width: int, height: int) -> float:
+    if len(points) <= 1 or width <= 0 or height <= 0:
+        return 0.5 if points else 0.0
+    xs = [point.x / max(1, width) for point in points]
+    ys = [point.y / max(1, height) for point in points]
+    avg_x = sum(xs) / len(xs)
+    avg_y = sum(ys) / len(ys)
+    drift = sum(abs(x - avg_x) + abs(y - avg_y) for x, y in zip(xs, ys)) / len(points)
+    return max(0.0, min(1.0, 1.0 - drift * 5.0))
+
+
 def _select_diverse_ranked_starts(
     ranked_starts: list[tuple[int, float]],
     max_clips: int,
@@ -3772,6 +4058,23 @@ def _find_nearby_audio_pause(
     return best_second
 
 
+def _clip_speech_activity_score(source: Path, start_seconds: int, duration_seconds: int) -> float:
+    windows = _read_audio_rms_windows(source, max(0.0, float(start_seconds)), max(1.0, float(duration_seconds)), window_seconds=0.5)
+    if len(windows) < 3:
+        return 0.45
+    values = [max(0.0, float(rms)) for _second, rms in windows]
+    median = sorted(values)[len(values) // 2]
+    peak = max(values)
+    if peak <= 0:
+        return 0.0
+    speech_threshold = max(115.0, median * 0.86)
+    active_ratio = sum(1 for value in values if value >= speech_threshold) / max(1, len(values))
+    dynamic_range = min(1.0, max(0.0, (peak - median) / max(1.0, peak)))
+    silence_ratio = sum(1 for value in values if value <= max(70.0, median * 0.42)) / max(1, len(values))
+    continuity = max(0.0, 1.0 - silence_ratio * 0.72)
+    return round(max(0.0, min(1.0, active_ratio * 0.50 + dynamic_range * 0.22 + continuity * 0.28)), 3)
+
+
 def _find_phrase_start_near(
     source: Path,
     target_second: int,
@@ -3809,6 +4112,43 @@ def _find_phrase_start_near(
         score = distance * 1.0 - min(3.0, rise) * 0.45
         candidates.append((score, candidate_second))
 
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def _find_phrase_end_after(
+    source: Path,
+    target_second: int,
+    after_seconds: float,
+) -> float | None:
+    if after_seconds <= 0:
+        return None
+    windows = _read_audio_rms_windows(source, max(0.0, target_second - 0.75), after_seconds + 0.75, window_seconds=0.25)
+    if len(windows) < 5:
+        return None
+    rms_values = sorted(rms for _second, rms in windows)
+    median = rms_values[len(rms_values) // 2]
+    if median <= 0:
+        return None
+    speech_threshold = max(105, median * 0.82)
+    pause_threshold = max(80, min(220, median * 0.64))
+    candidates: list[tuple[float, float]] = []
+    for index, (second, rms) in enumerate(windows):
+        if second <= target_second:
+            continue
+        if rms > pause_threshold:
+            continue
+        before = windows[max(0, index - 8) : index]
+        if not before or max(value for _sec, value in before) < speech_threshold:
+            continue
+        after = windows[index : min(len(windows), index + 4)]
+        quiet_ratio = sum(1 for _sec, value in after if value <= pause_threshold) / max(1, len(after))
+        if quiet_ratio < 0.5:
+            continue
+        distance = second - target_second
+        candidates.append((distance, max(target_second, second - 0.1)))
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[0])
