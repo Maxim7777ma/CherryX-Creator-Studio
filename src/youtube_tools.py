@@ -343,21 +343,38 @@ def select_smart_clip_starts_from_candidates(
     clip_seconds: int,
     strict_focus: bool = False,
     min_gap_seconds: int | None = None,
+    allow_strict_probe: bool = False,
 ) -> list[int]:
     if not ranked_starts:
         return [] if strict_focus else calculate_clip_starts(duration_seconds, max_clips, clip_seconds)
     min_gap = max(int(clip_seconds * 0.82), min(clip_seconds + 12, 65), int(min_gap_seconds or 0))
     scored_starts: list[tuple[int, float]] = []
+    probe_starts: list[tuple[int, float]] = []
     for item in ranked_starts:
+        try:
+            start = int(item["start"])
+            score = float(item.get("score") or 0.0)
+        except (KeyError, TypeError, ValueError):
+            continue
         if strict_focus:
             strict_ok = bool(item["strict_focus_ok"]) if "strict_focus_ok" in item else candidate_has_strict_focus(item)
             if not strict_ok:
+                if allow_strict_probe:
+                    probe_score = _strict_probe_candidate_score(item, score)
+                    if probe_score > 0:
+                        probe_starts.append((start, probe_score))
                 continue
-        try:
-            scored_starts.append((int(item["start"]), float(item.get("score") or 0.0)))
-        except (KeyError, TypeError, ValueError):
-            continue
+        scored_starts.append((start, score))
     if not scored_starts:
+        if strict_focus and allow_strict_probe and probe_starts:
+            selected = _select_diverse_ranked_starts(
+                probe_starts,
+                max_clips,
+                min_gap,
+                int(duration_seconds),
+                clip_seconds,
+            )
+            return sorted(selected[:max_clips])
         return []
     selected = _select_diverse_ranked_starts(
         scored_starts,
@@ -3810,6 +3827,27 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         and speaker_lock >= tuning.min_speaker_lock
         and empty_frame_risk <= 0.72
     )
+
+
+def _strict_probe_candidate_score(candidate: dict[str, object], score: float) -> float:
+    try:
+        coverage = float(candidate.get("face_coverage") or 0.0)
+        confidence = float(candidate.get("face_confidence") or 0.0)
+        focus_score = float(candidate.get("focus_score") or 0.0)
+        speaker_lock = float(candidate.get("speaker_lock_score") or 0.0)
+        empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.5)
+    except (TypeError, ValueError):
+        coverage = confidence = focus_score = speaker_lock = 0.0
+        empty_frame_risk = 0.5
+    face_hint = max(0.0, min(1.0, coverage * 0.38 + confidence * 0.28 + focus_score * 0.22 + speaker_lock * 0.12))
+    if str(candidate.get("focus_source") or "") == "face":
+        multiplier = 0.72 + face_hint * 0.72
+    elif face_hint > 0:
+        multiplier = 0.42 + face_hint * 0.50
+    else:
+        multiplier = 0.18
+    risk_penalty = 1.0 - max(0.0, min(0.55, (empty_frame_risk - 0.72) * 0.9))
+    return max(0.0, float(score) * multiplier * risk_penalty)
 
 
 def _face_track_crop_safety(points: list[FaceTrackPoint], width: int, height: int) -> float:

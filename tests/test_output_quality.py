@@ -90,6 +90,21 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(starts, [38])
 
+    def test_strict_selection_can_probe_ranked_candidates_without_base_fallback(self) -> None:
+        starts = youtube_tools.select_smart_clip_starts_from_candidates(
+            [
+                {"start": 6, "score": 96, "strict_focus_ok": False, "focus_source": "face", "face_coverage": 0.12, "face_confidence": 0.14},
+                {"start": 44, "score": 82, "strict_focus_ok": False, "focus_source": "none"},
+            ],
+            duration_seconds=130,
+            max_clips=2,
+            clip_seconds=20,
+            strict_focus=True,
+            allow_strict_probe=True,
+        )
+
+        self.assertEqual(starts, [6, 44])
+
     def test_selection_uses_mode_gap_to_avoid_duplicate_moments(self) -> None:
         starts = youtube_tools.select_smart_clip_starts_from_candidates(
             [

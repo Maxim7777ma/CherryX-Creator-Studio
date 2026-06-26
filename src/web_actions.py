@@ -459,6 +459,17 @@ def start_youtube_job(
             profile.strict_face,
             min_gap_seconds=profile.min_gap_seconds,
         )
+        if profile.strict_face and not render_queue and clip_candidates:
+            _update_job(job, 47, "No prevalidated face-safe candidates; probing render-time face tracks")
+            render_queue = select_smart_clip_starts_from_candidates(
+                clip_candidates,
+                actual_duration,
+                profile.max_shorts * 2,
+                profile.short_seconds,
+                profile.strict_face,
+                min_gap_seconds=profile.min_gap_seconds,
+                allow_strict_probe=True,
+            )
         starts = render_queue[: profile.max_shorts]
         if not starts:
             raise ValueError("No face-safe moments found for Shorts. Try Smart/Pro, a clearer source video, or Preview mode.")
