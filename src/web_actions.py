@@ -1862,7 +1862,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v3-focus-passport",
+        "schema": "youtube-analysis-v4-focus-passport",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),

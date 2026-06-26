@@ -3800,8 +3800,6 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         confidence = float(candidate.get("face_confidence") or 0.0)
         speaker_lock = float(candidate.get("speaker_lock_score") or 0.0)
         empty_frame_risk = float(candidate.get("empty_frame_risk") or 1.0)
-        center_safety = float(candidate.get("center_safety") or 0.0)
-        size_safety = float(candidate.get("size_safety") or 0.0)
     except (TypeError, ValueError):
         return False
     return (
@@ -3810,8 +3808,6 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         and coverage >= tuning.min_face_coverage
         and confidence >= tuning.min_face_confidence
         and speaker_lock >= tuning.min_speaker_lock
-        and center_safety >= 0.36
-        and size_safety >= 0.30
         and empty_frame_risk <= 0.72
     )
 

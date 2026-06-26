@@ -119,12 +119,12 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         }
         weak_speaker = {**good, "speaker_lock_score": 0.05}
         empty_risk = {**good, "empty_frame_risk": 0.9}
-        unsafe_center = {**good, "center_safety": 0.2}
+        side_face = {**good, "center_safety": 0.2}
 
         self.assertTrue(youtube_tools.candidate_has_strict_focus(good))
         self.assertFalse(youtube_tools.candidate_has_strict_focus(weak_speaker))
         self.assertFalse(youtube_tools.candidate_has_strict_focus(empty_risk))
-        self.assertFalse(youtube_tools.candidate_has_strict_focus(unsafe_center))
+        self.assertTrue(youtube_tools.candidate_has_strict_focus(side_face))
 
     def test_non_strict_selection_can_fill_from_fallback_starts(self) -> None:
         starts = youtube_tools.select_smart_clip_starts_from_candidates(
