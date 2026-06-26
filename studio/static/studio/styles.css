@@ -16890,6 +16890,7 @@ body.job-detail-page .detail-topbar .language-switcher {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 8px !important;
   max-width: min(820px, calc(100vw - 160px));
 }
 
