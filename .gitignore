@@ -2,9 +2,12 @@
 .env.*
 !.env.example
 .venv/
+venv/
 __pycache__/
 *.pyc
 data/
+media/
+staticfiles/
 tmp/
 tmp_screens/
 logs/
