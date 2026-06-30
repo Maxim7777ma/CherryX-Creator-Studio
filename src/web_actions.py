@@ -652,7 +652,7 @@ def start_youtube_job(
                 profile.short_seconds,
                 profile.min_gap_seconds,
             )
-            fallback_starts = list(dict.fromkeys(focused_fallback_starts))[: profile.max_shorts]
+            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: profile.max_shorts]
             if not fallback_starts:
                 raise ValueError("No face or motion-focused Shorts rendered. Try a clearer source video or Preview mode.")
             _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
@@ -1953,7 +1953,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v4-focus-passport",
+        "schema": "youtube-analysis-v5-motion-focus",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
