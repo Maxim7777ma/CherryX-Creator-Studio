@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from studio import views
+from studio.management.commands.run_worker import Command, RUNNING_RECOVERY_GRACE_SECONDS
 from studio.models import JobEventRecord, JobRecord
 from src.youtube_tools import SubtitleCue, SubtitleUnavailableError, _extract_whisper_audio, _normalize_caption_text, _split_segment_text_into_cues, normalize_subtitle_language
 
@@ -147,6 +150,32 @@ class VideoSubtitleJobRecordTests(TestCase):
         self.assertEqual(record.message, "Subtitles added: 2")
         self.assertEqual(record.error, "")
         self.assertTrue(JobEventRecord.objects.filter(job=record, status="completed", progress=100).exists())
+
+    def test_worker_recovery_leaves_fresh_running_jobs_alone(self) -> None:
+        fresh = JobRecord.objects.create(
+            job_id="fresh1",
+            kind="video_subtitles",
+            title="Fresh subtitles",
+            status="running",
+            progress=10,
+            message="Transcribing audio",
+        )
+        stale = JobRecord.objects.create(
+            job_id="stale1",
+            kind="video_subtitles",
+            title="Stale subtitles",
+            status="running",
+            progress=10,
+            message="Transcribing audio",
+        )
+        JobRecord.objects.filter(id=stale.id).update(updated_at=timezone.now() - timedelta(seconds=RUNNING_RECOVERY_GRACE_SECONDS + 5))
+
+        self.assertEqual(Command()._recover_interrupted_jobs(), 1)
+
+        fresh.refresh_from_db()
+        stale.refresh_from_db()
+        self.assertEqual(fresh.status, "running")
+        self.assertEqual(stale.status, "queued")
 
 
 if __name__ == "__main__":

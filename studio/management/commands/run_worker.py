@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 import json
 import time
@@ -26,6 +27,7 @@ GENERIC_JOB_KINDS = {
 }
 VIDEO_JOB_KINDS = {"video_export", "video_cover", "video_subtitles"}
 SUPPORTED_JOB_KINDS = GENERIC_JOB_KINDS | VIDEO_JOB_KINDS
+RUNNING_RECOVERY_GRACE_SECONDS = 90
 
 
 class Command(BaseCommand):
@@ -40,12 +42,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         if options["recover_running"]:
-            recovered = JobRecord.objects.filter(kind__in=SUPPORTED_JOB_KINDS, status="running").update(
-                status="queued",
-                message="Requeued after worker restart",
-                error="",
-                updated_at=timezone.now(),
-            )
+            recovered = self._recover_interrupted_jobs()
             if recovered:
                 self.stdout.write(self.style.WARNING(f"Requeued {recovered} interrupted job(s)."))
 
@@ -62,6 +59,15 @@ class Command(BaseCommand):
             self._run_record(record)
             if options["once"]:
                 continue
+
+    def _recover_interrupted_jobs(self) -> int:
+        stale_before = timezone.now() - timedelta(seconds=RUNNING_RECOVERY_GRACE_SECONDS)
+        return JobRecord.objects.filter(kind__in=SUPPORTED_JOB_KINDS, status="running", updated_at__lt=stale_before).update(
+            status="queued",
+            message="Requeued after worker restart",
+            error="",
+            updated_at=timezone.now(),
+        )
 
     def _claim_next_job(self) -> JobRecord | None:
         close_old_connections()
