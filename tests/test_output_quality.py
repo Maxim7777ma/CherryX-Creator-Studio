@@ -81,6 +81,32 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertEqual(web_actions._normalize_requested_clip_count("3", 15), 3)
         self.assertLessEqual(web_actions._normalize_requested_clip_count("999", 15), web_actions.settings.youtube_max_shorts)
 
+    def test_strict_render_probe_limit_uses_deep_candidate_queue(self) -> None:
+        profile = web_actions.YouTubeProfile(
+            mode="regular",
+            label="Shorts classic",
+            is_backstage=False,
+            max_shorts=5,
+            short_seconds=45,
+            backstage_output_seconds=0,
+            backstage_segment_seconds=0,
+            backstage_intro_seconds=0,
+            min_gap_seconds=45,
+            sample_limit=240,
+            strict_face=True,
+        )
+
+        self.assertEqual(web_actions._strict_render_probe_limit(profile), 40)
+
+    def test_filter_unused_short_starts_skips_duplicates_and_nearby_done_clips(self) -> None:
+        starts = web_actions._filter_unused_short_starts(
+            [10, 12, 50, 50, 82],
+            used_starts=[11],
+            min_distance_seconds=5,
+        )
+
+        self.assertEqual(starts, [50, 82])
+
     def test_youtube_mode_profiles_carry_strict_focus_and_alignment(self) -> None:
         self.assertTrue(web_actions.youtube_render_profile("regular").strict_face)
         self.assertTrue(web_actions.youtube_render_profile("dynamic").strict_face)

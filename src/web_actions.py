@@ -452,10 +452,11 @@ def start_youtube_job(
             )
             _save_youtube_analysis_cache(cache_key, clip_candidates)
             _update_job(job, 46, f"Shorts candidates found: {len(clip_candidates)}")
+        strict_probe_limit = _strict_render_probe_limit(profile)
         render_queue = select_smart_clip_starts_from_candidates(
             clip_candidates,
             actual_duration,
-            profile.max_shorts * 2 if profile.strict_face else profile.max_shorts,
+            strict_probe_limit if profile.strict_face else profile.max_shorts,
             profile.short_seconds,
             profile.strict_face,
             min_gap_seconds=profile.min_gap_seconds,
@@ -466,7 +467,7 @@ def start_youtube_job(
             render_queue = select_smart_clip_starts_from_candidates(
                 clip_candidates,
                 actual_duration,
-                profile.max_shorts * 2,
+                strict_probe_limit,
                 profile.short_seconds,
                 profile.strict_face,
                 min_gap_seconds=profile.min_gap_seconds,
@@ -656,27 +657,36 @@ def start_youtube_job(
                 pass
             _add_output(job, clip.path, f"Short {index}")
 
-        if not clips:
-            if not profile.strict_face:
-                raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
+        if not clips and not profile.strict_face:
+            raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
+
+        if profile.strict_face and len(clips) < profile.max_shorts:
+            remaining = profile.max_shorts - len(clips)
             focused_fallback_starts = _select_best_effort_focus_starts(
                 clip_candidates,
                 actual_duration,
-                max(profile.max_shorts * 4, profile.max_shorts + 8),
+                max(remaining * 8, profile.max_shorts + 12),
                 profile.short_seconds,
                 profile.min_gap_seconds,
             )
             guaranteed_starts = _select_guaranteed_short_starts(
                 clip_candidates,
                 actual_duration,
-                max(profile.max_shorts * 4, profile.max_shorts + 8),
+                max(remaining * 8, profile.max_shorts + 12),
                 profile.short_seconds,
                 profile.min_gap_seconds,
             )
-            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue, *guaranteed_starts]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
+            used_starts = [int(round(float(getattr(clip, "start_seconds", 0) or 0))) for clip in clips]
+            fallback_starts = _filter_unused_short_starts(
+                [*focused_fallback_starts, *guaranteed_starts, *render_queue, *selected_starts],
+                used_starts,
+                max(3, min(profile.min_gap_seconds, profile.short_seconds // 2)),
+            )[: max(remaining * 8, profile.max_shorts + 12)]
             if not fallback_starts:
-                raise ValueError("No moments found for Shorts. Try a clearer source video or Preview mode.")
-            _update_job(job, 78, "Face-safe crop was too weak; rendering guaranteed vertical Shorts")
+                if not clips:
+                    raise ValueError("No moments found for Shorts. Try a clearer source video or Preview mode.")
+            else:
+                _update_job(job, 78, f"Face-safe crop was weak; filling {remaining} Shorts with focus/full-frame fallback")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
                 if len(clips) >= profile.max_shorts:
@@ -2073,6 +2083,28 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
             prepared["score"] = round(base_score * (0.42 + quality * 0.34), 3)
             focused.append(prepared)
     return focused
+
+
+def _strict_render_probe_limit(profile: YouTubeProfile) -> int:
+    return max(profile.max_shorts * 8, profile.max_shorts + 24)
+
+
+def _filter_unused_short_starts(starts: list[int], used_starts: list[int], min_distance_seconds: int) -> list[int]:
+    min_distance = max(0, int(min_distance_seconds or 0))
+    unused: list[int] = []
+    seen: set[int] = set()
+    for raw_start in starts:
+        try:
+            start = int(raw_start)
+        except (TypeError, ValueError):
+            continue
+        if start in seen:
+            continue
+        if any(abs(start - used_start) < min_distance for used_start in used_starts):
+            continue
+        seen.add(start)
+        unused.append(start)
+    return unused
 
 
 def _select_best_effort_focus_starts(
