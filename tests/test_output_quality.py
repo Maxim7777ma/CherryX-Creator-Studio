@@ -77,6 +77,13 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertLessEqual(int(youtube_tools.PREVIEW_VIDEO_CRF), 21)
         self.assertLessEqual(int(youtube_tools.SUBTITLE_VIDEO_CRF), 20)
 
+    def test_youtube_download_prefers_h264_before_av1_mp4(self) -> None:
+        fmt = youtube_tools._youtube_options(Path("."), 30)["format"]
+
+        self.assertIn("vcodec^=avc1", fmt)
+        self.assertIn("vcodec!*=av01", fmt)
+        self.assertLess(fmt.index("vcodec^=avc1"), fmt.index("bv*[ext=mp4][height<=720]"))
+
     def test_requested_shorts_count_defaults_to_ten_and_clamps_to_server_limit(self) -> None:
         self.assertEqual(web_actions._normalize_requested_clip_count("", 15), 10)
         self.assertEqual(web_actions._normalize_requested_clip_count("3", 15), 3)

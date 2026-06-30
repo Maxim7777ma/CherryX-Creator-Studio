@@ -2911,7 +2911,14 @@ def _run_ffmpeg(args: list[str], timeout_seconds: int) -> None:
 def _youtube_options(output_dir: Path, timeout_seconds: int) -> dict:
     return {
         "outtmpl": str(output_dir / "%(id)s.%(ext)s"),
-        "format": "bv*[ext=mp4][height<=720]+ba[ext=m4a]/bv*[height<=720]+ba/b[ext=mp4][height<=720]/b[height<=720]/b",
+        "format": (
+            "bv*[ext=mp4][vcodec^=avc1][height<=720]+ba[ext=m4a]/"
+            "bv*[ext=mp4][vcodec!*=av01][height<=720]+ba[ext=m4a]/"
+            "b[ext=mp4][vcodec^=avc1][height<=720]/"
+            "b[ext=mp4][vcodec!*=av01][height<=720]/"
+            "bv*[ext=mp4][height<=720]+ba[ext=m4a]/"
+            "bv*[height<=720]+ba/b[ext=mp4][height<=720]/b[height<=720]/b"
+        ),
         "merge_output_format": "mp4",
         "ffmpeg_location": ffmpeg_path(),
         "noplaylist": True,
