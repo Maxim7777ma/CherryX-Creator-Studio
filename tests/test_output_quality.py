@@ -266,6 +266,29 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(starts, [66])
 
+    def test_timeline_focus_fallback_scans_for_reels_focus_candidates(self) -> None:
+        annotated = [
+            {"start": 0, "score": 90, "focus_source": "none", "empty_frame_risk": 1.0},
+            {"start": 60, "score": 88, "focus_source": "person", "person_focus_available": True, "person_focus_score": 0.44, "empty_frame_risk": 0.45},
+            {"start": 120, "score": 82, "focus_source": "none", "empty_frame_risk": 1.0},
+            {"start": 180, "score": 76, "focus_source": "visual", "visual_focus_available": True, "visual_focus_score": 0.36, "empty_frame_risk": 0.5},
+        ]
+        with patch.object(web_actions, "annotate_clip_candidate_focus", return_value=annotated) as annotate:
+            starts, candidates = web_actions._select_timeline_focus_fallback_starts(
+                Path("missing.mp4"),
+                duration_seconds=200,
+                max_clips=2,
+                clip_seconds=20,
+                min_gap_seconds=30,
+                face_detection_enabled=True,
+                selection_mode="regular",
+                sample_count=4,
+            )
+
+        annotate.assert_called_once()
+        self.assertEqual(starts, [60, 180])
+        self.assertEqual(candidates, annotated)
+
     def test_guaranteed_short_starts_use_ranked_candidates_without_focus(self) -> None:
         starts = web_actions._select_guaranteed_short_starts(
             [
