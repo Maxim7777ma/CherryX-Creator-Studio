@@ -474,7 +474,7 @@ def start_youtube_job(
         if not starts:
             if profile.strict_face and clip_candidates:
                 _update_job(job, 47, "No face-safe moments found; falling back to best-effort Shorts")
-                render_queue = _select_best_effort_face_starts(
+                render_queue = _select_best_effort_focus_starts(
                     clip_candidates,
                     actual_duration,
                     profile.max_shorts,
@@ -483,7 +483,7 @@ def start_youtube_job(
                 )
                 starts = render_queue[: profile.max_shorts]
             if not starts:
-                raise ValueError("No face-focused moments found for Shorts. Try a clearer source video or Preview mode.")
+                raise ValueError("No face or motion-focused moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -645,7 +645,7 @@ def start_youtube_job(
         if not clips:
             if not profile.strict_face:
                 raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
-            focused_fallback_starts = _select_best_effort_face_starts(
+            focused_fallback_starts = _select_best_effort_focus_starts(
                 clip_candidates,
                 actual_duration,
                 profile.max_shorts,
@@ -654,8 +654,8 @@ def start_youtube_job(
             )
             fallback_starts = list(dict.fromkeys(focused_fallback_starts))[: profile.max_shorts]
             if not fallback_starts:
-                raise ValueError("No face-focused Shorts rendered. Try a clearer source video or Preview mode.")
-            _update_job(job, 78, "Face-safe crop was too weak; rendering face-focused fallback Shorts")
+                raise ValueError("No face or motion-focused Shorts rendered. Try a clearer source video or Preview mode.")
+            _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
                 progress = 78 + int((fallback_index - 1) / max(1, len(fallback_starts)) * 4)
@@ -670,7 +670,7 @@ def start_youtube_job(
                         fallback_index,
                         profile.short_seconds,
                         settings.video_timeout_seconds,
-                        processing_plan.focus_mode,
+                        "focus",
                         processing_plan.face_detection,
                         source_info.width,
                         source_info.height,
@@ -1998,10 +1998,12 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
     return report
 
 
-def _best_effort_face_candidates(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
     focused: list[dict[str, object]] = []
     for candidate in candidates:
-        if str(candidate.get("focus_source") or "") != "face":
+        focus_source = str(candidate.get("focus_source") or "")
+        has_motion = bool(candidate.get("motion_focus_available"))
+        if focus_source not in {"face", "motion"} and not has_motion:
             continue
         try:
             coverage = float(candidate.get("face_coverage") or 0.0)
@@ -2012,19 +2014,21 @@ def _best_effort_face_candidates(candidates: list[dict[str, object]]) -> list[di
             continue
         if empty_frame_risk > 0.88:
             continue
-        if coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18:
+        if focus_source == "face" and (coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18):
+            focused.append(candidate)
+        elif has_motion or focus_source == "motion":
             focused.append(candidate)
     return focused
 
 
-def _select_best_effort_face_starts(
+def _select_best_effort_focus_starts(
     candidates: list[dict[str, object]],
     duration_seconds: float,
     max_clips: int,
     clip_seconds: int,
     min_gap_seconds: int,
 ) -> list[int]:
-    focused = _best_effort_face_candidates(candidates)
+    focused = _best_effort_focus_candidates(candidates)
     if not focused:
         return []
     focused_starts: set[int] = set()

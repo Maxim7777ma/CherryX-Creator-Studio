@@ -152,8 +152,8 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(starts), 2)
 
-    def test_best_effort_face_fallback_ignores_center_only_candidates(self) -> None:
-        starts = web_actions._select_best_effort_face_starts(
+    def test_best_effort_focus_fallback_ignores_center_only_candidates(self) -> None:
+        starts = web_actions._select_best_effort_focus_starts(
             [
                 {"start": 10, "score": 100, "focus_source": "none", "empty_frame_risk": 0.2},
                 {
@@ -173,6 +173,20 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         )
 
         self.assertEqual(starts, [42])
+
+    def test_best_effort_focus_fallback_allows_motion_candidates(self) -> None:
+        starts = web_actions._select_best_effort_focus_starts(
+            [
+                {"start": 10, "score": 100, "focus_source": "none", "empty_frame_risk": 0.2},
+                {"start": 54, "score": 86, "focus_source": "none", "motion_focus_available": True, "empty_frame_risk": 0.4},
+            ],
+            duration_seconds=180,
+            max_clips=3,
+            clip_seconds=20,
+            min_gap_seconds=30,
+        )
+
+        self.assertEqual(starts, [54])
 
     def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
         with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(

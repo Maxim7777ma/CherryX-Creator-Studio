@@ -2959,12 +2959,15 @@ def build_vertical_filter(
     if not width or not height:
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
+    focus_mode = (focus_mode or "center").lower()
     face_track: list[FaceTrackPoint] = []
-    if focus_mode == "face" and face_detection_enabled:
+    if focus_mode in {"face", "focus"} and face_detection_enabled:
         face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=not strict_focus)
+    elif focus_mode == "motion" and face_detection_enabled:
+        face_track = _detect_motion_focus_track(source, start_seconds, clip_seconds)
 
     if not face_track:
-        if strict_focus:
+        if strict_focus or focus_mode in {"focus", "motion"}:
             raise RuntimeError("No confident face/focus track for strict Shorts crop")
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
