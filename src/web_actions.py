@@ -1991,7 +1991,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v9-h264-reels-focus",
+        "schema": "youtube-analysis-v10-stable-reels-crop",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
@@ -2020,6 +2020,8 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
         "crop_safety",
         "center_safety",
         "size_safety",
+        "crop_travel",
+        "crop_stability",
         "speech_activity_score",
         "face_liveliness_score",
         "speaker_lock_score",
@@ -2061,6 +2063,7 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
             motion_score = float(candidate.get("motion_focus_score") or 0.0)
             visual_score = float(candidate.get("visual_focus_score") or 0.0)
             empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.0)
+            crop_travel = float(candidate.get("crop_travel") or 0.0)
         except (TypeError, ValueError):
             continue
         if empty_frame_risk > 0.88:
@@ -2068,8 +2071,11 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
         prepared = dict(candidate)
         base_score = float(prepared.get("score") or 0.0)
         if focus_source == "face" and (coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18):
+            if crop_travel > 0.38:
+                continue
             quality = min(1.0, coverage * 0.34 + confidence * 0.30 + focus_score * 0.26 + 0.18)
-            prepared["score"] = round(base_score * (0.92 + quality * 0.58), 3)
+            travel_penalty = 1.0 - max(0.0, min(0.46, (crop_travel - 0.18) * 1.8))
+            prepared["score"] = round(base_score * (0.92 + quality * 0.58) * travel_penalty, 3)
             focused.append(prepared)
         elif has_person or focus_source == "person":
             quality = min(1.0, max(person_score, focus_score * 0.80) + 0.12)

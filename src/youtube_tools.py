@@ -4035,11 +4035,13 @@ def annotate_clip_candidate_focus(
         center_safety = _face_track_center_safety(face_track, source_width, source_height)
         size_safety = _face_track_size_safety(face_track, source_width, source_height)
         stability = _face_track_stability_score(face_track, source_width, source_height)
+        crop_travel = _face_track_crop_travel(face_track, source_width, source_height)
+        crop_stability = max(0.0, min(1.0, 1.0 - crop_travel / 0.34))
         speech_activity = _clip_speech_activity_score(source, start, clip_seconds)
         face_liveliness = _face_track_liveliness_score(face_track, stability)
-        speaker_lock = round(confidence * 0.26 + coverage * 0.22 + stability * 0.16 + speech_activity * 0.22 + face_liveliness * 0.14, 3)
+        speaker_lock = round(confidence * 0.24 + coverage * 0.20 + stability * 0.14 + crop_stability * 0.16 + speech_activity * 0.18 + face_liveliness * 0.08, 3)
         empty_frame_risk = round(max(0.0, 1.0 - (coverage * 0.42 + confidence * 0.22 + crop_safety * 0.16 + center_safety * 0.12 + size_safety * 0.08)), 3)
-        focus_score = round(coverage * 0.34 + confidence * 0.24 + crop_safety * 0.14 + center_safety * 0.10 + size_safety * 0.08 + speaker_lock * 0.10, 3)
+        focus_score = round((coverage * 0.32 + confidence * 0.22 + crop_safety * 0.13 + center_safety * 0.09 + size_safety * 0.08 + speaker_lock * 0.10 + crop_stability * 0.06), 3)
         prepared.update(
             {
                 "face_coverage": round(coverage, 3),
@@ -4047,6 +4049,8 @@ def annotate_clip_candidate_focus(
                 "crop_safety": round(crop_safety, 3),
                 "center_safety": round(center_safety, 3),
                 "size_safety": round(size_safety, 3),
+                "crop_travel": round(crop_travel, 3),
+                "crop_stability": round(crop_stability, 3),
                 "speech_activity_score": speech_activity,
                 "face_liveliness_score": face_liveliness,
                 "speaker_lock_score": speaker_lock,
@@ -4109,6 +4113,7 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         confidence = float(candidate.get("face_confidence") or 0.0)
         speaker_lock = float(candidate.get("speaker_lock_score") or 0.0)
         empty_frame_risk = float(candidate.get("empty_frame_risk") or 1.0)
+        crop_travel = float(candidate.get("crop_travel") or 0.0)
     except (TypeError, ValueError):
         return False
     return (
@@ -4117,6 +4122,7 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         and coverage >= tuning.min_face_coverage
         and confidence >= tuning.min_face_confidence
         and speaker_lock >= tuning.min_speaker_lock
+        and crop_travel <= 0.28
         and empty_frame_risk <= 0.72
     )
 
@@ -4128,10 +4134,14 @@ def _strict_probe_candidate_score(candidate: dict[str, object], score: float) ->
         focus_score = float(candidate.get("focus_score") or 0.0)
         speaker_lock = float(candidate.get("speaker_lock_score") or 0.0)
         empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.5)
+        crop_travel = float(candidate.get("crop_travel") or 0.0)
     except (TypeError, ValueError):
         coverage = confidence = focus_score = speaker_lock = 0.0
         empty_frame_risk = 0.5
+        crop_travel = 0.0
     if str(candidate.get("focus_source") or "") != "face" and coverage <= 0 and confidence <= 0:
+        return 0.0
+    if crop_travel > 0.48:
         return 0.0
     face_hint = max(0.0, min(1.0, coverage * 0.38 + confidence * 0.28 + focus_score * 0.22 + speaker_lock * 0.12))
     if str(candidate.get("focus_source") or "") == "face":
@@ -4141,7 +4151,24 @@ def _strict_probe_candidate_score(candidate: dict[str, object], score: float) ->
     else:
         multiplier = 0.18
     risk_penalty = 1.0 - max(0.0, min(0.55, (empty_frame_risk - 0.72) * 0.9))
-    return max(0.0, float(score) * multiplier * risk_penalty)
+    travel_penalty = 1.0 - max(0.0, min(0.7, (crop_travel - 0.18) * 2.4))
+    return max(0.0, float(score) * multiplier * risk_penalty * travel_penalty)
+
+
+def _face_track_crop_travel(points: list[FaceTrackPoint], width: int, height: int) -> float:
+    if len(points) <= 1 or width <= 0 or height <= 0:
+        return 0.0
+    target_ratio = 9 / 16
+    if width / height > target_ratio:
+        crop_size = int(height * target_ratio)
+        positions = _face_safe_crop_positions(points, crop_size, width, axis="x")
+    else:
+        crop_size = int(width / target_ratio)
+        positions = _face_safe_crop_positions(points, crop_size, height, axis="y")
+    if len(positions) <= 1 or crop_size <= 0:
+        return 0.0
+    offsets = [offset for _second, offset in positions]
+    return max(0.0, (max(offsets) - min(offsets)) / max(1, crop_size))
 
 
 def _face_track_crop_safety(points: list[FaceTrackPoint], width: int, height: int) -> float:
