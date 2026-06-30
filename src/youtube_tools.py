@@ -3000,8 +3000,9 @@ def build_vertical_filter(
 def _vertical_fit_blur_filter() -> str:
     return (
         "split=2[bg][fg];"
-        "[bg]scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
-        "crop=1080:1920,gblur=sigma=28,eq=brightness=-0.045:saturation=1.08[bg];"
+        "[bg]scale=270:480:force_original_aspect_ratio=increase:flags=bilinear,"
+        "crop=270:480,boxblur=12:1,scale=1080:1920:flags=bicubic,"
+        "eq=brightness=-0.045:saturation=1.08[bg];"
         "[fg]scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
     )

@@ -58,7 +58,8 @@ class OutputQualityDefaultsTests(unittest.TestCase):
             face_detection_enabled=False,
         )
 
-        self.assertIn("gblur", vf)
+        self.assertIn("boxblur", vf)
+        self.assertIn("scale=270:480", vf)
         self.assertIn("force_original_aspect_ratio=decrease", vf)
         self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
 
