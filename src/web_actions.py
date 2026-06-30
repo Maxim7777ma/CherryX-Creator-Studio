@@ -2071,10 +2071,10 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
         prepared = dict(candidate)
         base_score = float(prepared.get("score") or 0.0)
         if focus_source == "face" and (coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18):
-            if crop_travel > 0.38:
+            if crop_travel > 0.95:
                 continue
             quality = min(1.0, coverage * 0.34 + confidence * 0.30 + focus_score * 0.26 + 0.18)
-            travel_penalty = 1.0 - max(0.0, min(0.46, (crop_travel - 0.18) * 1.8))
+            travel_penalty = 1.0 - max(0.0, min(0.35, (crop_travel - 0.35) * 1.1))
             prepared["score"] = round(base_score * (0.92 + quality * 0.58) * travel_penalty, 3)
             focused.append(prepared)
         elif has_person or focus_source == "person":

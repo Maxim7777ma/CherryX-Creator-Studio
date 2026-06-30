@@ -3564,8 +3564,8 @@ def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, sour
         previous_offset = stable_offset
     if not positions:
         return []
-    smoothed = _deadzone_crop_positions(positions, threshold=max(10, crop_size // 18))
-    return _limit_crop_motion(smoothed, max_step=max(18, crop_size // 18))
+    smoothed = _deadzone_crop_positions(positions, threshold=max(16, crop_size // 16))
+    return _limit_crop_motion(smoothed, max_step=max(8, crop_size // 42))
 
 
 def _smooth_crop_positions(positions: list[tuple[float, int]]) -> list[tuple[float, int]]:
@@ -4036,7 +4036,7 @@ def annotate_clip_candidate_focus(
         size_safety = _face_track_size_safety(face_track, source_width, source_height)
         stability = _face_track_stability_score(face_track, source_width, source_height)
         crop_travel = _face_track_crop_travel(face_track, source_width, source_height)
-        crop_stability = max(0.0, min(1.0, 1.0 - crop_travel / 0.34))
+        crop_stability = max(0.0, min(1.0, 1.0 - crop_travel / 0.72))
         speech_activity = _clip_speech_activity_score(source, start, clip_seconds)
         face_liveliness = _face_track_liveliness_score(face_track, stability)
         speaker_lock = round(confidence * 0.24 + coverage * 0.20 + stability * 0.14 + crop_stability * 0.16 + speech_activity * 0.18 + face_liveliness * 0.08, 3)
@@ -4122,7 +4122,7 @@ def candidate_has_strict_focus(candidate: dict[str, object], tuning: ShortsModeT
         and coverage >= tuning.min_face_coverage
         and confidence >= tuning.min_face_confidence
         and speaker_lock >= tuning.min_speaker_lock
-        and crop_travel <= 0.28
+        and crop_travel <= 0.85
         and empty_frame_risk <= 0.72
     )
 
@@ -4141,7 +4141,7 @@ def _strict_probe_candidate_score(candidate: dict[str, object], score: float) ->
         crop_travel = 0.0
     if str(candidate.get("focus_source") or "") != "face" and coverage <= 0 and confidence <= 0:
         return 0.0
-    if crop_travel > 0.48:
+    if crop_travel > 0.95:
         return 0.0
     face_hint = max(0.0, min(1.0, coverage * 0.38 + confidence * 0.28 + focus_score * 0.22 + speaker_lock * 0.12))
     if str(candidate.get("focus_source") or "") == "face":
@@ -4151,7 +4151,7 @@ def _strict_probe_candidate_score(candidate: dict[str, object], score: float) ->
     else:
         multiplier = 0.18
     risk_penalty = 1.0 - max(0.0, min(0.55, (empty_frame_risk - 0.72) * 0.9))
-    travel_penalty = 1.0 - max(0.0, min(0.7, (crop_travel - 0.18) * 2.4))
+    travel_penalty = 1.0 - max(0.0, min(0.55, (crop_travel - 0.35) * 1.4))
     return max(0.0, float(score) * multiplier * risk_penalty * travel_penalty)
 
 

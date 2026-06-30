@@ -185,12 +185,14 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         weak_speaker = {**good, "speaker_lock_score": 0.05}
         empty_risk = {**good, "empty_frame_risk": 0.9}
         side_face = {**good, "center_safety": 0.2}
-        unstable_crop = {**good, "crop_travel": 0.42}
+        moving_speaker = {**good, "crop_travel": 0.42}
+        unstable_crop = {**good, "crop_travel": 0.92}
 
         self.assertTrue(youtube_tools.candidate_has_strict_focus(good))
         self.assertFalse(youtube_tools.candidate_has_strict_focus(weak_speaker))
         self.assertFalse(youtube_tools.candidate_has_strict_focus(empty_risk))
         self.assertTrue(youtube_tools.candidate_has_strict_focus(side_face))
+        self.assertTrue(youtube_tools.candidate_has_strict_focus(moving_speaker))
         self.assertFalse(youtube_tools.candidate_has_strict_focus(unstable_crop))
 
     def test_non_strict_selection_can_fill_from_fallback_starts(self) -> None:
@@ -376,7 +378,7 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertIn("3-2*", expr)
 
-    def test_face_track_crop_travel_flags_large_camera_motion(self) -> None:
+    def test_face_track_crop_travel_caps_large_camera_motion(self) -> None:
         stable = [
             youtube_tools.FaceTrackPoint(second=0, x=640, y=360, width=80, height=110, confidence=0.8),
             youtube_tools.FaceTrackPoint(second=2, x=690, y=360, width=80, height=110, confidence=0.8),
@@ -389,8 +391,12 @@ class OutputQualityDefaultsTests(unittest.TestCase):
             youtube_tools.FaceTrackPoint(second=7, x=702, y=360, width=214, height=230, confidence=0.8),
         ]
 
-        self.assertLess(youtube_tools._face_track_crop_travel(stable, 1280, 720), 0.08)
-        self.assertGreater(youtube_tools._face_track_crop_travel(unstable, 1280, 720), 0.28)
+        stable_travel = youtube_tools._face_track_crop_travel(stable, 1280, 720)
+        unstable_travel = youtube_tools._face_track_crop_travel(unstable, 1280, 720)
+
+        self.assertLess(stable_travel, 0.08)
+        self.assertGreater(unstable_travel, stable_travel)
+        self.assertLess(unstable_travel, 0.28)
 
     def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
         with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
