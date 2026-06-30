@@ -1185,7 +1185,13 @@ def normalize_subtitle_language(value: str | None) -> str | None:
     return language if language in WHISPER_LANGUAGE_CODES else None
 
 
-def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: str | None = None) -> list[SubtitleCue]:
+def transcribe_subtitle_cues(
+    source: Path,
+    model_size: str = "small",
+    language: str | None = None,
+    start_seconds: float = 0.0,
+    duration_seconds: float | None = None,
+) -> list[SubtitleCue]:
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
@@ -1196,7 +1202,7 @@ def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: 
     normalized_language = normalize_subtitle_language(language)
     prompt = SUBTITLE_LANGUAGE_PROMPTS.get(normalized_language or "", "")
     model = WhisperModel(model_size or "small", device="cpu", compute_type="int8")
-    audio_source = _extract_whisper_audio(source)
+    audio_source = _extract_whisper_audio(source, start_seconds=start_seconds, duration_seconds=duration_seconds)
     try:
         segments, _info = model.transcribe(
             str(audio_source),
@@ -1235,28 +1241,45 @@ def transcribe_subtitle_cues(source: Path, model_size: str = "small", language: 
                 pass
 
 
-def _extract_whisper_audio(source: Path) -> Path:
+def _extract_whisper_audio(source: Path, start_seconds: float = 0.0, duration_seconds: float | None = None) -> Path:
     if not has_audio_stream(source):
         raise SubtitleUnavailableError("No audio stream found for subtitle transcription")
     temp = tempfile.NamedTemporaryFile(prefix="cherryx_whisper_", suffix=".wav", delete=False)
     temp_path = Path(temp.name)
     temp.close()
-    args = [
-        ffmpeg_path(),
-        "-y",
-        "-i",
-        str(source),
-        "-vn",
-        "-map",
-        "0:a:0",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-c:a",
-        "pcm_s16le",
-        str(temp_path),
-    ]
+    args = [ffmpeg_path(), "-y"]
+    try:
+        start = max(0.0, float(start_seconds or 0.0))
+    except (TypeError, ValueError):
+        start = 0.0
+    try:
+        duration = float(duration_seconds) if duration_seconds is not None else 0.0
+    except (TypeError, ValueError):
+        duration = 0.0
+    if start > 0:
+        args.extend(["-ss", f"{start:.3f}"])
+    args.extend(
+        [
+            "-i",
+            str(source),
+            "-vn",
+            "-map",
+            "0:a:0",
+        ]
+    )
+    if duration > 0:
+        args.extend(["-t", f"{duration:.3f}"])
+    args.extend(
+        [
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(temp_path),
+        ]
+    )
     try:
         completed = subprocess.run(args, capture_output=True, text=True, timeout=600)
     except Exception:

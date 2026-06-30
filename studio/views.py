@@ -5032,10 +5032,17 @@ def _run_video_project_subtitles(job_id: str, project_id: int, asset_id: int, pa
 
         language = str(params.get("language") or "auto").strip().lower()
         language = None if language == "auto" else language
-        transcribed = transcribe_subtitle_cues(source, settings.subtitle_model, language)
+        transcribe_start, transcribe_duration, normalize_params = _auto_subtitle_transcription_window(params)
+        transcribed = transcribe_subtitle_cues(
+            source,
+            settings.subtitle_model,
+            language,
+            start_seconds=transcribe_start,
+            duration_seconds=transcribe_duration,
+        )
         _set_video_export_job(job_id, progress=70, message="Saving captions")
 
-        cues = _normalize_auto_subtitle_cues(transcribed, params)
+        cues = _normalize_auto_subtitle_cues(transcribed, normalize_params)
         project = _append_video_project_caption_clips(project, cues)
         _merge_job_params(job_id, {"result_cues": cues, "result_count": len(cues)})
         _set_video_export_job(
@@ -5471,6 +5478,22 @@ def _normalize_auto_subtitle_cues(transcribed, params: dict[str, object]) -> lis
             continue
         raw_cues.append({"start": timeline_cue_start, "end": timeline_cue_end, "text": cue.text})
     return _normalize_subtitle_cues(raw_cues)
+
+
+def _auto_subtitle_transcription_window(params: dict[str, object]) -> tuple[float, float | None, dict[str, object]]:
+    source_start = _subtitle_seconds(params.get("source_start"))
+    source_end = _subtitle_seconds(params.get("source_end"))
+    clip_duration = _subtitle_seconds(params.get("clip_duration"))
+    if source_end <= source_start and clip_duration > 0:
+        source_end = source_start + clip_duration
+    duration = max(0.0, source_end - source_start)
+    if duration <= 0:
+        return 0.0, None, params
+    normalized_params = dict(params)
+    normalized_params["source_start"] = 0.0
+    normalized_params["source_end"] = duration
+    normalized_params["clip_duration"] = duration
+    return source_start, duration, normalized_params
 
 
 def _append_video_project_caption_clips(project: VideoEditorProject, cues: list[dict[str, object]]) -> VideoEditorProject:

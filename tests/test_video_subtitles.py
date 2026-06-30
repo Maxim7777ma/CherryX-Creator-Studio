@@ -91,6 +91,19 @@ class VideoSubtitleFormatTests(SimpleTestCase):
         self.assertEqual(cues[0], {"start": 10.25, "end": 11.0, "text": "First line"})
         self.assertEqual(cues[1], {"start": 11.8, "end": 12.0, "text": "Clipped line"})
 
+    def test_auto_subtitles_transcribes_only_selected_source_window(self) -> None:
+        start, duration, params = views._auto_subtitle_transcription_window(
+            {"timeline_start": 10, "source_start": 941, "source_end": 1001, "clip_duration": 60}
+        )
+
+        self.assertEqual(start, 941)
+        self.assertEqual(duration, 60)
+        self.assertEqual(params["source_start"], 0.0)
+        self.assertEqual(params["source_end"], 60)
+
+        cues = views._normalize_auto_subtitle_cues([SubtitleCue(0.25, 1.0, "selected line")], params)
+        self.assertEqual(cues[0], {"start": 10.25, "end": 11.0, "text": "Selected line"})
+
     def test_subtitle_language_aliases_normalize_for_whisper(self) -> None:
         self.assertEqual(normalize_subtitle_language("ua"), "uk")
         self.assertEqual(normalize_subtitle_language("pt-BR"), "pt")
