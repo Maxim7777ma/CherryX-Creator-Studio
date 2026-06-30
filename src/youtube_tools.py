@@ -2960,6 +2960,8 @@ def build_vertical_filter(
         return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
 
     focus_mode = (focus_mode or "center").lower()
+    if focus_mode in {"fit", "contain", "full"}:
+        return _vertical_fit_blur_filter()
     face_track: list[FaceTrackPoint] = []
     if focus_mode == "focus" and face_detection_enabled:
         face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=False)
@@ -2993,6 +2995,16 @@ def build_vertical_filter(
         return f"crop={crop_w}:{crop_h}:x=0:y='{crop_y_expr}',scale=1080:1920:flags=lanczos,setsar=1"
 
     return "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,setsar=1"
+
+
+def _vertical_fit_blur_filter() -> str:
+    return (
+        "split=2[bg][fg];"
+        "[bg]scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+        "crop=1080:1920,gblur=sigma=28,eq=brightness=-0.045:saturation=1.08[bg];"
+        "[fg]scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
+    )
 
 
 def detect_face_center(source: Path, start_seconds: int, clip_seconds: int = 10) -> tuple[int, int] | None:

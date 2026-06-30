@@ -47,6 +47,21 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         self.assertIn("flags=lanczos", vf)
         self.assertIn("crop=1080:1920", vf)
 
+    def test_vertical_fit_filter_keeps_full_frame_with_blurred_background(self) -> None:
+        vf = youtube_tools.build_vertical_filter(
+            Path("missing.mp4"),
+            start_seconds=0,
+            clip_seconds=10,
+            width=1920,
+            height=1080,
+            focus_mode="fit",
+            face_detection_enabled=False,
+        )
+
+        self.assertIn("gblur", vf)
+        self.assertIn("force_original_aspect_ratio=decrease", vf)
+        self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
+
     def test_wide_preview_uses_blurred_background_instead_of_black_bars(self) -> None:
         vf = youtube_tools._wide_preview_filter(5)
 
@@ -216,6 +231,21 @@ class OutputQualityDefaultsTests(unittest.TestCase):
         )
 
         self.assertEqual(starts, [66])
+
+    def test_guaranteed_short_starts_use_ranked_candidates_without_focus(self) -> None:
+        starts = web_actions._select_guaranteed_short_starts(
+            [
+                {"start": 12, "score": 90, "focus_source": "none"},
+                {"start": 74, "score": 70, "focus_source": "none"},
+            ],
+            duration_seconds=180,
+            max_clips=2,
+            clip_seconds=20,
+            min_gap_seconds=30,
+        )
+
+        self.assertEqual(len(starts), 2)
+        self.assertIn(12, starts)
 
     def test_focus_filter_can_fall_back_to_person_track(self) -> None:
         person_track = [youtube_tools.FaceTrackPoint(second=0, x=1260, y=430, width=420, height=520, confidence=0.44)]

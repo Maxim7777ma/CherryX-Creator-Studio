@@ -22,6 +22,7 @@ from .config import get_settings
 from .image_tools import SUPPORTED_IMAGE_FORMATS, clean_base_name, convert_image, human_size
 from .video_tools import VIDEO_FORMATS, convert_video, format_duration, inspect_video
 from .youtube_tools import (
+    calculate_clip_starts,
     create_backstage_montage,
     create_business_cover,
     create_premium_cover_from_image,
@@ -485,7 +486,18 @@ def start_youtube_job(
                 starts = render_queue[: profile.max_shorts]
                 force_focus_fallback = bool(starts)
             if not starts:
-                raise ValueError("No face, person, motion, or visual-focus moments found for Shorts. Try a clearer source video or Preview mode.")
+                _update_job(job, 47, "No confident focus found; using full-frame vertical Shorts")
+                render_queue = _select_guaranteed_short_starts(
+                    clip_candidates,
+                    actual_duration,
+                    profile.max_shorts,
+                    profile.short_seconds,
+                    profile.min_gap_seconds,
+                )
+                starts = render_queue[: profile.max_shorts]
+                force_focus_fallback = bool(starts)
+            if not starts:
+                raise ValueError("No moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -654,17 +666,26 @@ def start_youtube_job(
                 profile.short_seconds,
                 profile.min_gap_seconds,
             )
-            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
+            guaranteed_starts = _select_guaranteed_short_starts(
+                clip_candidates,
+                actual_duration,
+                max(profile.max_shorts * 4, profile.max_shorts + 8),
+                profile.short_seconds,
+                profile.min_gap_seconds,
+            )
+            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue, *guaranteed_starts]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
             if not fallback_starts:
-                raise ValueError("No face, person, motion, or visual-focus Shorts rendered. Try a clearer source video or Preview mode.")
-            _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
+                raise ValueError("No moments found for Shorts. Try a clearer source video or Preview mode.")
+            _update_job(job, 78, "Face-safe crop was too weak; rendering guaranteed vertical Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
                 if len(clips) >= profile.max_shorts:
                     break
                 output_index = len(clips) + 1
                 progress = 78 + int((fallback_index - 1) / max(1, len(fallback_starts)) * 4)
-                _update_job(job, progress, f"Focus fallback candidate {fallback_index}/{len(fallback_starts)} for Short {output_index}: start {format_duration(start_second)}")
+                use_focus_crop = start_second in set(focused_fallback_starts)
+                fallback_mode = "focus" if use_focus_crop else "fit"
+                _update_job(job, progress, f"Guaranteed Short candidate {fallback_index}/{len(fallback_starts)} for Short {output_index}: start {format_duration(start_second)}")
                 try:
                     clip = make_short_clip(
                         download.path,
@@ -675,7 +696,7 @@ def start_youtube_job(
                         output_index,
                         profile.short_seconds,
                         settings.video_timeout_seconds,
-                        "focus",
+                        fallback_mode,
                         processing_plan.face_detection,
                         source_info.width,
                         source_info.height,
@@ -706,6 +727,7 @@ def start_youtube_job(
                                     "requested_start": int(start_second),
                                     "render_start": int(clip.start_seconds),
                                     "face_safe_fallback": True,
+                                    "fallback_mode": fallback_mode,
                                 },
                             },
                             ensure_ascii=False,
@@ -2078,6 +2100,39 @@ def _select_best_effort_focus_starts(
         min_gap_seconds=min_gap_seconds,
     )
     return [start for start in starts if start in focused_starts][:max_clips]
+
+
+def _select_guaranteed_short_starts(
+    candidates: list[dict[str, object]],
+    duration_seconds: float,
+    max_clips: int,
+    clip_seconds: int,
+    min_gap_seconds: int,
+) -> list[int]:
+    max_start = max(0, int(duration_seconds or 0) - max(1, int(clip_seconds or 1)))
+    ranked: list[dict[str, object]] = []
+    for candidate in candidates:
+        try:
+            start = max(0, min(max_start, int(candidate.get("start") or 0)))
+            score = float(candidate.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        prepared = dict(candidate)
+        prepared["start"] = start
+        prepared["score"] = score
+        ranked.append(prepared)
+    if ranked:
+        starts = select_smart_clip_starts_from_candidates(
+            ranked,
+            duration_seconds,
+            max_clips,
+            clip_seconds,
+            False,
+            min_gap_seconds=min_gap_seconds,
+        )
+        if starts:
+            return starts[:max_clips]
+    return calculate_clip_starts(duration_seconds, max_clips, clip_seconds)[:max_clips]
 
 
 def _youtube_analysis_cache_path(cache_key: str) -> Path:
