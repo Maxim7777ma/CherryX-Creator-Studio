@@ -485,7 +485,7 @@ def start_youtube_job(
                 starts = render_queue[: profile.max_shorts]
                 force_focus_fallback = bool(starts)
             if not starts:
-                raise ValueError("No face, motion, or visual-focus moments found for Shorts. Try a clearer source video or Preview mode.")
+                raise ValueError("No face, person, motion, or visual-focus moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -656,7 +656,7 @@ def start_youtube_job(
             )
             fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
             if not fallback_starts:
-                raise ValueError("No face, motion, or visual-focus Shorts rendered. Try a clearer source video or Preview mode.")
+                raise ValueError("No face, person, motion, or visual-focus Shorts rendered. Try a clearer source video or Preview mode.")
             _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
@@ -1958,7 +1958,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v7-visual-focus",
+        "schema": "youtube-analysis-v8-person-focus",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
@@ -1993,6 +1993,9 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
         "empty_frame_risk",
         "focus_score",
         "focus_source",
+        "person_focus_available",
+        "person_focus_score",
+        "person_focus_coverage",
         "motion_focus_available",
         "motion_focus_score",
         "motion_focus_coverage",
@@ -2012,14 +2015,16 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
     focused: list[dict[str, object]] = []
     for candidate in candidates:
         focus_source = str(candidate.get("focus_source") or "")
+        has_person = bool(candidate.get("person_focus_available"))
         has_motion = bool(candidate.get("motion_focus_available"))
         has_visual = bool(candidate.get("visual_focus_available"))
-        if focus_source not in {"face", "motion", "visual"} and not has_motion and not has_visual:
+        if focus_source not in {"face", "person", "motion", "visual"} and not has_person and not has_motion and not has_visual:
             continue
         try:
             coverage = float(candidate.get("face_coverage") or 0.0)
             confidence = float(candidate.get("face_confidence") or 0.0)
             focus_score = float(candidate.get("focus_score") or 0.0)
+            person_score = float(candidate.get("person_focus_score") or 0.0)
             motion_score = float(candidate.get("motion_focus_score") or 0.0)
             visual_score = float(candidate.get("visual_focus_score") or 0.0)
             empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.0)
@@ -2032,6 +2037,10 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
         if focus_source == "face" and (coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18):
             quality = min(1.0, coverage * 0.34 + confidence * 0.30 + focus_score * 0.26 + 0.18)
             prepared["score"] = round(base_score * (0.92 + quality * 0.58), 3)
+            focused.append(prepared)
+        elif has_person or focus_source == "person":
+            quality = min(1.0, max(person_score, focus_score * 0.80) + 0.12)
+            prepared["score"] = round(base_score * (0.70 + quality * 0.48), 3)
             focused.append(prepared)
         elif has_motion or focus_source == "motion":
             quality = min(1.0, max(motion_score, focus_score * 0.72) + 0.08)

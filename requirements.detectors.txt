@@ -1,0 +1,3 @@
+# Optional enhanced person/pose detector for smarter Shorts focus crops.
+# Keep separate from requirements.txt because mediapipe pulls opencv-contrib-python.
+mediapipe==0.10.35

@@ -2961,7 +2961,13 @@ def build_vertical_filter(
 
     focus_mode = (focus_mode or "center").lower()
     face_track: list[FaceTrackPoint] = []
-    if focus_mode in {"face", "focus"} and face_detection_enabled:
+    if focus_mode == "focus" and face_detection_enabled:
+        face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=False)
+        if not face_track:
+            face_track = _detect_person_focus_track(source, start_seconds, clip_seconds)
+        if not face_track:
+            face_track = _detect_motion_focus_track(source, start_seconds, clip_seconds)
+    elif focus_mode == "face" and face_detection_enabled:
         face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=not strict_focus)
     elif focus_mode == "motion" and face_detection_enabled:
         face_track = _detect_motion_focus_track(source, start_seconds, clip_seconds)
@@ -3293,6 +3299,155 @@ def _detect_motion_focus_track(source: Path, start_seconds: int, clip_seconds: i
             )
     finally:
         capture.release()
+    return _smooth_face_track(points)
+
+
+_HOG_PERSON_DETECTOR: cv2.HOGDescriptor | None = None
+
+
+def _opencv_hog_person_detector() -> cv2.HOGDescriptor:
+    global _HOG_PERSON_DETECTOR
+    if _HOG_PERSON_DETECTOR is None:
+        detector = cv2.HOGDescriptor()
+        detector.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        _HOG_PERSON_DETECTOR = detector
+    return _HOG_PERSON_DETECTOR
+
+
+def _make_mediapipe_pose_detector():
+    try:
+        import mediapipe as mp  # type: ignore[import-not-found]
+    except Exception:
+        return None
+    try:
+        return mp.solutions.pose.Pose(
+            static_image_mode=True,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=0.35,
+        )
+    except Exception:
+        return None
+
+
+def _mediapipe_person_focus_point(frame: np.ndarray, pose_detector, second: float) -> FaceTrackPoint | None:
+    if pose_detector is None:
+        return None
+    try:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = pose_detector.process(rgb)
+    except Exception:
+        return None
+    landmarks = getattr(getattr(result, "pose_landmarks", None), "landmark", None)
+    if not landmarks:
+        return None
+    height, width = frame.shape[:2]
+    visible = [
+        landmark
+        for landmark in landmarks
+        if 0.0 <= float(getattr(landmark, "x", -1.0)) <= 1.0
+        and 0.0 <= float(getattr(landmark, "y", -1.0)) <= 1.0
+        and float(getattr(landmark, "visibility", 0.0)) >= 0.32
+    ]
+    if len(visible) < 4:
+        return None
+    xs = [float(landmark.x) for landmark in visible]
+    ys = [float(landmark.y) for landmark in visible]
+    min_x, max_x = max(0.0, min(xs)), min(1.0, max(xs))
+    min_y, max_y = max(0.0, min(ys)), min(1.0, max(ys))
+    box_w = max(1, int((max_x - min_x) * width))
+    box_h = max(1, int((max_y - min_y) * height))
+    if box_w * box_h < width * height * 0.004:
+        return None
+    confidence = sum(float(getattr(landmark, "visibility", 0.0)) for landmark in visible) / max(1, len(visible))
+    center_x = int((min_x + max_x) * 0.5 * width)
+    center_y = int((min_y + (max_y - min_y) * 0.38) * height)
+    return FaceTrackPoint(
+        second=second,
+        x=clamp(center_x, 0, max(0, width - 1)),
+        y=clamp(center_y, 0, max(0, height - 1)),
+        width=max(72, int(box_w * 1.12)),
+        height=max(96, int(box_h * 0.62)),
+        confidence=max(0.22, min(0.74, confidence)),
+    )
+
+
+def _opencv_person_focus_point(frame: np.ndarray, second: float) -> FaceTrackPoint | None:
+    height, width = frame.shape[:2]
+    if width <= 0 or height <= 0:
+        return None
+    detector = _opencv_hog_person_detector()
+    scale = min(1.0, 540.0 / max(1, width))
+    small = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale)))) if scale < 1.0 else frame
+    try:
+        rects, weights = detector.detectMultiScale(
+            small,
+            winStride=(8, 8),
+            padding=(8, 8),
+            scale=1.06,
+        )
+    except Exception:
+        return None
+    if len(rects) == 0:
+        return None
+    inv_scale = 1.0 / scale
+    best: tuple[float, tuple[int, int, int, int], float] | None = None
+    frame_area = max(1, small.shape[0] * small.shape[1])
+    for rect, raw_weight in zip(rects, weights if len(weights) else [0.0] * len(rects)):
+        x, y, w, h = [int(value) for value in rect]
+        area_ratio = (w * h) / frame_area
+        if area_ratio < 0.006:
+            continue
+        center_x = (x + w / 2) / max(1, small.shape[1])
+        center_y = (y + h / 2) / max(1, small.shape[0])
+        center_score = 1.0 - min(1.0, abs(center_x - 0.5) / 0.48)
+        vertical_score = 1.0 - min(1.0, abs(center_y - 0.46) / 0.42)
+        weight = float(np.ravel(raw_weight)[0]) if np.size(raw_weight) else 0.0
+        score = area_ratio * 2.4 + center_score * 0.28 + vertical_score * 0.18 + max(0.0, weight) * 0.08
+        if best is None or score > best[0]:
+            best = (score, (x, y, w, h), weight)
+    if best is None:
+        return None
+    _score, (x, y, w, h), weight = best
+    x = int(x * inv_scale)
+    y = int(y * inv_scale)
+    w = int(w * inv_scale)
+    h = int(h * inv_scale)
+    confidence = max(0.20, min(0.56, 0.24 + max(0.0, weight) * 0.05))
+    return FaceTrackPoint(
+        second=second,
+        x=clamp(int(x + w / 2), 0, max(0, width - 1)),
+        y=clamp(int(y + h * 0.36), 0, max(0, height - 1)),
+        width=max(72, int(w * 1.12)),
+        height=max(96, int(h * 0.58)),
+        confidence=confidence,
+    )
+
+
+def _detect_person_focus_track(source: Path, start_seconds: int, clip_seconds: int) -> list[FaceTrackPoint]:
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return []
+    points: list[FaceTrackPoint] = []
+    pose_detector = _make_mediapipe_pose_detector()
+    try:
+        for offset in _focus_sample_offsets(max(1, clip_seconds)):
+            capture.set(cv2.CAP_PROP_POS_MSEC, max(0, start_seconds + offset) * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                continue
+            point = _mediapipe_person_focus_point(frame, pose_detector, float(offset))
+            if point is None:
+                point = _opencv_person_focus_point(frame, float(offset))
+            if point is not None:
+                points.append(point)
+    finally:
+        capture.release()
+        try:
+            if pose_detector is not None:
+                pose_detector.close()
+        except Exception:
+            pass
     return _smooth_face_track(points)
 
 
@@ -3853,7 +4008,17 @@ def annotate_clip_candidate_focus(
             }
         )
         if not face_track and face_detection_enabled:
-            motion_track = _detect_motion_focus_track(source, start, clip_seconds)
+            person_track = _detect_person_focus_track(source, start, clip_seconds)
+            person_coverage = min(1.0, len(person_track) / offsets_count) if person_track else 0.0
+            person_confidence = sum(point.confidence for point in person_track) / max(1, len(person_track)) if person_track else 0.0
+            person_focus_score = round(min(0.62, person_confidence * 0.58 + person_coverage * 0.30), 3)
+            prepared["person_focus_available"] = bool(person_track)
+            prepared["person_focus_score"] = person_focus_score
+            prepared["person_focus_coverage"] = round(person_coverage, 3)
+            if person_track:
+                prepared["focus_source"] = "person"
+                prepared["focus_score"] = round(max(focus_score, person_focus_score), 3)
+            motion_track = [] if person_track else _detect_motion_focus_track(source, start, clip_seconds)
             motion_coverage = min(1.0, len(motion_track) / offsets_count) if motion_track else 0.0
             motion_confidence = sum(point.confidence for point in motion_track) / max(1, len(motion_track)) if motion_track else 0.0
             motion_focus_score = round(min(0.52, motion_confidence * 0.58 + motion_coverage * 0.28), 3)
@@ -3874,6 +4039,9 @@ def annotate_clip_candidate_focus(
                 prepared["focus_source"] = "visual"
                 prepared["focus_score"] = round(max(focus_score, visual_focus_score), 3)
         else:
+            prepared["person_focus_available"] = False
+            prepared["person_focus_score"] = 0.0
+            prepared["person_focus_coverage"] = 0.0
             prepared["motion_focus_available"] = False
             prepared["motion_focus_score"] = 0.0
             prepared["motion_focus_coverage"] = 0.0
