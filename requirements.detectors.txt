@@ -1,3 +1,8 @@
-# Optional enhanced person/pose detector for smarter Shorts focus crops.
-# Keep separate from requirements.txt because mediapipe pulls opencv-contrib-python.
-mediapipe==0.10.35
+# Optional detector extras for CherryX Shorts.
+#
+# This file is intentionally empty for the shared headless server.
+# MediaPipe currently pulls opencv-contrib-python, which requires libGL.so.1
+# and can break cv2 imports on Mirohost containers.
+#
+# The app still uses the built-in OpenCV HOG person detector from
+# opencv-python-headless in requirements.txt.
