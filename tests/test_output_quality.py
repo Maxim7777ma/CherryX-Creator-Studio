@@ -321,9 +321,8 @@ class OutputQualityDefaultsTests(unittest.TestCase):
                 face_detection_enabled=True,
             )
 
-        self.assertIn("crop=777:1080", vf)
-        self.assertIn("scale=1080:-2", vf)
-        self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
+        self.assertIn("crop=607:1080", vf)
+        self.assertIn("scale=1080:1920", vf)
 
     def test_focus_filter_can_fall_back_to_visual_track(self) -> None:
         visual_track = [youtube_tools.FaceTrackPoint(second=0, x=1300, y=460, width=360, height=360, confidence=0.28)]
@@ -346,9 +345,8 @@ class OutputQualityDefaultsTests(unittest.TestCase):
                 face_detection_enabled=True,
             )
 
-        self.assertIn("crop=777:1080", vf)
-        self.assertIn("scale=1080:-2", vf)
-        self.assertIn("overlay=(W-w)/2:(H-h)/2", vf)
+        self.assertIn("crop=607:1080", vf)
+        self.assertIn("scale=1080:1920", vf)
 
     def test_focus_crop_positions_ignore_tiny_face_jitter(self) -> None:
         points = [
@@ -357,7 +355,7 @@ class OutputQualityDefaultsTests(unittest.TestCase):
             youtube_tools.FaceTrackPoint(second=4, x=637, y=360, width=180, height=220, confidence=0.8),
             youtube_tools.FaceTrackPoint(second=6, x=642, y=360, width=180, height=220, confidence=0.8),
         ]
-        positions = youtube_tools._face_safe_crop_positions(points, crop_size=518, source_size=1280, axis="x")
+        positions = youtube_tools._face_safe_crop_positions(points, crop_size=405, source_size=1280, axis="x")
 
         self.assertEqual(len({offset for _second, offset in positions}), 1)
 

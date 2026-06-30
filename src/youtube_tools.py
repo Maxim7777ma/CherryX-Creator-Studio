@@ -2992,9 +2992,9 @@ def build_vertical_filter(
     source_ratio = width / height
     if source_ratio > target_ratio:
         crop_h = height
-        crop_w = min(width, int(height * 0.72))
+        crop_w = int(height * target_ratio)
         crop_x_expr = _ffmpeg_dynamic_crop_expr(_face_safe_crop_positions(face_track, crop_w, width, axis="x"), width - crop_w)
-        return _vertical_focus_blur_filter(crop_w, crop_h, crop_x_expr)
+        return f"crop={crop_w}:{crop_h}:x='{crop_x_expr}':y=0,scale=1080:1920:flags=lanczos,setsar=1"
     else:
         crop_w = width
         crop_h = int(width / target_ratio)
@@ -3011,18 +3011,6 @@ def _vertical_fit_blur_filter() -> str:
         "crop=270:480,boxblur=12:1,scale=1080:1920:flags=bicubic,"
         "eq=brightness=-0.045:saturation=1.08[bg];"
         "[fg]scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
-    )
-
-
-def _vertical_focus_blur_filter(crop_w: int, crop_h: int, crop_x_expr: str) -> str:
-    return (
-        "split=2[bg][fg];"
-        "[bg]scale=270:480:force_original_aspect_ratio=increase:flags=bilinear,"
-        "crop=270:480,boxblur=12:1,scale=1080:1920:flags=bicubic,"
-        "eq=brightness=-0.055:saturation=1.04[bg];"
-        f"[fg]crop={crop_w}:{crop_h}:x='{crop_x_expr}':y=0,"
-        "scale=1080:-2:flags=lanczos[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
     )
 
