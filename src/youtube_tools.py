@@ -3800,13 +3800,19 @@ def annotate_clip_candidate_focus(
         )
         if not face_track and face_detection_enabled:
             motion_track = _detect_motion_focus_track(source, start, clip_seconds)
+            motion_coverage = min(1.0, len(motion_track) / offsets_count) if motion_track else 0.0
+            motion_confidence = sum(point.confidence for point in motion_track) / max(1, len(motion_track)) if motion_track else 0.0
+            motion_focus_score = round(min(0.52, motion_confidence * 0.58 + motion_coverage * 0.28), 3)
             prepared["motion_focus_available"] = bool(motion_track)
-            if motion_track and not tuning.strict_focus:
-                motion_confidence = sum(point.confidence for point in motion_track) / max(1, len(motion_track))
+            prepared["motion_focus_score"] = motion_focus_score
+            prepared["motion_focus_coverage"] = round(motion_coverage, 3)
+            if motion_track:
                 prepared["focus_source"] = "motion"
-                prepared["focus_score"] = round(max(focus_score, min(0.34, motion_confidence + len(motion_track) / offsets_count * 0.16)), 3)
+                prepared["focus_score"] = round(max(focus_score, motion_focus_score), 3)
         else:
             prepared["motion_focus_available"] = False
+            prepared["motion_focus_score"] = 0.0
+            prepared["motion_focus_coverage"] = 0.0
         prepared["strict_focus_ok"] = candidate_has_strict_focus(prepared, tuning)
         annotated.append(prepared)
     return annotated
@@ -3842,6 +3848,8 @@ def _strict_probe_candidate_score(candidate: dict[str, object], score: float) ->
     except (TypeError, ValueError):
         coverage = confidence = focus_score = speaker_lock = 0.0
         empty_frame_risk = 0.5
+    if str(candidate.get("focus_source") or "") != "face" and coverage <= 0 and confidence <= 0:
+        return 0.0
     face_hint = max(0.0, min(1.0, coverage * 0.38 + confidence * 0.28 + focus_score * 0.22 + speaker_lock * 0.12))
     if str(candidate.get("focus_source") or "") == "face":
         multiplier = 0.72 + face_hint * 0.72

@@ -459,6 +459,7 @@ def start_youtube_job(
             profile.strict_face,
             min_gap_seconds=profile.min_gap_seconds,
         )
+        force_focus_fallback = False
         if profile.strict_face and not render_queue and clip_candidates:
             _update_job(job, 47, "No prevalidated face-safe candidates; probing render-time face tracks")
             render_queue = select_smart_clip_starts_from_candidates(
@@ -473,7 +474,7 @@ def start_youtube_job(
         starts = render_queue[: profile.max_shorts]
         if not starts:
             if profile.strict_face and clip_candidates:
-                _update_job(job, 47, "No face-safe moments found; falling back to best-effort Shorts")
+                _update_job(job, 47, "No face-safe moments found; switching to focus-tracked Shorts")
                 render_queue = _select_best_effort_focus_starts(
                     clip_candidates,
                     actual_duration,
@@ -482,6 +483,7 @@ def start_youtube_job(
                     profile.min_gap_seconds,
                 )
                 starts = render_queue[: profile.max_shorts]
+                force_focus_fallback = bool(starts)
             if not starts:
                 raise ValueError("No face or motion-focused moments found for Shorts. Try a clearer source video or Preview mode.")
 
@@ -596,13 +598,13 @@ def start_youtube_job(
                     pass
                 _add_output(job, clip.path, f"Short {index}")
             starts = []
-        sequential_starts = render_queue if profile.strict_face else starts
+        sequential_starts = [] if force_focus_fallback else render_queue if profile.strict_face else starts
         for render_index, start_second in enumerate(sequential_starts, start=1):
             if profile.strict_face and len(clips) >= profile.max_shorts:
                 break
             index = len(clips) + 1 if profile.strict_face else render_index
-            progress = 38 + int((index - 1) / max(1, len(starts)) * 38)
-            _update_job(job, progress, f"Режу клип {index}/{len(starts)}: старт {format_duration(start_second)}")
+            progress = 38 + int((render_index - 1) / max(1, len(sequential_starts)) * 38)
+            _update_job(job, progress, f"Rendering candidate {render_index}/{len(sequential_starts)} for Short {index}: start {format_duration(start_second)}")
             try:
                 clip, actual_start_second, retry_errors = render_short_with_retries(start_second, index)
             except RuntimeError as exc:
@@ -648,18 +650,21 @@ def start_youtube_job(
             focused_fallback_starts = _select_best_effort_focus_starts(
                 clip_candidates,
                 actual_duration,
-                profile.max_shorts,
+                max(profile.max_shorts * 4, profile.max_shorts + 8),
                 profile.short_seconds,
                 profile.min_gap_seconds,
             )
-            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: profile.max_shorts]
+            fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
             if not fallback_starts:
                 raise ValueError("No face or motion-focused Shorts rendered. Try a clearer source video or Preview mode.")
             _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
+                if len(clips) >= profile.max_shorts:
+                    break
+                output_index = len(clips) + 1
                 progress = 78 + int((fallback_index - 1) / max(1, len(fallback_starts)) * 4)
-                _update_job(job, progress, f"Best-effort Short {fallback_index}/{len(fallback_starts)}: start {format_duration(start_second)}")
+                _update_job(job, progress, f"Focus fallback candidate {fallback_index}/{len(fallback_starts)} for Short {output_index}: start {format_duration(start_second)}")
                 try:
                     clip = make_short_clip(
                         download.path,
@@ -667,7 +672,7 @@ def start_youtube_job(
                         base_name,
                         actual_duration,
                         start_second,
-                        fallback_index,
+                        output_index,
                         profile.short_seconds,
                         settings.video_timeout_seconds,
                         "focus",
@@ -710,7 +715,7 @@ def start_youtube_job(
                     )
                 except Exception:
                     pass
-                _add_output(job, clip.path, f"Short {fallback_index}")
+                _add_output(job, clip.path, f"Short {output_index}")
             if not clips:
                 raise ValueError("; ".join(fallback_errors) or "No Shorts rendered. Try a clearer source video or Preview mode.")
 
@@ -1953,7 +1958,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v5-motion-focus",
+        "schema": "youtube-analysis-v6-focus-quality",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
@@ -1989,6 +1994,8 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
         "focus_score",
         "focus_source",
         "motion_focus_available",
+        "motion_focus_score",
+        "motion_focus_coverage",
         "strict_focus_ok",
         "source",
     )
@@ -2009,15 +2016,22 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
             coverage = float(candidate.get("face_coverage") or 0.0)
             confidence = float(candidate.get("face_confidence") or 0.0)
             focus_score = float(candidate.get("focus_score") or 0.0)
+            motion_score = float(candidate.get("motion_focus_score") or 0.0)
             empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.0)
         except (TypeError, ValueError):
             continue
         if empty_frame_risk > 0.88:
             continue
+        prepared = dict(candidate)
+        base_score = float(prepared.get("score") or 0.0)
         if focus_source == "face" and (coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18):
-            focused.append(candidate)
+            quality = min(1.0, coverage * 0.34 + confidence * 0.30 + focus_score * 0.26 + 0.18)
+            prepared["score"] = round(base_score * (0.92 + quality * 0.58), 3)
+            focused.append(prepared)
         elif has_motion or focus_source == "motion":
-            focused.append(candidate)
+            quality = min(1.0, max(motion_score, focus_score * 0.72) + 0.08)
+            prepared["score"] = round(base_score * (0.54 + quality * 0.42), 3)
+            focused.append(prepared)
     return focused
 
 
