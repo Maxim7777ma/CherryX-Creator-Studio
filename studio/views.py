@@ -4944,9 +4944,8 @@ def _video_export_access(job_id: str, project: VideoEditorProject, owner_id: int
 def _set_video_export_job(job_id: str, **values: object) -> None:
     with _video_export_lock:
         job = _video_export_jobs.get(job_id)
-        if not job:
-            return
-        job.update(values)
+        if job:
+            job.update(values)
     try:
         record = JobRecord.objects.filter(job_id=job_id).first()
         if record:

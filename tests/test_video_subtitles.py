@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from pathlib import Path
 from unittest.mock import patch
 
 from studio import views
+from studio.models import JobEventRecord, JobRecord
 from src.youtube_tools import SubtitleCue, SubtitleUnavailableError, _extract_whisper_audio, _normalize_caption_text, _split_segment_text_into_cues, normalize_subtitle_language
 
 
@@ -111,6 +112,28 @@ class VideoSubtitleFormatTests(SimpleTestCase):
         with patch("src.youtube_tools.has_audio_stream", return_value=False):
             with self.assertRaisesMessage(SubtitleUnavailableError, "No audio stream found"):
                 _extract_whisper_audio(Path("silent.mp4"))
+
+
+class VideoSubtitleJobRecordTests(TestCase):
+    def test_video_export_job_update_writes_database_without_memory_job(self) -> None:
+        views._video_export_jobs.pop("subjob1", None)
+        record = JobRecord.objects.create(
+            job_id="subjob1",
+            kind="video_subtitles",
+            title="Auto subtitles",
+            status="running",
+            progress=2,
+            message="Worker claimed task",
+        )
+
+        views._set_video_export_job("subjob1", status="done", progress=100, message="Subtitles added: 2", error="")
+
+        record.refresh_from_db()
+        self.assertEqual(record.status, "completed")
+        self.assertEqual(record.progress, 100)
+        self.assertEqual(record.message, "Subtitles added: 2")
+        self.assertEqual(record.error, "")
+        self.assertTrue(JobEventRecord.objects.filter(job=record, status="completed", progress=100).exists())
 
 
 if __name__ == "__main__":
