@@ -16871,6 +16871,47 @@ body.video-projects-page .project-sort-option[aria-selected="true"]::before {
   font-weight: 700;
 }
 
+body.job-detail-page .detail-side .timeline {
+  max-height: clamp(320px, calc(100vh - 220px), 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--blue) 48%, #8fb4ff) color-mix(in srgb, var(--blue) 7%, transparent);
+}
+
+body.job-detail-page .detail-side .timeline::-webkit-scrollbar {
+  width: 10px;
+}
+
+body.job-detail-page .detail-side .timeline::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+}
+
+body.job-detail-page .detail-side .timeline::-webkit-scrollbar-thumb {
+  min-height: 54px;
+  border: 2px solid color-mix(in srgb, var(--surface) 84%, transparent);
+  border-radius: 999px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 64%, #8fb4ff), color-mix(in srgb, var(--teal) 48%, var(--blue)));
+}
+
+body.job-detail-page .detail-side .timeline::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 78%, #8fb4ff), color-mix(in srgb, var(--teal) 58%, var(--blue)));
+}
+
+.theme-dark.job-detail-page .detail-side .timeline {
+  scrollbar-color: color-mix(in srgb, var(--blue) 58%, #9db7ff) rgba(15, 23, 42, 0.38);
+}
+
+.theme-dark.job-detail-page .detail-side .timeline::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.theme-dark.job-detail-page .detail-side .timeline::-webkit-scrollbar-thumb {
+  border-color: rgba(17, 26, 46, 0.9);
+}
+
 body.job-detail-page .detail-topbar {
   align-items: flex-start;
   min-height: 86px;
