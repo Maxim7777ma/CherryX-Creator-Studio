@@ -2992,9 +2992,9 @@ def build_vertical_filter(
     source_ratio = width / height
     if source_ratio > target_ratio:
         crop_h = height
-        crop_w = int(height * target_ratio)
+        crop_w = min(width, int(height * 0.72))
         crop_x_expr = _ffmpeg_dynamic_crop_expr(_face_safe_crop_positions(face_track, crop_w, width, axis="x"), width - crop_w)
-        return f"crop={crop_w}:{crop_h}:x='{crop_x_expr}':y=0,scale=1080:1920:flags=lanczos,setsar=1"
+        return _vertical_focus_blur_filter(crop_w, crop_h, crop_x_expr)
     else:
         crop_w = width
         crop_h = int(width / target_ratio)
@@ -3011,6 +3011,18 @@ def _vertical_fit_blur_filter() -> str:
         "crop=270:480,boxblur=12:1,scale=1080:1920:flags=bicubic,"
         "eq=brightness=-0.045:saturation=1.08[bg];"
         "[fg]scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
+    )
+
+
+def _vertical_focus_blur_filter(crop_w: int, crop_h: int, crop_x_expr: str) -> str:
+    return (
+        "split=2[bg][fg];"
+        "[bg]scale=270:480:force_original_aspect_ratio=increase:flags=bilinear,"
+        "crop=270:480,boxblur=12:1,scale=1080:1920:flags=bicubic,"
+        "eq=brightness=-0.055:saturation=1.04[bg];"
+        f"[fg]crop={crop_w}:{crop_h}:x='{crop_x_expr}':y=0,"
+        "scale=1080:-2:flags=lanczos[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
     )
 
@@ -3554,7 +3566,8 @@ def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, sour
         positions.append((point.second, clamp(int(round(offset)), 0, max_offset)))
     if not positions:
         return []
-    return _limit_crop_motion(_smooth_crop_positions(positions), max_step=max(90, crop_size // 5))
+    smoothed = _deadzone_crop_positions(_smooth_crop_positions(positions), threshold=max(10, crop_size // 28))
+    return _limit_crop_motion(smoothed, max_step=max(36, crop_size // 10))
 
 
 def _smooth_crop_positions(positions: list[tuple[float, int]]) -> list[tuple[float, int]]:
@@ -3562,15 +3575,31 @@ def _smooth_crop_positions(positions: list[tuple[float, int]]) -> list[tuple[flo
         return positions
     smoothed: list[tuple[float, int]] = []
     for index, (second, offset) in enumerate(positions):
-        neighbors = positions[max(0, index - 1) : min(len(positions), index + 2)]
+        start_index = max(0, index - 2)
+        neighbors = positions[start_index : min(len(positions), index + 3)]
         weighted = 0.0
         total = 0.0
         for neighbor_index, (_neighbor_second, neighbor_offset) in enumerate(neighbors):
-            weight = 1.8 if max(0, index - 1) + neighbor_index == index else 1.0
+            distance = abs(start_index + neighbor_index - index)
+            weight = 2.6 if distance == 0 else 1.35 if distance == 1 else 0.75
             weighted += neighbor_offset * weight
             total += weight
         smoothed.append((second, int(round(weighted / max(1.0, total)))))
     return smoothed
+
+
+def _deadzone_crop_positions(positions: list[tuple[float, int]], threshold: int) -> list[tuple[float, int]]:
+    if not positions:
+        return []
+    stable: list[tuple[float, int]] = []
+    previous = positions[0][1]
+    stable.append((positions[0][0], previous))
+    for second, offset in positions[1:]:
+        if abs(offset - previous) < threshold:
+            offset = previous
+        stable.append((second, offset))
+        previous = offset
+    return stable
 
 
 def _limit_crop_motion(positions: list[tuple[float, int]], max_step: int) -> list[tuple[float, int]]:
