@@ -2965,6 +2965,8 @@ def build_vertical_filter(
         face_track = detect_face_track(source, start_seconds, clip_seconds, fallback_to_motion=not strict_focus)
     elif focus_mode == "motion" and face_detection_enabled:
         face_track = _detect_motion_focus_track(source, start_seconds, clip_seconds)
+    if not face_track and focus_mode == "focus":
+        face_track = _detect_visual_focus_track(source, start_seconds, clip_seconds)
 
     if not face_track:
         if strict_focus or focus_mode in {"focus", "motion"}:
@@ -3287,6 +3289,58 @@ def _detect_motion_focus_track(source: Path, start_seconds: int, clip_seconds: i
                     width=max(48, int(width * 0.16)),
                     height=max(64, int(height * 0.34)),
                     confidence=0.24,
+                )
+            )
+    finally:
+        capture.release()
+    return _smooth_face_track(points)
+
+
+def _detect_visual_focus_track(source: Path, start_seconds: int, clip_seconds: int) -> list[FaceTrackPoint]:
+    capture = cv2.VideoCapture(str(source))
+    if not capture.isOpened():
+        return []
+    points: list[FaceTrackPoint] = []
+    last_x: int | None = None
+    try:
+        for offset in _focus_sample_offsets(max(1, clip_seconds)):
+            capture.set(cv2.CAP_PROP_POS_MSEC, max(0, start_seconds + offset) * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                continue
+            height, width = frame.shape[:2]
+            small = cv2.resize(frame, (320, 180))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+            edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+            edges = np.abs(edges)
+            contrast = np.abs(gray.astype(np.float32) - float(np.median(gray)))
+            saturation = hsv[:, :, 1].astype(np.float32)
+            row_weights = np.linspace(0.65, 1.05, small.shape[0], dtype=np.float32)
+            row_weights *= np.exp(-((np.linspace(0.0, 1.0, small.shape[0], dtype=np.float32) - 0.46) ** 2) / 0.22)
+            saliency = (edges * 0.58 + contrast * 0.28 + saturation * 0.14) * row_weights[:, None]
+            column_energy = saliency.mean(axis=0)
+            baseline = float(np.percentile(column_energy, 55))
+            focused_energy = np.maximum(column_energy - baseline, 0)
+            energy = focused_energy if float(focused_energy.sum()) > 0 else column_energy
+            mean_energy = float(np.mean(column_energy))
+            peak_energy = float(np.max(column_energy))
+            if peak_energy < 2.2 or peak_energy < mean_energy * 1.10:
+                continue
+            weighted_x = _weighted_column_center(energy)
+            focus_x = int(weighted_x / max(1, len(energy) - 1) * width)
+            if last_x is not None:
+                focus_x = int(round(last_x * 0.58 + focus_x * 0.42))
+            last_x = focus_x
+            confidence = max(0.16, min(0.34, 0.14 + (peak_energy / max(1.0, mean_energy) - 1.0) * 0.08))
+            points.append(
+                FaceTrackPoint(
+                    second=float(offset),
+                    x=clamp(focus_x, 0, max(0, width - 1)),
+                    y=int(height * 0.43),
+                    width=max(72, int(width * 0.22)),
+                    height=max(88, int(height * 0.38)),
+                    confidence=confidence,
                 )
             )
     finally:
@@ -3809,10 +3863,23 @@ def annotate_clip_candidate_focus(
             if motion_track:
                 prepared["focus_source"] = "motion"
                 prepared["focus_score"] = round(max(focus_score, motion_focus_score), 3)
+            visual_track = [] if motion_track else _detect_visual_focus_track(source, start, clip_seconds)
+            visual_coverage = min(1.0, len(visual_track) / offsets_count) if visual_track else 0.0
+            visual_confidence = sum(point.confidence for point in visual_track) / max(1, len(visual_track)) if visual_track else 0.0
+            visual_focus_score = round(min(0.46, visual_confidence * 0.62 + visual_coverage * 0.22), 3)
+            prepared["visual_focus_available"] = bool(visual_track)
+            prepared["visual_focus_score"] = visual_focus_score
+            prepared["visual_focus_coverage"] = round(visual_coverage, 3)
+            if visual_track and not motion_track:
+                prepared["focus_source"] = "visual"
+                prepared["focus_score"] = round(max(focus_score, visual_focus_score), 3)
         else:
             prepared["motion_focus_available"] = False
             prepared["motion_focus_score"] = 0.0
             prepared["motion_focus_coverage"] = 0.0
+            prepared["visual_focus_available"] = False
+            prepared["visual_focus_score"] = 0.0
+            prepared["visual_focus_coverage"] = 0.0
         prepared["strict_focus_ok"] = candidate_has_strict_focus(prepared, tuning)
         annotated.append(prepared)
     return annotated

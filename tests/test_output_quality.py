@@ -189,6 +189,40 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(starts, [54])
 
+    def test_best_effort_focus_fallback_allows_visual_candidates(self) -> None:
+        starts = web_actions._select_best_effort_focus_starts(
+            [
+                {"start": 10, "score": 100, "focus_source": "none", "empty_frame_risk": 0.2},
+                {"start": 66, "score": 84, "focus_source": "visual", "visual_focus_available": True, "visual_focus_score": 0.32, "empty_frame_risk": 0.45},
+            ],
+            duration_seconds=180,
+            max_clips=3,
+            clip_seconds=20,
+            min_gap_seconds=30,
+        )
+
+        self.assertEqual(starts, [66])
+
+    def test_focus_filter_can_fall_back_to_visual_track(self) -> None:
+        visual_track = [youtube_tools.FaceTrackPoint(second=0, x=1300, y=460, width=360, height=360, confidence=0.28)]
+        with patch.object(youtube_tools, "detect_face_track", return_value=[]), patch.object(
+            youtube_tools,
+            "_detect_visual_focus_track",
+            return_value=visual_track,
+        ):
+            vf = youtube_tools.build_vertical_filter(
+                Path("missing.mp4"),
+                start_seconds=0,
+                clip_seconds=10,
+                width=1920,
+                height=1080,
+                focus_mode="focus",
+                face_detection_enabled=True,
+            )
+
+        self.assertIn("crop=607:1080", vf)
+        self.assertIn("scale=1080:1920", vf)
+
     def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
         with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
             youtube_tools,

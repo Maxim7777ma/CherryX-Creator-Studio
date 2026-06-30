@@ -485,7 +485,7 @@ def start_youtube_job(
                 starts = render_queue[: profile.max_shorts]
                 force_focus_fallback = bool(starts)
             if not starts:
-                raise ValueError("No face or motion-focused moments found for Shorts. Try a clearer source video or Preview mode.")
+                raise ValueError("No face, motion, or visual-focus moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -656,7 +656,7 @@ def start_youtube_job(
             )
             fallback_starts = list(dict.fromkeys([*focused_fallback_starts, *selected_starts, *render_queue]))[: max(profile.max_shorts * 4, profile.max_shorts + 8)]
             if not fallback_starts:
-                raise ValueError("No face or motion-focused Shorts rendered. Try a clearer source video or Preview mode.")
+                raise ValueError("No face, motion, or visual-focus Shorts rendered. Try a clearer source video or Preview mode.")
             _update_job(job, 78, "Face-safe crop was too weak; rendering focus-tracked fallback Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
@@ -1958,7 +1958,7 @@ def _youtube_analysis_cache_key(
     plan: YouTubeProcessingPlan,
 ) -> str:
     payload = {
-        "schema": "youtube-analysis-v6-focus-quality",
+        "schema": "youtube-analysis-v7-visual-focus",
         "url": url,
         "mode": mode,
         "duration": int(duration_seconds or 0),
@@ -1996,6 +1996,9 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
         "motion_focus_available",
         "motion_focus_score",
         "motion_focus_coverage",
+        "visual_focus_available",
+        "visual_focus_score",
+        "visual_focus_coverage",
         "strict_focus_ok",
         "source",
     )
@@ -2010,13 +2013,15 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
     for candidate in candidates:
         focus_source = str(candidate.get("focus_source") or "")
         has_motion = bool(candidate.get("motion_focus_available"))
-        if focus_source not in {"face", "motion"} and not has_motion:
+        has_visual = bool(candidate.get("visual_focus_available"))
+        if focus_source not in {"face", "motion", "visual"} and not has_motion and not has_visual:
             continue
         try:
             coverage = float(candidate.get("face_coverage") or 0.0)
             confidence = float(candidate.get("face_confidence") or 0.0)
             focus_score = float(candidate.get("focus_score") or 0.0)
             motion_score = float(candidate.get("motion_focus_score") or 0.0)
+            visual_score = float(candidate.get("visual_focus_score") or 0.0)
             empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.0)
         except (TypeError, ValueError):
             continue
@@ -2031,6 +2036,10 @@ def _best_effort_focus_candidates(candidates: list[dict[str, object]]) -> list[d
         elif has_motion or focus_source == "motion":
             quality = min(1.0, max(motion_score, focus_score * 0.72) + 0.08)
             prepared["score"] = round(base_score * (0.54 + quality * 0.42), 3)
+            focused.append(prepared)
+        elif has_visual or focus_source == "visual":
+            quality = min(1.0, max(visual_score, focus_score * 0.62) + 0.06)
+            prepared["score"] = round(base_score * (0.42 + quality * 0.34), 3)
             focused.append(prepared)
     return focused
 
