@@ -472,7 +472,19 @@ def start_youtube_job(
             )
         starts = render_queue[: profile.max_shorts]
         if not starts:
-            raise ValueError("No face-safe moments found for Shorts. Try Smart/Pro, a clearer source video, or Preview mode.")
+            if profile.strict_face and clip_candidates:
+                _update_job(job, 47, "No face-safe moments found; falling back to best-effort Shorts")
+                render_queue = select_smart_clip_starts_from_candidates(
+                    clip_candidates,
+                    actual_duration,
+                    profile.max_shorts,
+                    profile.short_seconds,
+                    False,
+                    min_gap_seconds=profile.min_gap_seconds,
+                )
+                starts = render_queue[: profile.max_shorts]
+            if not starts:
+                raise ValueError("No strong moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -632,7 +644,69 @@ def start_youtube_job(
             _add_output(job, clip.path, f"Short {index}")
 
         if not clips:
-            raise ValueError("No face-safe Shorts rendered. Try Smart/Pro, a clearer source video, or Preview mode.")
+            if not profile.strict_face:
+                raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
+            fallback_starts = list(dict.fromkeys([*selected_starts, *render_queue]))[: profile.max_shorts]
+            if not fallback_starts:
+                raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
+            _update_job(job, 78, "Face-safe crop was too weak; rendering best-effort Shorts")
+            fallback_errors: list[str] = []
+            for fallback_index, start_second in enumerate(fallback_starts, start=1):
+                progress = 78 + int((fallback_index - 1) / max(1, len(fallback_starts)) * 4)
+                _update_job(job, progress, f"Best-effort Short {fallback_index}/{len(fallback_starts)}: start {format_duration(start_second)}")
+                try:
+                    clip = make_short_clip(
+                        download.path,
+                        output_dir,
+                        base_name,
+                        actual_duration,
+                        start_second,
+                        fallback_index,
+                        profile.short_seconds,
+                        settings.video_timeout_seconds,
+                        processing_plan.focus_mode,
+                        processing_plan.face_detection,
+                        source_info.width,
+                        source_info.height,
+                        False,
+                        profile.alignment_mode,
+                    )
+                except RuntimeError as exc:
+                    fallback_errors.append(f"{format_duration(start_second)}: {exc}")
+                    continue
+                clips.append(clip)
+                try:
+                    clip.path.with_suffix(".edit.json").write_text(
+                        json.dumps(
+                            {
+                                "kind": "youtube_short_source",
+                                "source_path": str(editor_source_path),
+                                "fallback_source_path": str(download.path),
+                                "source_title": download.title,
+                                "source_url": clean_url,
+                                "source_start": float(clip.start_seconds),
+                                "clip_duration": float(clip.duration_seconds),
+                                "source_width": source_info.width,
+                                "source_height": source_info.height,
+                                "mode": profile.mode,
+                                "aspect": "9 / 16",
+                                "selection": {
+                                    **_clip_selection_report(candidate_by_start.get(int(start_second), {}), profile.mode, processing_plan.label),
+                                    "requested_start": int(start_second),
+                                    "render_start": int(clip.start_seconds),
+                                    "face_safe_fallback": True,
+                                },
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+                _add_output(job, clip.path, f"Short {fallback_index}")
+            if not clips:
+                raise ValueError("; ".join(fallback_errors) or "No Shorts rendered. Try a clearer source video or Preview mode.")
 
         _update_job(job, 82, "Собираю ZIP со всеми Shorts")
         zip_path = zip_clips(clips, output_dir / f"{base_name}_shorts.zip")
