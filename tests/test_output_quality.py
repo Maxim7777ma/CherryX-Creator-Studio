@@ -359,6 +359,21 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(len({offset for _second, offset in positions}), 1)
 
+    def test_focus_crop_holds_while_face_stays_inside_safe_zone(self) -> None:
+        points = [
+            youtube_tools.FaceTrackPoint(second=0, x=640, y=360, width=80, height=110, confidence=0.8),
+            youtube_tools.FaceTrackPoint(second=2, x=690, y=360, width=80, height=110, confidence=0.8),
+            youtube_tools.FaceTrackPoint(second=4, x=615, y=360, width=80, height=110, confidence=0.8),
+        ]
+        positions = youtube_tools._face_safe_crop_positions(points, crop_size=405, source_size=1280, axis="x")
+
+        self.assertEqual(len({offset for _second, offset in positions}), 1)
+
+    def test_dynamic_crop_expression_uses_eased_motion(self) -> None:
+        expr = youtube_tools._ffmpeg_dynamic_crop_expr([(0, 100), (2, 140)], 500)
+
+        self.assertIn("3-2*", expr)
+
     def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
         with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
             youtube_tools,

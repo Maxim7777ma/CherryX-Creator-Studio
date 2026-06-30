@@ -3534,6 +3534,7 @@ def _weighted_column_center(values: np.ndarray) -> float:
 def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, source_size: int, axis: str) -> list[tuple[float, int]]:
     max_offset = max(0, source_size - crop_size)
     positions: list[tuple[float, int]] = []
+    previous_offset: int | None = None
     for point in points:
         center = point.x if axis == "x" else point.y
         face_size = point.width if axis == "x" else point.height
@@ -3547,15 +3548,24 @@ def _face_safe_crop_positions(points: list[FaceTrackPoint], crop_size: int, sour
             desired = center - crop_size * 0.38
         lower = face_end + padding - crop_size
         upper = face_start - padding
-        if lower <= upper:
+        if previous_offset is not None and lower <= upper:
+            if lower <= previous_offset <= upper:
+                offset = previous_offset
+            elif previous_offset < lower:
+                offset = lower
+            else:
+                offset = upper
+        elif lower <= upper:
             offset = min(max(desired, lower), upper)
         else:
             offset = center - crop_size * (0.50 if axis == "x" else 0.38)
-        positions.append((point.second, clamp(int(round(offset)), 0, max_offset)))
+        stable_offset = clamp(int(round(offset)), 0, max_offset)
+        positions.append((point.second, stable_offset))
+        previous_offset = stable_offset
     if not positions:
         return []
-    smoothed = _deadzone_crop_positions(_smooth_crop_positions(positions), threshold=max(10, crop_size // 28))
-    return _limit_crop_motion(smoothed, max_step=max(36, crop_size // 10))
+    smoothed = _deadzone_crop_positions(positions, threshold=max(10, crop_size // 18))
+    return _limit_crop_motion(smoothed, max_step=max(18, crop_size // 18))
 
 
 def _smooth_crop_positions(positions: list[tuple[float, int]]) -> list[tuple[float, int]]:
@@ -3618,7 +3628,8 @@ def _ffmpeg_dynamic_crop_expr(positions: list[tuple[float, int]], max_offset: in
             value = str(end_x)
         else:
             progress = f"((t-{start_t:.3f})/{(end_t - start_t):.3f})"
-            value = f"({start_x}+({end_x - start_x})*{progress})"
+            eased = f"(({progress})*({progress})*(3-2*({progress})))"
+            value = f"({start_x}+({end_x - start_x})*{eased})"
         expression = f"if(lt(t\\,{end_t:.3f})\\,{value}\\,{expression})"
     return expression
 
