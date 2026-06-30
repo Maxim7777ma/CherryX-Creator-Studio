@@ -152,6 +152,28 @@ class OutputQualityDefaultsTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(starts), 2)
 
+    def test_best_effort_face_fallback_ignores_center_only_candidates(self) -> None:
+        starts = web_actions._select_best_effort_face_starts(
+            [
+                {"start": 10, "score": 100, "focus_source": "none", "empty_frame_risk": 0.2},
+                {
+                    "start": 42,
+                    "score": 90,
+                    "focus_source": "face",
+                    "face_coverage": 0.1,
+                    "face_confidence": 0.14,
+                    "focus_score": 0.2,
+                    "empty_frame_risk": 0.4,
+                },
+            ],
+            duration_seconds=180,
+            max_clips=3,
+            clip_seconds=20,
+            min_gap_seconds=30,
+        )
+
+        self.assertEqual(starts, [42])
+
     def test_podcast_alignment_does_not_shorten_on_tiny_pause_before_end(self) -> None:
         with patch.object(youtube_tools, "align_clip_start_to_audio", return_value=10), patch.object(
             youtube_tools,

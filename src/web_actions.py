@@ -474,17 +474,16 @@ def start_youtube_job(
         if not starts:
             if profile.strict_face and clip_candidates:
                 _update_job(job, 47, "No face-safe moments found; falling back to best-effort Shorts")
-                render_queue = select_smart_clip_starts_from_candidates(
+                render_queue = _select_best_effort_face_starts(
                     clip_candidates,
                     actual_duration,
                     profile.max_shorts,
                     profile.short_seconds,
-                    False,
-                    min_gap_seconds=profile.min_gap_seconds,
+                    profile.min_gap_seconds,
                 )
                 starts = render_queue[: profile.max_shorts]
             if not starts:
-                raise ValueError("No strong moments found for Shorts. Try a clearer source video or Preview mode.")
+                raise ValueError("No face-focused moments found for Shorts. Try a clearer source video or Preview mode.")
 
         if ai_improve and not profile.strict_face:
             starts = _ai_improve_clip_starts(job, download.title, actual_duration, clip_candidates or starts, profile.max_shorts)
@@ -646,10 +645,17 @@ def start_youtube_job(
         if not clips:
             if not profile.strict_face:
                 raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
-            fallback_starts = list(dict.fromkeys([*selected_starts, *render_queue]))[: profile.max_shorts]
+            focused_fallback_starts = _select_best_effort_face_starts(
+                clip_candidates,
+                actual_duration,
+                profile.max_shorts,
+                profile.short_seconds,
+                profile.min_gap_seconds,
+            )
+            fallback_starts = list(dict.fromkeys(focused_fallback_starts))[: profile.max_shorts]
             if not fallback_starts:
-                raise ValueError("No Shorts rendered. Try a clearer source video or Preview mode.")
-            _update_job(job, 78, "Face-safe crop was too weak; rendering best-effort Shorts")
+                raise ValueError("No face-focused Shorts rendered. Try a clearer source video or Preview mode.")
+            _update_job(job, 78, "Face-safe crop was too weak; rendering face-focused fallback Shorts")
             fallback_errors: list[str] = []
             for fallback_index, start_second in enumerate(fallback_starts, start=1):
                 progress = 78 + int((fallback_index - 1) / max(1, len(fallback_starts)) * 4)
@@ -1990,6 +1996,52 @@ def _clip_selection_report(candidate: dict[str, object], mode: str, processing_l
     report["mode"] = mode
     report["processing"] = processing_label
     return report
+
+
+def _best_effort_face_candidates(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    focused: list[dict[str, object]] = []
+    for candidate in candidates:
+        if str(candidate.get("focus_source") or "") != "face":
+            continue
+        try:
+            coverage = float(candidate.get("face_coverage") or 0.0)
+            confidence = float(candidate.get("face_confidence") or 0.0)
+            focus_score = float(candidate.get("focus_score") or 0.0)
+            empty_frame_risk = float(candidate.get("empty_frame_risk") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if empty_frame_risk > 0.88:
+            continue
+        if coverage >= 0.08 or confidence >= 0.12 or focus_score >= 0.18:
+            focused.append(candidate)
+    return focused
+
+
+def _select_best_effort_face_starts(
+    candidates: list[dict[str, object]],
+    duration_seconds: float,
+    max_clips: int,
+    clip_seconds: int,
+    min_gap_seconds: int,
+) -> list[int]:
+    focused = _best_effort_face_candidates(candidates)
+    if not focused:
+        return []
+    focused_starts: set[int] = set()
+    for candidate in focused:
+        try:
+            focused_starts.add(int(candidate.get("start") or 0))
+        except (TypeError, ValueError):
+            continue
+    starts = select_smart_clip_starts_from_candidates(
+        focused,
+        duration_seconds,
+        max_clips,
+        clip_seconds,
+        False,
+        min_gap_seconds=min_gap_seconds,
+    )
+    return [start for start in starts if start in focused_starts][:max_clips]
 
 
 def _youtube_analysis_cache_path(cache_key: str) -> Path:
